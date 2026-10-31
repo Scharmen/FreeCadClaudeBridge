@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "freecad": {
+      "command": "uvx",
+      "args": ["--from", "${CLAUDE_PLUGIN_ROOT}/server", "freecad-bridge-mcp"],
+      "env": { "FREECAD_BRIDGE_ADDON_SRC": "${CLAUDE_PLUGIN_ROOT}/addon/ClaudeBridge" },
+      "timeout": 900000
+    }
+  }
+}

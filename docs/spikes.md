@@ -18,7 +18,7 @@ A third-party addon `freecad-mcp` is already in the user `Mod` folder. It ran al
 | 8 | `uvx` startup time | ✅ | Throwaway package with `mcp` 2.3.0 and Python 3.12: first run 1.3 s (2.5 s including the Python 3.12 download), then **0.56–0.60 s**. New path (as after a plugin update): 1.2 s, then 0.53 s. **Caution:** `uvx` doesn't pick up source changes under the same path at the same version (cache). For development use `uvx --refresh` or `uv run --project` |
 | 9 | Permission rule | ✅ | All tools of the plugin server: **`mcp__plugin_freecad_freecad__*`** (per the docs also `mcp__plugin_freecad_freecad`). Allow globs only work after a fixed `mcp__<server>__` prefix |
 | 10 | Claude Code in the background | ✅ | See below |
-| 11 | Finding `claude` from FreeCAD | ⚠️ almost | Started from FreeCAD via `QProcess` with an absolute path: subscription login found (`apiKeySource: none`), tool call goes through. With a minimal environment (`env -i`, as when launched from Dock/Finder), `claude` is not on PATH but runs with the absolute path. **Still open:** actually launch FreeCAD from the Dock. For the test it was started with `open -a` from the terminal and inherited its environment |
+| 11 | Finding `claude` from FreeCAD | ⚠️ almost (Dock launch: see `docs/phase1.md`) | Started from FreeCAD via `QProcess` with an absolute path: subscription login found (`apiKeySource: none`), tool call goes through. With a minimal environment (`env -i`, as when launched from Dock/Finder), `claude` is not on PATH but runs with the absolute path. **Still open:** actually launch FreeCAD from the Dock. For the test it was started with `open -a` from the terminal and inherited its environment |
 
 ## Spike results
 
