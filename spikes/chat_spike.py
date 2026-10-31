@@ -1,12 +1,12 @@
-"""Phase-0-Spike: Claude Code als QProcess aus FreeCAD starten.
+"""Phase 0 spike: start Claude Code from FreeCAD as a QProcess.
 
-In der FreeCAD-Python-Konsole (ThreadSpike muss laufen):
+In the FreeCAD Python console (ThreadSpike must be running):
     exec(open(os.path.expanduser(
         "~/StudioProjects/FreeCadClaudeBridge/spikes/chat_spike.py")).read())
 
-Prüft: stream-json zeilenweise lesen, Tool-Aufruf läuft zurück in FreeCAD,
-GUI bleibt bedienbar (Herzschlag in der Konsole läuft weiter), Fund von
-`claude` ohne Shell-PATH.
+Checks: stream-json read line by line, tool call runs back in FreeCAD,
+GUI stays usable (the heartbeat keeps counting), `claude` found without
+the shell PATH.
 """
 
 import json
@@ -17,9 +17,9 @@ import FreeCAD as App
 from PySide import QtCore
 
 SPIKES = os.path.expanduser("~/StudioProjects/FreeCadClaudeBridge/spikes")
-CLAUDE = os.path.expanduser("~/.local/bin/claude")  # später aus /freecad:setup
-PROMPT = ("Lege im aktiven FreeCAD-Dokument mit dem Tool run_python einen Würfel "
-          "20x20x20 mm namens SpikeCube an und nenne danach sein Volumen.")
+CLAUDE = os.path.expanduser("~/.local/bin/claude")  # later from /freecad:setup
+PROMPT = ("In the active FreeCAD document, use the run_python tool to create a "
+          "20x20x20 mm cube named SpikeCube, then report its volume.")
 
 mcp_config = json.dumps({"mcpServers": {"spike": {
     "command": "/usr/bin/python3", "args": [os.path.join(SPIKES, "mini_mcp.py")]}}})
@@ -44,10 +44,10 @@ proc.setArguments([
     "--allowedTools", "mcp__spike__run_python",
 ])
 proc.setWorkingDirectory(os.path.expanduser("~"))
-proc.setStandardInputFile(QtCore.QProcess.nullDevice())  # sonst wartet claude 3 s auf stdin
+proc.setStandardInputFile(QtCore.QProcess.nullDevice())  # otherwise claude waits 3 s for stdin
 
-# FreeCAD vererbt PYTHONHOME, LD_LIBRARY_PATH und eigene PATH-Einträge; die
-# brechen jedes fremde Python im Kindprozess (MCP-Server, uvx).
+# FreeCAD passes on PYTHONHOME, LD_LIBRARY_PATH and its own PATH entries;
+# they break any other Python in the child process (MCP server, uvx).
 _env = QtCore.QProcessEnvironment.systemEnvironment()
 _bundle = App.getHomePath().rstrip("/")
 for _k in ("PYTHONHOME", "PYTHONPATH", "PYTHONDONTWRITEBYTECODE", "LD_LIBRARY_PATH",
@@ -96,7 +96,7 @@ def _beat():
 
 _hb = QtCore.QTimer()
 _hb.timeout.connect(_beat)
-_hb.start(100)  # zählt nur, wenn der GUI-Thread frei ist
+_hb.start(100)  # only counts while the GUI thread is free
 proc.readyReadStandardOutput.connect(_on_stdout)
 proc.readyReadStandardError.connect(
     lambda: _log("[chat stderr] " + bytes(proc.readAllStandardError()).decode(errors="replace")))

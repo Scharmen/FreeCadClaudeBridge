@@ -1,7 +1,8 @@
 # Changelog
 
-## Phase 0 – Spikes (31.10.2026)
+## Phase 0 – Spikes (2026-10-31)
 
-- `docs/PLAN.md` und `CLAUDE.md` angelegt.
-- Spikes auf macOS mit FreeCAD 1.1.4: Threading (1.000 Aufrufe im GUI-Thread, Rollback, ein Undo-Schritt pro Aufruf), Chat aus FreeCAD per `QProcess` mit `claude -p` und MCP-Rückruf, `uvx`-Startzeit, Report-View, Task-Dialoge. Ergebnisse in `docs/spikes.md`.
-- Plan angepasst: bereinigte Umgebung für Kindprozesse, MCP-SDK 2.x, Python 3.12 fest, `--plugin-dir` und Startprüfung im Chat-Fenster, `--permission-prompts none`, SIGINT beim Stopp, Undo-Limit, Repo-Name `Scharmen/FreeCadClaudeBridge`.
+- Added `docs/PLAN.md` and `CLAUDE.md`.
+- Spikes on macOS with FreeCAD 1.1.4: threading (1,000 calls in the GUI thread, rollback, one undo step per call), chat from FreeCAD via `QProcess` with `claude -p` and an MCP callback, `uvx` startup time, Report view, task dialogs. Results in `docs/spikes.md`.
+- Plan adjusted: cleaned environment for child processes, MCP SDK 2.x, Python pinned to 3.12, `--plugin-dir` and startup check in the chat panel, `--permission-prompts none`, SIGINT on stop, undo limit, repo name `Scharmen/FreeCadClaudeBridge`.
+- Translated all repository content to English.

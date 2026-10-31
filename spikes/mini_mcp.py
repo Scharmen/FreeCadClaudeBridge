@@ -1,7 +1,7 @@
-"""Phase-0-Spike: minimaler MCP-Server (stdio) nur mit Standardbibliothek.
+"""Phase 0 spike: minimal MCP server (stdio) using only the standard library.
 
-Ein Tool `run_python`, weitergereicht an den ThreadSpike-Socket. Ersetzt für
-den Chat-Spike das MCP-SDK, damit uv dafür noch nicht nötig ist.
+One tool, `run_python`, forwarded to the ThreadSpike socket. Replaces the
+MCP SDK for the chat spike so uv isn't needed for it yet.
 """
 
 from __future__ import annotations

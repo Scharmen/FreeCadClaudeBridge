@@ -1,7 +1,7 @@
-"""Phase-0-Spike: Listener-Thread nimmt an, ausgeführt wird im GUI-Thread.
+"""Phase 0 spike: a listener thread accepts, execution happens in the GUI thread.
 
-Nur Standardbibliothek plus PySide aus FreeCAD. Keine Authentifizierung
-(nur Spike); der Socket hat Rechte 0600.
+Standard library plus FreeCAD's PySide only. No authentication
+(spike only); the socket has permissions 0600.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ def send_msg(conn: socket.socket, msg: dict) -> None:
 
 
 class _Dispatcher(QtCore.QObject):
-    """Lebt im GUI-Thread; das Signal wird per QueuedConnection zugestellt."""
+    """Lives in the GUI thread; the signal is delivered via QueuedConnection."""
 
     request = QtCore.Signal(object)
 
@@ -64,7 +64,7 @@ class _Dispatcher(QtCore.QObject):
     @QtCore.Slot(object)
     def _run(self, item: tuple) -> None:
         code, fut = item
-        if fut.done():  # Aufrufer hat schon aufgegeben
+        if fut.done():  # caller already gave up
             return
         import FreeCADGui as Gui
 
@@ -100,7 +100,7 @@ def _handle(conn: socket.socket) -> None:
                 return
             op = msg.get("op")
             if op == "ping":
-                # Antwort ohne GUI-Thread, auch wenn dieser blockiert ist
+                # answered without the GUI thread, even while it is blocked
                 send_msg(conn, {"id": msg.get("id"), "ok": True, "result": "pong",
                                 "thread": threading.current_thread().name})
                 continue
@@ -133,7 +133,7 @@ def start() -> None:
     os.makedirs(BRIDGE_DIR, mode=0o700, exist_ok=True)
     if os.path.exists(SOCK_PATH):
         os.unlink(SOCK_PATH)
-    _state["dispatcher"] = _Dispatcher()  # im GUI-Thread erzeugt
+    _state["dispatcher"] = _Dispatcher()  # created in the GUI thread
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     old = os.umask(0o177)
     try:

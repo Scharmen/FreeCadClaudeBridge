@@ -1,8 +1,8 @@
-"""Phase-0-Spike: 1.000 Aufrufe gegen den ThreadSpike-Listener.
+"""Phase 0 spike: 1,000 calls against the ThreadSpike listener.
 
-Aufruf (System-Python genügt): python3 spikes/thread_client.py [anzahl]
-Prüft: kein Hänger, Ausführung im GUI-Thread, ping antwortet während der
-GUI-Thread blockiert, fehlerhafter Code wird zurückgerollt.
+Usage (system Python is enough): python3 spikes/thread_client.py [count]
+Checks: no hang, execution in the GUI thread, ping answers while the
+GUI thread is blocked, faulty code is rolled back.
 """
 
 from __future__ import annotations
@@ -58,13 +58,13 @@ def main() -> int:
           f"p50={statistics.median(lat):.2f} ms p99={lat[int(len(lat) * 0.99) - 1]:.2f} ms max={lat[-1]:.2f} ms")
     print("objects:", call(s, {"id": -1, "op": "exec", "code": "_result = len(App.ActiveDocument.Objects)"}))
 
-    # Rollback: Fehler nach addObject darf kein Objekt hinterlassen
+    # Rollback: an error after addObject must leave no object behind
     before = call(s, {"id": -2, "op": "exec", "code": "_result = len(App.ActiveDocument.Objects)"})["result"]
     bad = call(s, {"id": -3, "op": "exec", "code": "App.ActiveDocument.addObject('Part::Box','Bad'); 1/0"})
     after = call(s, {"id": -4, "op": "exec", "code": "_result = len(App.ActiveDocument.Objects)"})["result"]
     print(f"rollback: ok={bad['ok']} objects before={before} after={after} -> {'PASS' if before == after else 'FAIL'}")
 
-    # ping während der GUI-Thread 3 s blockiert
+    # ping while the GUI thread is blocked for 3 s
     blocker = threading.Thread(target=lambda: call(connect(), {
         "id": -5, "op": "exec", "code": "import time; time.sleep(3)", "timeout_s": 10}))
     blocker.start()

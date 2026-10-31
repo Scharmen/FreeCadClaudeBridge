@@ -1,4 +1,4 @@
-# Startet den Spike-Listener, sobald die Qt-Ereignisschleife läuft.
+# Starts the spike listener as soon as the Qt event loop is running.
 from PySide import QtCore
 
 
