@@ -19,6 +19,7 @@ from .stream import check_init, short_tool_name
 
 PARAMS = "User parameter:BaseApp/Preferences/Mod/ClaudeBridge"
 OBJECT_NAME = "ClaudeChatPanel"
+NO_DOC = "<no document>"
 _panel: dict[str, Any] = {}
 
 
@@ -50,7 +51,7 @@ def _save_sessions(data: dict[str, str]) -> None:
 def _doc_key() -> str:
     doc = App.ActiveDocument
     if doc is None:
-        return "<no document>"
+        return NO_DOC
     return doc.FileName or f"unsaved:{doc.Name}"
 
 
@@ -200,7 +201,9 @@ class ChatPanel(QtWidgets.QDockWidget):
         doc = App.ActiveDocument
         cwd = os.path.dirname(doc.FileName) if doc is not None and doc.FileName else os.path.expanduser("~")
         self.current_key = _doc_key()
-        self.run = ClaudeRun(prompt, self.sessions.get(self.current_key), self.mode(), cwd,
+        # Without a document there is nothing to tie a conversation to: start fresh each time.
+        session = None if self.current_key == NO_DOC else self.sessions.get(self.current_key)
+        self.run = ClaudeRun(prompt, session, self.mode(), cwd,
                              load_plugin_dir=_params().GetBool("LoadPluginDir", True), parent=self)
         self.run.event.connect(self._on_event)
         self.run.finished.connect(self._on_finished)
@@ -223,7 +226,7 @@ class ChatPanel(QtWidgets.QDockWidget):
     def _on_event(self, ev: dict[str, Any]) -> None:
         kind = ev.get("kind")
         if kind == "init":
-            if ev.get("session_id"):
+            if ev.get("session_id") and self.current_key != NO_DOC:
                 self.sessions[self.current_key] = ev["session_id"]
                 _save_sessions(self.sessions)
             for problem in check_init(ev, self.mode()):

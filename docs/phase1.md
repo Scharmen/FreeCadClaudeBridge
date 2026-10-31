@@ -20,7 +20,7 @@ As of: 2026-10-31 · version 0.1.0 · Mac (Apple Silicon), FreeCAD 1.1.4, Claude
 
 | Item | Status |
 | --- | --- |
-| Dock launch (item 11) | ⏳ manual: quit FreeCAD, start it from the Dock, send a message in the panel. All tests here started FreeCAD with `open -a`, which inherits the terminal's environment |
+| Dock launch (item 11) | ✅ FreeCAD started from the Dock (parent `launchd`, PATH `/usr/bin:/bin:/usr/sbin:/sbin`, no terminal variables): the panel found Claude Code via `config.json`, used the subscription login and built `DockTest` with a 27000 mm³ cube in 8 s |
 | Addon Manager with `<subdirectory>` (item 5) | ⏳ manual: `package.xml` is in place; add the repo as a custom repository in the Addon Manager (branch with this code) and check that the workbench "Claude Bridge" appears. Don't keep both the Addon Manager copy and the `/freecad:setup` copy installed at once |
 | `ANTHROPIC_API_KEY` precedence over the subscription (item 10) | ⏳ manual, together with the API key gate item |
 
@@ -34,6 +34,7 @@ As of: 2026-10-31 · version 0.1.0 · Mac (Apple Silicon), FreeCAD 1.1.4, Claude
 - Quantities used FreeCAD's `UserString`, which follows the user's decimals setting ("12.00 mm"). Now converted via `getUserPreferred()` to six significant digits.
 - Code that closed its own document crashed the transaction handling (`ReferenceError`). Now guarded; regression test added.
 - The panel remembered "hidden" when FreeCAD quit (closing hides docks). Visibility is now saved only when the user toggles the panel.
+- With no document open, the panel resumed an old unrelated conversation. Without a document it now always starts fresh.
 
 ## Deviations from the plan (small)
 
