@@ -1,4 +1,4 @@
-"""CI checks from docs/PLAN.md: identical protocol copies, matching versions and names."""
+"""CI checks from the implementation plan: identical protocol copies, matching versions and names."""
 
 import json
 import re

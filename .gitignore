@@ -7,3 +7,8 @@ __pycache__/
 dist/
 build/
 .DS_Store
+
+# Planning docs stay local (not part of the published repository)
+docs/PLAN.md
+docs/spikes.md
+docs/phase*.md

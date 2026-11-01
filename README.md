@@ -2,7 +2,7 @@
 
 Control FreeCAD by chat with Claude, either in a **"Claude" chat panel inside FreeCAD** or from **Claude Code**. Claude works on your open document through FreeCAD's Python API: it creates and changes geometry, reads the model tree and properties, and exports files. Every Claude step is exactly one undo step, and failed code leaves nothing behind.
 
-> Status: 0.1.0 (Phase 1 MVP, macOS). Windows and Linux follow in Phase 3. See [docs/PLAN.md](docs/PLAN.md).
+> Status: 0.1.0 (MVP, macOS). Windows and Linux support is planned. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
@@ -41,7 +41,7 @@ make lint
 make validate # claude plugin validate .
 ```
 
-Layout: `plugin/` is the Claude Code plugin (`server/` = Python package `freecad-bridge`, `addon/ClaudeBridge/` = FreeCAD addon, `skills/`, `commands/`, `hooks/`). `uvx --from <path>` caches by version; use `uvx --refresh` after code changes. Details in [CLAUDE.md](CLAUDE.md) and [docs/PLAN.md](docs/PLAN.md).
+Layout: `plugin/` is the Claude Code plugin (`server/` = Python package `freecad-bridge`, `addon/ClaudeBridge/` = FreeCAD addon, `skills/`, `commands/`, `hooks/`). `uv run --project plugin/server …` always uses the current code; `uvx --from plugin/server` caches the built package. Conventions are in [CLAUDE.md](CLAUDE.md).
 
 ## License
 

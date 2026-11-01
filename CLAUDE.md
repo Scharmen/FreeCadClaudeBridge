@@ -2,7 +2,7 @@
 
 ## Goal and architecture
 
-Control FreeCAD by chat, in the "Claude" chat panel inside FreeCAD or in Claude Code. The full plan is in [docs/PLAN.md](docs/PLAN.md); it is binding.
+Control FreeCAD by chat, in the "Claude" chat panel inside FreeCAD or in Claude Code. The full plan is in `docs/PLAN.md` (kept locally, not in Git); it is binding.
 
 - **Plugin `freecad`** (Claude Code, marketplace `freecad-claude` = this repo `Scharmen/FreeCadClaudeBridge`) bundles MCP server, skill, `/freecad:setup`, `/freecad:status` and a SessionStart hook.
 - **MCP server `freecad-bridge-mcp`** (stdio, Python 3.12, official MCP SDK, started via `uvx`) offers 19 generic tools, first of all `run_python`.
@@ -29,4 +29,4 @@ Control FreeCAD by chat, in the "Claude" chat panel inside FreeCAD or in Claude 
 - Acceptance criteria as tests first, then the code.
 - No deviation from the key decisions in `docs/PLAN.md` without asking.
 - After each phase: CHANGELOG entry, version bump, tag.
-- Results of spikes and open points go into `docs/spikes.md`.
+- Results of spikes and open points go into `docs/spikes.md`; phase gate reports into `docs/phaseN.md`. These planning docs are git-ignored.
