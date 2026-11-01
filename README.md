@@ -16,7 +16,7 @@ Requirements: FreeCAD 1.1, [Claude Code](https://claude.com/claude-code) (logged
    On Claude Code older than 2.1.275: `/plugin marketplace add Scharmen/FreeCadClaudeBridge`, then `/plugin install freecad@freecad-claude`.
 3. **Set up:** run `/freecad:setup` in Claude Code. It finds FreeCAD (macOS app, Windows install or portable folder, Linux package or AppImage; pass `--freecad <path>` if it isn't found), copies the ClaudeBridge addon into FreeCAD's `Mod` folder and records the path to Claude Code. Then (re)start FreeCAD; the "Claude" panel appears docked on the right.
 
-Check everything with `/freecad:status`. Remove it with `/freecad:setup --uninstall`, then `/plugin uninstall freecad@freecad-claude`.
+Check everything with `/freecad:status`. The manual acceptance checklist for Windows and Ubuntu is in [docs/manual-testing.md](docs/manual-testing.md). Remove it with `/freecad:setup --uninstall`, then `/plugin uninstall freecad@freecad-claude`.
 
 ## Use
 
