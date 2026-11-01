@@ -21,11 +21,17 @@ def bridge(tmp_path, monkeypatch):
 
 
 def fake_addon(bridge_dir, pid, handler, addon_version=__version__, started=None):
-    path = f"/tmp/fcb-test-{pid}-{os.urandom(3).hex()}.sock"  # tmp_path is too long for AF_UNIX on macOS
-    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(path)
+    if hasattr(socket, "AF_UNIX") and os.name != "nt":
+        path = f"/tmp/fcb-test-{pid}-{os.urandom(3).hex()}.sock"  # tmp_path is too long for AF_UNIX on macOS
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(path)
+        transport, address = "unix", path
+    else:  # Windows: TCP on loopback, like the addon
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.bind(("127.0.0.1", 0))
+        transport, address = "tcp", f"127.0.0.1:{srv.getsockname()[1]}"
     srv.listen(4)
-    info = {"pid": pid, "transport": "unix", "address": path, "started": started or time.time()}
+    info = {"pid": pid, "transport": transport, "address": address, "started": started or time.time()}
     (bridge_dir / "instances" / f"{pid}.json").write_text(json.dumps(info))
 
     def loop():

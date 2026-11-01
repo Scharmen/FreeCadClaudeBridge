@@ -4,18 +4,23 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+env:
+  FREECAD_VERSION: "1.1.4"
+  FREECAD_RELEASE: https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4
 
 jobs:
   unit:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - name: Unit tests (GUI tests skip without FreeCAD)
+      - name: Unit tests (GUI and headless tests skip without FreeCAD)
         run: uv run --project plugin/server pytest tests -q
       - name: Lint
         run: uv run --project plugin/server ruff check plugin tests
@@ -32,3 +37,81 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           claude plugin validate .
           claude plugin validate ./plugin
+
+  headless-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/cache@v4
+        with:
+          path: ~/freecad-dl
+          key: freecad-${{ env.FREECAD_VERSION }}-linux-x86_64
+      - name: Get FreeCAD AppImage
+        run: |
+          mkdir -p ~/freecad-dl && cd ~/freecad-dl
+          f=FreeCAD_${FREECAD_VERSION}-Linux-x86_64-py311.AppImage
+          [ -f "$f" ] || curl -fsSL -o "$f" "$FREECAD_RELEASE/$f"
+          chmod +x "$f"
+          rm -rf squashfs-root && ./"$f" --appimage-extract > /dev/null
+          echo "FREECAD_TARGET=$HOME/freecad-dl/squashfs-root" >> "$GITHUB_ENV"
+      - name: Headless tests against FreeCAD (Linux AppImage)
+        run: uv run --project plugin/server pytest tests/headless -v -s
+
+  headless-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/cache@v4
+        with:
+          path: ~/freecad-dl
+          key: freecad-${{ env.FREECAD_VERSION }}-windows-x86_64
+      - name: Get FreeCAD (portable)
+        shell: bash
+        run: |
+          mkdir -p ~/freecad-dl && cd ~/freecad-dl
+          f=FreeCAD_${FREECAD_VERSION}-Windows-x86_64-py311.7z
+          [ -f "$f" ] || curl -fsSL -o "$f" "$FREECAD_RELEASE/$f"
+          [ -d "${f%.7z}" ] || 7z x -y "$f" > /dev/null
+          echo "FREECAD_TARGET=$(cygpath -w "$HOME/freecad-dl/${f%.7z}")" >> "$GITHUB_ENV"
+      - name: Headless tests against FreeCAD (Windows portable)
+        run: uv run --project plugin/server pytest tests/headless -v -s
+
+  gui-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/cache@v4
+        with:
+          path: ~/freecad-dl
+          key: freecad-${{ env.FREECAD_VERSION }}-linux-x86_64
+      - name: System libraries for Qt under xvfb
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 \
+            libfontconfig1 libdbus-1-3 > /dev/null
+      - name: Get FreeCAD AppImage
+        run: |
+          mkdir -p ~/freecad-dl && cd ~/freecad-dl
+          f=FreeCAD_${FREECAD_VERSION}-Linux-x86_64-py311.AppImage
+          [ -f "$f" ] || curl -fsSL -o "$f" "$FREECAD_RELEASE/$f"
+          chmod +x "$f"
+          rm -rf squashfs-root && ./"$f" --appimage-extract > /dev/null
+      - name: Install the addon and start FreeCAD under xvfb
+        run: |
+          uv run --project plugin/server freecad-bridge install --freecad ~/freecad-dl/squashfs-root \
+            --addon-src plugin/addon/ClaudeBridge
+          xvfb-run -a -s "-screen 0 1600x1200x24" ~/freecad-dl/squashfs-root/AppRun > freecad.log 2>&1 &
+          for i in $(seq 1 120); do
+            uv run --project plugin/server freecad-bridge instances | grep -q '"pid"' && break
+            sleep 1
+          done
+          uv run --project plugin/server freecad-bridge doctor
+      - name: GUI integration tests (Linux, xvfb)
+        run: uv run --project plugin/server pytest tests/gui -v
+      - name: FreeCAD log
+        if: always()
+        run: tail -100 freecad.log || true

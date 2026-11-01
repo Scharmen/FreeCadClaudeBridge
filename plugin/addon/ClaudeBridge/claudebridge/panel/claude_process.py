@@ -27,11 +27,20 @@ SYSTEM_PROMPT = (
 )
 
 
+def claude_candidates() -> list[str]:
+    home = os.path.expanduser("~")
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA", os.path.join(home, "AppData", "Roaming"))
+        return [os.path.join(home, ".local", "bin", "claude.exe"), os.path.join(appdata, "npm", "claude.cmd")]
+    return [os.path.join(home, ".local", "bin", "claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude",
+            "/usr/bin/claude", os.path.join(home, ".npm-global", "bin", "claude")]
+
+
 def find_claude() -> str | None:
+    """GUI apps don't inherit the shell's PATH: use the path recorded by /freecad:setup, then known spots."""
     cfg = paths.load_config()
-    for candidate in (cfg.get("claude_path"), os.path.expanduser("~/.local/bin/claude"),
-                      "/opt/homebrew/bin/claude", "/usr/local/bin/claude"):
-        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+    for candidate in (cfg.get("claude_path"), *claude_candidates()):
+        if candidate and os.path.isfile(candidate) and (os.name == "nt" or os.access(candidate, os.X_OK)):
             return candidate
     return None
 
@@ -91,9 +100,11 @@ class ClaudeRun(QtCore.QObject):
         if not self.proc or self.proc.state() == QtCore.QProcess.NotRunning:
             return
         self.stopping = True
-        pid = self.proc.processId()
+        if os.name == "nt":  # no SIGINT for a console child on Windows; end it directly
+            self.proc.kill()
+            return
         try:
-            os.kill(pid, signal.SIGINT)
+            os.kill(self.proc.processId(), signal.SIGINT)
         except OSError:
             self.proc.terminate()
         QtCore.QTimer.singleShot(5000, self._escalate)

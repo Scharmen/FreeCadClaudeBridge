@@ -1,7 +1,9 @@
 """Find FreeCAD, install/uninstall the ClaudeBridge addon, write config and token.
 
-Phase 1: macOS detection only (Windows/Linux come in Phase 3); `--freecad`
-accepts an explicit FreeCAD.app or freecadcmd path on any platform.
+Detection: macOS (FreeCAD.app), Windows (registry, Program Files, portable via
+--freecad), Linux (PATH, AppImages in the usual folders). `--freecad` accepts a
+FreeCAD.app, an install folder, a freecadcmd binary or an AppImage on any platform.
+FreeCAD itself reports its user directory, so versioned folders (v1-1) just work.
 """
 
 from __future__ import annotations
@@ -33,10 +35,14 @@ print("FCB_HOME=" + App.getHomePath())
 
 @dataclass
 class FreeCADInstall:
-    freecadcmd: Path
+    command: list[str]  # how to start freecadcmd, e.g. [".../freecadcmd"] or ["FreeCAD.AppImage", "freecadcmd"]
     version: str
     user_app_data: Path
     app: Path | None = None
+
+    @property
+    def freecadcmd(self) -> str:
+        return " ".join(self.command)
 
     @property
     def version_tuple(self) -> tuple[int, ...]:
@@ -57,67 +63,150 @@ def parse_probe(stdout: str) -> dict[str, str]:
     return out
 
 
-def freecadcmd_for(path: Path) -> Path | None:
-    """Resolve a FreeCAD.app, a bin directory or a freecadcmd binary to freecadcmd."""
+CMD_NAMES = ("freecadcmd", "FreeCADCmd", "freecadcmd.exe", "FreeCADCmd.exe")
+
+
+def command_for(path: Path) -> list[str] | None:
+    """Resolve a FreeCAD.app, install folder, bin folder, freecadcmd binary or AppImage to a command."""
     path = path.expanduser()
-    candidates = [path] if path.is_file() else [
-        path / "Contents/Resources/bin/freecadcmd",
-        path / "bin/freecadcmd", path / "bin/FreeCADCmd", path / "bin/freecadcmd.exe",
-        path / "freecadcmd", path / "FreeCADCmd",
-    ]
-    for c in candidates:
-        if c.is_file() and os.access(c, os.X_OK):
-            return c
+    if path.is_file() and (path.suffix.lower() == ".appimage" or path.name == "AppRun"):
+        return [str(path), "freecadcmd"]
+    if path.is_dir() and (path / "AppRun").is_file():  # extracted AppImage (squashfs-root)
+        return [str(path / "AppRun"), "freecadcmd"]
+    if path.is_file():
+        return [str(path)] if os.access(path, os.X_OK) or path.suffix.lower() == ".exe" else None
+    for sub in ("Contents/Resources/bin", "bin", ""):
+        for name in CMD_NAMES:
+            c = path / sub / name if sub else path / name
+            if c.is_file() and (os.access(c, os.X_OK) or c.suffix.lower() == ".exe"):
+                return [str(c)]
     return None
 
 
-def candidate_apps() -> list[Path]:
-    """macOS: FreeCAD*.app in /Applications, ~/Applications, plus Spotlight."""
+def freecadcmd_for(path: Path) -> Path | None:
+    """Single-binary form of command_for (None for AppImages)."""
+    cmd = command_for(path)
+    return Path(cmd[0]) if cmd and len(cmd) == 1 else None
+
+
+def _mac_candidates() -> list[Path]:
     found: list[Path] = []
     for base in (Path("/Applications"), Path.home() / "Applications"):
         if base.is_dir():
             found += sorted(base.glob("FreeCAD*.app"))
-    if sys.platform == "darwin" and shutil.which("mdfind"):
+    if shutil.which("mdfind"):
         try:
             out = subprocess.run(["mdfind", "kMDItemFSName == 'FreeCAD*.app'"], capture_output=True,
                                  text=True, timeout=5).stdout
             found += [Path(p) for p in out.splitlines() if p.endswith(".app")]
         except (OSError, subprocess.TimeoutExpired):
             pass
+    return found
+
+
+def _windows_registry_locations() -> list[Path]:
+    try:
+        import winreg  # type: ignore[import-not-found]
+    except ImportError:
+        return []
+    out: list[Path] = []
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+            try:
+                root = winreg.OpenKey(hive, key_path, 0, winreg.KEY_READ | view)
+            except OSError:
+                continue
+            for i in range(winreg.QueryInfoKey(root)[0]):
+                try:
+                    sub = winreg.OpenKey(root, winreg.EnumKey(root, i))
+                    name = str(winreg.QueryValueEx(sub, "DisplayName")[0])
+                    if name.lower().startswith("freecad"):
+                        loc = winreg.QueryValueEx(sub, "InstallLocation")[0]
+                        if loc:
+                            out.append(Path(loc))
+                except OSError:
+                    continue
+    return out
+
+
+def _windows_candidates() -> list[Path]:
+    found = _windows_registry_locations()
+    for env in ("ProgramFiles", "ProgramW6432", "LOCALAPPDATA"):
+        base = os.environ.get(env)
+        if not base:
+            continue
+        for root in (Path(base), Path(base) / "Programs"):
+            if root.is_dir():
+                found += sorted(root.glob("FreeCAD*"))
+    return found
+
+
+def _linux_candidates() -> list[Path]:
+    found: list[Path] = []
+    for name in ("freecadcmd", "FreeCADCmd", "freecad-cmd"):
+        hit = shutil.which(name)
+        if hit:
+            found.append(Path(hit))
+    home = Path.home()
+    for folder in (home / "Applications", home / "Downloads", home / "Desktop", home / ".local/bin", home / "bin",
+                   Path("/opt")):
+        if folder.is_dir():
+            found += sorted(folder.glob("FreeCAD*.AppImage")) + sorted(folder.glob("freecad*.AppImage"))
+            found += sorted(p for p in folder.glob("FreeCAD*") if p.is_dir())
+    return found
+
+
+def candidate_apps() -> list[Path]:
+    """Places FreeCAD may be installed on this platform (unverified)."""
+    if sys.platform == "darwin":
+        found = _mac_candidates()
+    elif sys.platform == "win32":
+        found = _windows_candidates()
+    else:
+        found = _linux_candidates()
     unique: list[Path] = []
     for p in found:
-        if p.resolve() not in [u.resolve() for u in unique]:
+        try:
+            key = p.resolve()
+        except OSError:
+            key = p
+        if key not in [u.resolve() for u in unique]:
             unique.append(p)
     return unique
 
 
-def probe(freecadcmd: Path, timeout: float = 60) -> FreeCADInstall:
+def probe(command: list[str] | Path, timeout: float = 120) -> FreeCADInstall:
+    cmd = [str(command)] if isinstance(command, Path) else list(command)
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
         f.write(PROBE_SCRIPT)
         script = f.name
     try:
-        proc = subprocess.run([str(freecadcmd), script], capture_output=True, text=True,
-                              timeout=timeout, env=platforms.clean_env(), stdin=subprocess.DEVNULL)
+        proc = subprocess.run([*cmd, script], capture_output=True, text=True, timeout=timeout,
+                              env=platforms.clean_env(), stdin=subprocess.DEVNULL)
     finally:
         os.unlink(script)
     data = parse_probe(proc.stdout)
     if "version" not in data or "userappdata" not in data:
-        raise RuntimeError(f"could not query {freecadcmd}: {proc.stdout[-400:]}{proc.stderr[-400:]}")
-    app = next((p for p in freecadcmd.parents if p.suffix == ".app"), None)
-    return FreeCADInstall(freecadcmd, data["version"], Path(data["userappdata"]), app)
+        raise RuntimeError(f"could not query {' '.join(cmd)}: {proc.stdout[-400:]}{proc.stderr[-400:]}")
+    app = next((p for p in Path(cmd[0]).parents if p.suffix == ".app"), None)
+    return FreeCADInstall(cmd, data["version"], Path(data["userappdata"]), app)
 
 
 def discover(explicit: str | None = None) -> list[FreeCADInstall]:
     paths = [Path(explicit)] if explicit else candidate_apps()
-    installs = []
+    installs: list[FreeCADInstall] = []
     for p in paths:
-        cmd = freecadcmd_for(p)
+        cmd = command_for(p)
         if cmd is None:
             continue
         try:
-            installs.append(probe(cmd))
+            inst = probe(cmd)
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
             print(f"warning: skipping {p}: {e}", file=sys.stderr)
+            continue
+        if all(i.user_app_data != inst.user_app_data or i.version != inst.version for i in installs):
+            installs.append(inst)
     return sorted(installs, key=lambda i: i.version_tuple, reverse=True)
 
 
@@ -165,13 +254,14 @@ def install(addon_src: str | None, freecad: str | None = None, out=print) -> int
         return 1
     target = installs[0]
     for other in installs[1:]:
-        out(f"note: also found FreeCAD {other.version} at {other.freecadcmd}; use --freecad to pick it.")
+        out(f"note: also found FreeCAD {other.version} ({other.freecadcmd}); use --freecad to pick it.")
     backup = copy_addon(src, target.mod_dir)
     platforms.ensure_token()
     platforms.instances_dir().mkdir(parents=True, exist_ok=True)
     claude = find_claude()
     platforms.update_config(claude_path=claude, plugin_root=str(src.parent.parent), addon_src=str(src),
-                            freecad_version=target.version, freecadcmd=str(target.freecadcmd),
+                            freecad_version=target.version, freecadcmd=target.freecadcmd,
+                            freecadcmd_cmd=target.command,
                             user_app_data=str(target.user_app_data), server_version=__version__)
     out(f"Installed ClaudeBridge {__version__} for FreeCAD {target.version}:")
     out(f"  addon:  {target.mod_dir / ADDON_NAME}")

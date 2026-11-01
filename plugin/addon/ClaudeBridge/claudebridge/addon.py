@@ -58,19 +58,31 @@ def _start_server(transport: str) -> None:
     from .bridge.transport import BridgeServer
 
     home = App.getHomePath()
-    cmd = os.path.join(home, "bin", "freecadcmd.exe" if sys.platform == "win32" else "freecadcmd")
     info = {
         "freecad_version": ".".join(App.Version()[:3]),
         "user_app_data": App.getUserAppDataDir(),
         "freecad_home": home,
-        "freecadcmd": cmd if os.path.exists(cmd) else None,
         "python": sys.version.split()[0],
+        **_freecadcmd_info(home),
     }
     executor = _state.get("executor") or Executor()
     server = BridgeServer(executor, __version__, info, log, transport)
     server.start()
     _state.update(executor=executor, server=server)
     App.Console.PrintMessage(f"ClaudeBridge {__version__} ready\n")
+
+
+def _freecadcmd_info(home: str) -> dict[str, Any]:
+    """How to start this FreeCAD's freecadcmd. Inside an AppImage the bundle is a temporary mount,
+    so the AppImage itself is called with the `freecadcmd` argument."""
+    appimage = os.environ.get("APPIMAGE")
+    if appimage and os.path.isfile(appimage):
+        return {"freecadcmd": appimage, "freecadcmd_cmd": [appimage, "freecadcmd"]}
+    for name in ("freecadcmd", "FreeCADCmd", "freecadcmd.exe", "FreeCADCmd.exe"):
+        path = os.path.join(home, "bin", name)
+        if os.path.isfile(path):
+            return {"freecadcmd": path, "freecadcmd_cmd": [path]}
+    return {"freecadcmd": None, "freecadcmd_cmd": None}
 
 
 def stop() -> None:

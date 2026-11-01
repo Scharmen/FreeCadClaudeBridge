@@ -1,6 +1,7 @@
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,9 @@ def test_parse_probe_ignores_banner():
                     "home": "/Applications/FreeCAD.app/Contents/Resources/"}
 
 
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="fake freecadcmd is a shell script")
+
+
 def fake_app(tmp_path: Path, name: str, version: str) -> Path:
     """A FreeCAD.app whose freecadcmd is a shell script printing probe markers."""
     app = tmp_path / "Applications" / name
@@ -44,12 +48,14 @@ def fake_app(tmp_path: Path, name: str, version: str) -> Path:
     return app
 
 
+@posix_only
 def test_freecadcmd_for_app_bundle(tmp_path):
     app = fake_app(tmp_path, "FreeCAD.app", "1.1.4")
     assert installer.freecadcmd_for(app) == app / "Contents/Resources/bin/freecadcmd"
     assert installer.freecadcmd_for(tmp_path / "nothing") is None
 
 
+@posix_only
 def test_discover_prefers_newest(tmp_path, monkeypatch):
     old = fake_app(tmp_path, "FreeCAD 1.0.app", "1.0.2")
     new = fake_app(tmp_path, "FreeCAD.app", "1.1.4")
@@ -59,6 +65,7 @@ def test_discover_prefers_newest(tmp_path, monkeypatch):
     assert found[0].app == new
 
 
+@posix_only
 def test_install_copies_addon_and_writes_state(tmp_path, bridge, monkeypatch):
     app = fake_app(tmp_path, "FreeCAD.app", "1.1.4")
     monkeypatch.setattr(installer, "candidate_apps", lambda: [app])
@@ -79,6 +86,7 @@ def test_install_copies_addon_and_writes_state(tmp_path, bridge, monkeypatch):
     assert cfg["freecad_version"] == "1.1.4"
 
 
+@posix_only
 def test_reinstall_backs_up_outside_mod(tmp_path, bridge, monkeypatch):
     app = fake_app(tmp_path, "FreeCAD.app", "1.1.4")
     monkeypatch.setattr(installer, "candidate_apps", lambda: [app])
@@ -102,6 +110,7 @@ def test_install_bad_addon_src(bridge):
     assert installer.install("/nonexistent", out=lines.append) == 2
 
 
+@posix_only
 def test_uninstall_removes_everything(tmp_path, bridge, monkeypatch):
     app = fake_app(tmp_path, "FreeCAD.app", "1.1.4")
     monkeypatch.setattr(installer, "candidate_apps", lambda: [app])

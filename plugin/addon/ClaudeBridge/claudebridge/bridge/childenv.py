@@ -36,18 +36,28 @@ def clean_child_env(environ: dict[str, str], bundle_home: str | None = None,
     `bundle_home` is App.getHomePath(); `user_mod_dir` the user's Mod folder.
     PATH entries below either are dropped.
     """
+    windows = os.name == "nt"
     env = {k: v for k, v in environ.items()
-           if k not in STRIP_VARS and not k.startswith(STRIP_PREFIXES)}
-    drop = [p.rstrip("/") for p in (bundle_home, user_mod_dir) if p]
-    parts = []
-    for p in env.get("PATH", "").split(os.pathsep):
-        if not p or any(p == d or p.startswith(d + "/") for d in drop):
+           if k.upper() not in STRIP_VARS and not k.upper().startswith(STRIP_PREFIXES)}
+    path_key = next((k for k in env if k.upper() == "PATH"), "PATH")  # "Path" on Windows
+
+    def norm(p: str) -> str:
+        p = p.replace("\\", "/").rstrip("/")
+        return p.lower() if windows else p
+
+    drop = [norm(p) for p in (bundle_home, user_mod_dir) if p]
+    parts: list[str] = []
+    for p in env.get(path_key, "").split(os.pathsep):
+        n = norm(p)
+        if not p or any(n == d or n.startswith(d + "/") for d in drop):
             continue
-        if p not in parts:
+        if n not in (norm(x) for x in parts):
             parts.append(p)
-    for extra in ("/usr/local/bin", "/opt/homebrew/bin", os.path.expanduser("~/.local/bin"),
-                  "/usr/bin", "/bin", "/usr/sbin", "/sbin"):
-        if extra not in parts and os.path.isdir(extra):
+    extras = [os.path.expanduser("~/.local/bin")]
+    if not windows:
+        extras = ["/usr/local/bin", "/opt/homebrew/bin", *extras, "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    for extra in extras:
+        if norm(extra) not in (norm(x) for x in parts) and os.path.isdir(extra):
             parts.append(extra)
-    env["PATH"] = os.pathsep.join(parts)
+    env[path_key] = os.pathsep.join(parts)
     return env

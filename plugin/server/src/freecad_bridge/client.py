@@ -6,6 +6,7 @@ import itertools
 import json
 import os
 import socket
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,6 +37,8 @@ class Instance:
 
 
 def pid_alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        return _pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -45,6 +48,22 @@ def pid_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def _pid_alive_windows(pid: int) -> bool:
+    """os.kill(pid, 0) on Windows sends CTRL_C_EVENT; query the process handle instead."""
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    PROCESS_QUERY_LIMITED_INFORMATION, STILL_ACTIVE = 0x1000, 259  # noqa: N806
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def list_instances(cleanup: bool = True) -> list[Instance]:

@@ -36,13 +36,22 @@ print("FCB_RESULT=" + _json.dumps(_result, default=repr))
 """
 
 
-def find_freecadcmd() -> str | None:
+def _usable(cmd: Any) -> list[str] | None:
+    if isinstance(cmd, str):
+        cmd = [cmd]
+    if isinstance(cmd, list) and cmd and os.path.exists(cmd[0]):
+        return [str(c) for c in cmd]
+    return None
+
+
+def find_freecadcmd() -> list[str] | None:
+    """Command for freecadcmd: from a running FreeCAD (same version), else from the setup config."""
     for inst in list_instances():
-        cmd = inst.info.get("freecadcmd")
-        if cmd and os.path.exists(cmd):
+        cmd = _usable(inst.info.get("freecadcmd_cmd")) or _usable(inst.info.get("freecadcmd"))
+        if cmd:
             return cmd
-    cmd = platforms.load_config().get("freecadcmd")
-    return cmd if cmd and os.path.exists(cmd) else None
+    cfg = platforms.load_config()
+    return _usable(cfg.get("freecadcmd_cmd")) or _usable(cfg.get("freecadcmd"))
 
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -81,7 +90,7 @@ async def run_headless(script: str, timeout_s: float = 600) -> dict[str, Any]:
     wrapper.write_text(WRAPPER.format(workdir=str(workdir), script=str(script_path)), encoding="utf-8")
     t0 = time.monotonic()
     timed_out = False
-    async with await anyio.open_process([cmd, str(wrapper)], env=platforms.clean_env(), cwd=str(workdir),
+    async with await anyio.open_process([*cmd, str(wrapper)], env=platforms.clean_env(), cwd=str(workdir),
                                         stdin=None) as proc:
         chunks: list[bytes] = []
 

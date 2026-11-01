@@ -43,3 +43,18 @@ def test_input_not_modified():
     src = freecad_env()
     clean_child_env(src, BUNDLE, MOD)
     assert src["PYTHONHOME"] == BUNDLE
+
+
+def test_windows_style_paths(monkeypatch):
+    import os
+
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(os, "pathsep", ";")
+    bundle = "C:\\Program Files\\FreeCAD 1.1"
+    env = {"Path": ";".join([bundle + "\\bin", "c:\\program files\\freecad 1.1\\lib", "C:\\Windows\\system32",
+                            "C:\\Users\\Käse Müller\\.local\\bin", "C:\\Windows\\System32"]),
+           "PythonHome": bundle + "\\bin", "CLAUDE_CODE_SSE_PORT": "1"}
+    out = clean_child_env(env, bundle, None)
+    assert "PythonHome" not in out and "CLAUDE_CODE_SSE_PORT" not in out
+    assert out["Path"].split(";")[:2] == ["C:\\Windows\\system32", "C:\\Users\\Käse Müller\\.local\\bin"]
+    assert "PATH" not in out
