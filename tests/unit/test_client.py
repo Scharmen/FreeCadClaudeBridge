@@ -85,7 +85,20 @@ def test_error_response_raised(bridge):
 
 def test_version_warning(bridge):
     fake_addon(bridge, os.getpid(), lambda m: {"ok": True, "result": {}}, addon_version="0.0.9")
-    assert "0.0.9" in client.call("ping").warnings[0]
+    warning = client.call("ping").warnings[0]
+    assert "0.0.9" in warning and "restart FreeCAD" in warning
+
+
+def test_newer_addon_asks_for_plugin_update(bridge):
+    fake_addon(bridge, os.getpid(), lambda m: {"ok": True, "result": {}}, addon_version="99.0.0")
+    assert "claude plugin update" in client.call("ping").warnings[0]
+
+
+def test_setup_errors_carry_a_fix():
+    for code in (client.NOT_RUNNING, protocol.AUTH_FAILED, protocol.VERSION_MISMATCH, protocol.GUI_BUSY,
+                 protocol.TIMEOUT):
+        assert client.fix_for(code)
+    assert client.fix_for(protocol.PY_EXCEPTION) is None
 
 
 def test_wrong_token_fails(bridge):

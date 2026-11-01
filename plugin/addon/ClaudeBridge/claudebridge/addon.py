@@ -13,7 +13,8 @@ from PySide import QtCore, QtWidgets
 from . import __version__
 
 PARAMS = "User parameter:BaseApp/Preferences/Mod/ClaudeBridge"
-COMMANDS = ["ClaudeBridge_TogglePanel", "ClaudeBridge_Status", "ClaudeBridge_Restart"]
+COMMANDS = ["ClaudeBridge_TogglePanel", "ClaudeBridge_Status", "ClaudeBridge_Restart", "ClaudeBridge_RotateToken",
+            "ClaudeBridge_OpenLog"]
 _state: dict[str, Any] = {}
 
 
@@ -96,13 +97,30 @@ def restart() -> None:
     _start_server(params().GetString("Transport", "auto"))
 
 
+def pending_update() -> str | None:
+    """Version of an addon installed after this FreeCAD started (it loads on the next start)."""
+    import json
+
+    marker = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".installed.json")
+    try:
+        with open(marker) as f:
+            installed = json.load(f).get("version")
+    except (OSError, ValueError):
+        return None
+    return installed if installed and installed != __version__ else None
+
+
 def status_text() -> str:
     server = _state.get("server")
     if not server:
         return "ClaudeBridge is not running."
     busy = _state["executor"].busy
-    return (f"ClaudeBridge {__version__}\nListening on: {server.address}\n"
+    text = (f"ClaudeBridge {__version__}\nListening on: {server.address}\n"
             f"GUI thread: {'busy' if busy else 'idle'}\nPID: {server.pid}")
+    newer = pending_update()
+    if newer:
+        text += f"\n\nClaudeBridge {newer} is installed: restart FreeCAD to load it."
+    return text
 
 
 class _Command:
@@ -132,6 +150,27 @@ def _show_status() -> None:
     QtWidgets.QMessageBox.information(Gui.getMainWindow(), "Claude Bridge", status_text())
 
 
+def rotate_token() -> None:
+    from .bridge import paths, protocol
+
+    paths.write_token(protocol.new_token())
+    QtWidgets.QMessageBox.information(
+        Gui.getMainWindow(), "Claude Bridge",
+        "A new token was written. Claude Code uses it from its next call; no restart needed.")
+
+
+def open_log() -> None:
+    from PySide import QtGui
+
+    from .bridge import audit
+
+    path = audit.log_path()
+    if not os.path.exists(path):
+        QtWidgets.QMessageBox.information(Gui.getMainWindow(), "Claude Bridge", f"No audit log yet ({path}).")
+        return
+    QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
+
+
 def _register_commands() -> None:
     if _state.get("commands"):
         return
@@ -139,4 +178,7 @@ def _register_commands() -> None:
                                          _toggle_panel, "Ctrl+Alt+K"))
     Gui.addCommand(COMMANDS[1], _Command("Bridge status", "Show the Claude bridge status", _show_status))
     Gui.addCommand(COMMANDS[2], _Command("Restart bridge", "Restart the Claude bridge server", restart))
+    Gui.addCommand(COMMANDS[3], _Command("Rotate token", "Create a new shared token for Claude Code", rotate_token))
+    Gui.addCommand(COMMANDS[4], _Command("Open audit log", "Open the log of everything Claude ran in FreeCAD",
+                                         open_log))
     _state["commands"] = True

@@ -54,3 +54,13 @@ def test_addon_has_no_third_party_imports():
         for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_][\w]*)", py.read_text(), re.M):
             mod = m[1]
             assert mod in stdlib or mod in allowed or mod == "__future__", f"{py}: imports {mod}"
+
+
+def test_no_network_access_and_loopback_only():
+    """Security checklist: no telemetry or update checks, TCP only on 127.0.0.1."""
+    code = [*ADDON.rglob("*.py"), *(SERVER / "src").rglob("*.py")]
+    for py in code:
+        text = py.read_text()
+        assert not re.search(r"^\s*(?:import|from)\s+(?:urllib|http|requests|httpx|aiohttp)\b", text, re.M), py
+        for m in re.finditer(r"\.bind\((.+?)\)\n", text):
+            assert "127.0.0.1" in m[1] or "path" in m[1], f"{py}: bind({m[1]})"

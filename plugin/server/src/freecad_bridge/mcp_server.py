@@ -9,7 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import os
-import shutil
+import sys
 from typing import Any, Literal
 
 import anyio
@@ -17,8 +17,8 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
-from . import __version__, headless, platforms
-from .client import NOT_RUNNING, BridgeError, call
+from . import __version__, headless, installer
+from .client import NOT_RUNNING, BridgeError, call, fix_for
 
 MAX_CHARS = 38000  # ~10k tokens; Claude Code warns above that
 
@@ -56,6 +56,8 @@ async def _raw(op: str, args: dict[str, Any], timeout_s: float = 60, instance: i
         return await anyio.to_thread.run_sync(run)
     except BridgeError as e:
         msg = f"{e.code}: {e.message}"
+        if fix_for(e.code):
+            msg += f"\nFix: {fix_for(e.code)}"
         if e.traceback:
             msg += "\n" + e.traceback
         raise ToolError(msg) from e
@@ -255,16 +257,10 @@ async def run_headless(script: str, timeout_s: float = 600) -> str:
 
 
 def _refresh_config() -> None:
-    """Keep config.json pointing at the current plugin version (the path changes on update)."""
-    src = os.environ.get("FREECAD_BRIDGE_ADDON_SRC")
-    values: dict[str, Any] = {"server_version": __version__}
-    if src and os.path.isdir(src):
-        values["addon_src"] = src
-        values["plugin_root"] = os.path.dirname(os.path.dirname(src))
-    if not platforms.load_config().get("claude_path"):
-        values["claude_path"] = shutil.which("claude")
+    """After a plugin update: point config.json at the new plugin path and update the addon."""
     try:
-        platforms.update_config(**values)
+        installer.auto_update(os.environ.get("FREECAD_BRIDGE_ADDON_SRC"),
+                              out=lambda line: print(f"freecad-bridge: {line}", file=sys.stderr))
     except OSError:
         pass
 

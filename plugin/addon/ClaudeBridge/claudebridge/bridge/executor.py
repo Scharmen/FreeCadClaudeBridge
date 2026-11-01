@@ -8,6 +8,7 @@ serialized: a second call waits for the first; GUI_BUSY only if it waits too lon
 from __future__ import annotations
 
 import threading
+import time
 import traceback
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
@@ -15,7 +16,7 @@ from typing import Any
 
 from PySide import QtCore
 
-from . import protocol
+from . import audit, protocol
 
 BUSY_WAIT_S = 30.0
 READ_ONLY_OPS = {"status_gui", "get_tree", "get_object", "inspect_shape", "inspect_sketch", "get_changes",
@@ -82,20 +83,27 @@ class Executor(QtCore.QObject):
         op, args, fut = item
         self._busy.set()
         self.journal.claude_active = op not in READ_ONLY_OPS
+        started = time.monotonic()
+        resp: dict[str, Any] = {}
         try:
             if not fut.set_running_or_notify_cancel():
                 return
             try:
-                result = self.ops.OPS[op](args, self)
-                fut.set_result({"ok": True, "result": result})
+                resp = {"ok": True, "result": self.ops.OPS[op](args, self)}
             except OpError as e:
                 err = protocol.error(e.code, e.message, e.traceback)
                 err.update(e.extra)
-                fut.set_result({"ok": False, "error": err})
+                resp = {"ok": False, "error": err}
             except Exception as e:  # bug in the bridge itself
-                fut.set_result({"ok": False, "error": protocol.error(
-                    protocol.INTERNAL, f"{type(e).__name__}: {e}", traceback.format_exc())})
+                resp = {"ok": False, "error": protocol.error(
+                    protocol.INTERNAL, f"{type(e).__name__}: {e}", traceback.format_exc())}
+            fut.set_result(resp)
         finally:
+            if resp and op != "status_gui":
+                err = resp.get("error") or {}
+                audit.record("call", op=op, args=audit.call_args(args), ok=resp["ok"],
+                             ms=round((time.monotonic() - started) * 1000), error=err.get("code"),
+                             message=err.get("message"))
             self.journal.claude_active = False
             self._busy.clear()
             self._slot.release()

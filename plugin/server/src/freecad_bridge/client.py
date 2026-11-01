@@ -15,6 +15,23 @@ from . import __version__, platforms, protocol
 NOT_RUNNING = "NOT_RUNNING"
 _ids = itertools.count(1)
 
+# What to do about errors that come from setup or the connection rather than from FreeCAD code.
+FIXES = {
+    NOT_RUNNING: "Start FreeCAD. If it is running and the Claude panel is missing, run /freecad:setup and restart "
+                 "FreeCAD.",
+    protocol.AUTH_FAILED: "Claude Code and FreeCAD use different tokens: run /freecad:setup, then restart FreeCAD.",
+    protocol.VERSION_MISMATCH: "Plugin and addon are incompatible: run `claude plugin update "
+                               "freecad@freecad-claude`, then /freecad:setup, and restart FreeCAD.",
+    protocol.GUI_BUSY: "FreeCAD is still working on an earlier call; wait and retry, and use run_headless for heavy "
+                       "operations.",
+    protocol.TIMEOUT: "The call ran too long. Split the work, raise timeout_s, or move heavy geometry to "
+                      "run_headless.",
+}
+
+
+def fix_for(code: str) -> str | None:
+    return FIXES.get(code)
+
 
 class BridgeError(Exception):
     def __init__(self, code: str, message: str, traceback: str | None = None) -> None:
@@ -94,8 +111,7 @@ def pick_instance(pid: int | None = None) -> Instance:
                 return inst
         raise BridgeError(NOT_RUNNING, f"no FreeCAD instance with pid {pid}")
     if not instances:
-        raise BridgeError(NOT_RUNNING, "FreeCAD with the ClaudeBridge addon is not running. "
-                          "Start FreeCAD; if it is running, run /freecad:setup and restart it.")
+        raise BridgeError(NOT_RUNNING, "FreeCAD with the ClaudeBridge addon is not running.")
     return instances[0]
 
 
@@ -112,7 +128,8 @@ def connect(inst: Instance, timeout: float) -> socket.socket:
         sock.connect(target)
     except OSError as e:
         sock.close()
-        raise BridgeError(NOT_RUNNING, f"cannot connect to FreeCAD (pid {inst.pid}): {e}") from e
+        hint = " Security software may be blocking 127.0.0.1." if inst.transport == "tcp" else ""
+        raise BridgeError(NOT_RUNNING, f"cannot connect to FreeCAD (pid {inst.pid}): {e}.{hint}") from e
     return sock
 
 
@@ -125,10 +142,14 @@ class CallResult:
     @property
     def warnings(self) -> list[str]:
         addon = self.hello.get("addon_version")
-        if addon and addon != __version__:
-            return [f"Addon version {addon} differs from server version {__version__}; "
-                    "run /freecad:setup and restart FreeCAD."]
-        return []
+        if not addon or addon == __version__:
+            return []
+        from .installer import version_tuple  # installer imports this module
+
+        if version_tuple(addon) < version_tuple(__version__):
+            return [f"FreeCAD still runs ClaudeBridge {addon}; restart FreeCAD to load {__version__}."]
+        return [f"FreeCAD runs ClaudeBridge {addon}, newer than this plugin ({__version__}): "
+                "run `claude plugin update freecad@freecad-claude`."]
 
 
 def call(op: str, args: dict[str, Any] | None = None, timeout_s: float = 60,
@@ -136,7 +157,7 @@ def call(op: str, args: dict[str, Any] | None = None, timeout_s: float = 60,
     inst = pick_instance(instance)
     token = platforms.read_token()
     if token is None:
-        raise BridgeError(protocol.AUTH_FAILED, "no token file; run /freecad:setup")
+        raise BridgeError(protocol.AUTH_FAILED, "no token file")
     sock = connect(inst, timeout=min(10.0, timeout_s + 5))
     try:
         try:

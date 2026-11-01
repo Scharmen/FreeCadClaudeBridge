@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from . import protocol
@@ -49,11 +50,37 @@ def ensure_token() -> bytes:
 
 
 def write_token(token: bytes) -> bytes:
+    """Atomic, so a handshake running in FreeCAD never reads half a token."""
     bridge_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(token_path(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    tmp = token_path().with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(token)
+    os.replace(tmp, token_path())
     return token
+
+
+AUDIT_MAX_BYTES = 10 * 1024 * 1024
+
+
+def audit_path() -> Path:
+    return bridge_dir() / "bridge-log.jsonl"
+
+
+def audit_record(event: str, **fields: object) -> None:
+    """Append to the audit log the addon writes (mirrors its bridge/audit.py); never raises."""
+    entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "event": event, "pid": os.getpid(), **fields}
+    try:
+        line = json.dumps(entry, ensure_ascii=False, default=str) + "\n"
+        path = audit_path()
+        if path.exists() and path.stat().st_size + len(line) > AUDIT_MAX_BYTES:
+            os.replace(path, path.with_name("bridge-log.1.jsonl"))
+        bridge_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 
 def load_config() -> dict:

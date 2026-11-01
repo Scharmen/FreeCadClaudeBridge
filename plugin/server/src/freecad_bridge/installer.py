@@ -24,6 +24,8 @@ from .client import list_instances
 
 ADDON_NAME = "ClaudeBridge"
 INSTALLED_MARKER = ".installed.json"
+MAX_BACKUPS = 3
+API_KEY_SERVICE = "freecad-bridge-anthropic-api-key"  # same name as the addon's panel/secrets.py
 
 PROBE_SCRIPT = """\
 import FreeCAD as App
@@ -46,7 +48,7 @@ class FreeCADInstall:
 
     @property
     def version_tuple(self) -> tuple[int, ...]:
-        return tuple(int(x) for x in re.findall(r"\d+", self.version)[:3])
+        return version_tuple(self.version)
 
     @property
     def mod_dir(self) -> Path:
@@ -210,6 +212,10 @@ def discover(explicit: str | None = None) -> list[FreeCADInstall]:
     return sorted(installs, key=lambda i: i.version_tuple, reverse=True)
 
 
+def version_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in re.findall(r"\d+", version)[:3])
+
+
 def installed_version(mod_dir: Path) -> str | None:
     try:
         return json.loads((mod_dir / ADDON_NAME / INSTALLED_MARKER).read_text()).get("version")
@@ -226,6 +232,8 @@ def copy_addon(addon_src: Path, mod_dir: Path) -> Path | None:
         backup = platforms.bridge_dir() / "backups" / f"{ADDON_NAME}-{old}-{time.strftime('%Y%m%d-%H%M%S')}"
         backup.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(dest), str(backup))
+        for old_backup in sorted(backup.parent.glob(f"{ADDON_NAME}-*"), key=lambda p: p.stat().st_mtime)[:-MAX_BACKUPS]:
+            shutil.rmtree(old_backup, ignore_errors=True)
     mod_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(addon_src, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (dest / INSTALLED_MARKER).write_text(json.dumps(
@@ -276,8 +284,71 @@ def install(addon_src: str | None, freecad: str | None = None, out=print) -> int
     return 0
 
 
-def uninstall(freecad: str | None = None, out=print) -> int:
+def auto_update(addon_src: str | None, out=print) -> bool:
+    """After a plugin update: point config.json at the new plugin and replace an older addon.
+
+    Runs from the SessionStart hook and when the MCP server starts, so updating needs
+    no step beyond restarting FreeCAD. Does nothing before /freecad:setup or after an
+    uninstall, and never downgrades. Returns True if the addon was replaced.
+    """
     cfg = platforms.load_config()
+    src = Path(addon_src or os.environ.get("FREECAD_BRIDGE_ADDON_SRC", "")).expanduser()
+    if not cfg.get("user_app_data") or not (src / "InitGui.py").is_file():
+        return False
+    values: dict = {"server_version": __version__, "addon_src": str(src), "plugin_root": str(src.parent.parent)}
+    if not cfg.get("claude_path") or not Path(cfg["claude_path"]).exists():
+        values["claude_path"] = find_claude()
+    platforms.update_config(**values)
+    mod = Path(cfg["user_app_data"]) / "Mod"
+    have = installed_version(mod)
+    if have is None or version_tuple(have) >= version_tuple(__version__):
+        return False
+    try:
+        copy_addon(src, mod)
+    except OSError as e:
+        out(f"could not update the ClaudeBridge addon {have} -> {__version__} ({e}); run /freecad:setup")
+        return False
+    running = " (FreeCAD is running: restart it to load the new version)" if list_instances() else ""
+    out(f"updated the ClaudeBridge addon {have} -> {__version__}{running}")
+    return True
+
+
+def clear_api_key() -> list[str]:
+    """Remove the chat panel's API key from the system keychain. Returns what was removed."""
+    removed = []
+    account = os.environ.get("USER") or os.environ.get("USERNAME") or ""
+    if sys.platform == "darwin":
+        cmd = ["/usr/bin/security", "delete-generic-password", "-a", account, "-s", API_KEY_SERVICE]
+    elif sys.platform == "win32":
+        cmd = ["cmdkey", f"/delete:{API_KEY_SERVICE}"]
+    elif shutil.which("secret-tool"):
+        cmd = ["secret-tool", "clear", "service", API_KEY_SERVICE, "account", account]
+    else:
+        cmd = []
+    if cmd:
+        try:
+            if subprocess.run(cmd, capture_output=True, timeout=10, stdin=subprocess.DEVNULL).returncode == 0:
+                removed.append(f"API key in the system keychain ({API_KEY_SERVICE})")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return removed
+
+
+def _instance_infos() -> list[dict]:
+    infos = []
+    for f in platforms.instances_dir().glob("*.json") if platforms.instances_dir().is_dir() else []:
+        try:
+            infos.append(json.loads(f.read_text()))
+        except (OSError, ValueError):
+            continue
+    return infos
+
+
+def uninstall(freecad: str | None = None, out=print, purge: bool = False) -> int:
+    cfg = platforms.load_config()
+    socks = [Path(i.get("address", "")) for i in _instance_infos() if i.get("transport") == "unix"]
+    if list_instances():  # also drops instance files of dead processes, so read the sockets first
+        out("note: FreeCAD is running; quit it so the addon is not reloaded from memory.")
     mod_dirs = {Path(cfg["user_app_data"]) / "Mod"} if cfg.get("user_app_data") else set()
     if freecad or not mod_dirs:
         mod_dirs |= {i.mod_dir for i in discover(freecad)}
@@ -287,12 +358,25 @@ def uninstall(freecad: str | None = None, out=print) -> int:
             shutil.rmtree(dest)
             out(f"removed {dest}")
     bd = platforms.bridge_dir()
-    for p in [platforms.token_path(), platforms.config_path(), *bd.glob("bridge-*.sock")]:
-        if p.exists():
+    for p in [platforms.token_path(), platforms.config_path(), bd / "api_key", *bd.glob("bridge-*.sock"), *socks]:
+        if p.name and (p.exists() or p.is_symlink()):
             p.unlink()
             out(f"removed {p}")
     if platforms.instances_dir().exists():
         shutil.rmtree(platforms.instances_dir())
         out(f"removed {platforms.instances_dir()}")
+    for what in clear_api_key():
+        out(f"removed {what}")
+    user_data = ("snapshots", "history", "sessions.json", "headless", "backups")
+    kept = [p for p in (*(bd / n for n in user_data), *bd.glob("bridge-log*.jsonl")) if p.exists()]
+    for p in kept:
+        if purge:
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+            out(f"removed {p}")
+    if kept and not purge:
+        out(f"kept snapshots, chat history, headless work folders, backups and the audit log in {bd} "
+            "(add --purge to remove them)")
+    if bd.is_dir() and not any(bd.iterdir()):
+        bd.rmdir()
     out("Now run: /plugin uninstall freecad@freecad-claude")
     return 0

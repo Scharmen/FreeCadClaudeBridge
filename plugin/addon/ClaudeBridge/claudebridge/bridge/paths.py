@@ -42,7 +42,6 @@ def config_path() -> str:
 
 
 def load_or_create_token() -> bytes:
-    ensure_bridge_dir()
     path = token_path()
     try:
         with open(path, "rb") as f:
@@ -51,10 +50,17 @@ def load_or_create_token() -> bytes:
             return data
     except FileNotFoundError:
         pass
-    data = protocol.new_token()
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    return write_token(protocol.new_token())
+
+
+def write_token(data: bytes) -> bytes:
+    """Write a token atomically, so a concurrent handshake never reads half a token."""
+    ensure_bridge_dir()
+    tmp = token_path() + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(data)
+    os.replace(tmp, token_path())
     return data
 
 
@@ -64,6 +70,27 @@ def socket_path(pid: int) -> str:
     if len(path.encode()) > 100:
         path = os.path.join(tempfile.gettempdir(), f"freecad-bridge-{os.getuid()}-{pid}.sock")
     return path
+
+
+def remove_stale_sockets() -> None:
+    """Sockets left behind by FreeCAD processes that ended without cleanup (crash, forced quit)."""
+    import glob
+    import re
+
+    for path in glob.glob(os.path.join(bridge_dir(), "bridge-*.sock")):
+        m = re.search(r"bridge-(\d+)\.sock$", path)
+        if not m or int(m.group(1)) == os.getpid():
+            continue
+        try:
+            os.kill(int(m.group(1)), 0)
+        except ProcessLookupError:
+            for p in (path, instance_path(int(m.group(1)))):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+        except OSError:
+            pass
 
 
 def instance_path(pid: int) -> str:

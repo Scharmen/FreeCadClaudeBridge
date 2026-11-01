@@ -28,6 +28,7 @@ from typing import Any
 
 PROTOCOL_VERSION = "1.0.0"
 MAX_FRAME = 64 * 1024 * 1024
+MAX_HANDSHAKE_FRAME = 4096  # before authentication only tiny messages are accepted
 NONCE_BYTES = 32
 TOKEN_BYTES = 32
 
@@ -69,13 +70,13 @@ def send_msg(sock: socket.socket, msg: dict[str, Any]) -> None:
     sock.sendall(struct.pack(">I", len(body)) + body)
 
 
-def recv_msg(sock: socket.socket) -> dict[str, Any] | None:
+def recv_msg(sock: socket.socket, max_size: int = MAX_FRAME) -> dict[str, Any] | None:
     """Read one message; None on a clean EOF before the length prefix."""
     head = _recv_exact(sock, 4)
     if head is None:
         return None
     (size,) = struct.unpack(">I", head)
-    if size > MAX_FRAME:
+    if size > max_size:
         raise ProtocolError(INTERNAL, f"frame too large ({size} bytes)")
     body = _recv_exact(sock, size)
     if body is None:
@@ -119,7 +120,7 @@ def server_handshake(sock: socket.socket, token: bytes, addon_version: str, pid:
     nonce = new_nonce()
     send_msg(sock, {"type": "hello", "proto": PROTOCOL_VERSION, "nonce": nonce,
                     "addon_version": addon_version, "pid": pid})
-    msg = recv_msg(sock)
+    msg = recv_msg(sock, MAX_HANDSHAKE_FRAME)
     if not msg or msg.get("type") != "auth":
         return False
     if not compatible(str(msg.get("proto", "0")), PROTOCOL_VERSION):
@@ -138,7 +139,7 @@ def client_handshake(sock: socket.socket, token: bytes) -> dict[str, Any]:
 
     Raises ProtocolError if the addon rejects us or fails to prove the token.
     """
-    hello = recv_msg(sock)
+    hello = recv_msg(sock, MAX_HANDSHAKE_FRAME)
     if not hello or hello.get("type") != "hello":
         raise ProtocolError(AUTH_FAILED, "no hello from addon")
     if not compatible(str(hello.get("proto", "0")), PROTOCOL_VERSION):
@@ -147,7 +148,7 @@ def client_handshake(sock: socket.socket, token: bytes) -> dict[str, Any]:
     nonce = new_nonce()
     send_msg(sock, {"type": "auth", "proto": PROTOCOL_VERSION, "nonce": nonce,
                     "mac": mac(token, "client", str(hello["nonce"]))})
-    welcome = recv_msg(sock)
+    welcome = recv_msg(sock, MAX_HANDSHAKE_FRAME)
     if not welcome or welcome.get("type") != "welcome":
         raise ProtocolError(AUTH_FAILED, "no welcome from addon")
     if not welcome.get("ok"):

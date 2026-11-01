@@ -289,6 +289,7 @@ class ChatPanel(QtWidgets.QDockWidget):
             self.input.clear()
             self._append(f"<p style='margin-top:10px'><b>You:</b> {html.escape(text)}</p>")
         self.last_text = text
+        self._note_pending_update()
         self.turn_results, self.turn_denied, self.max_result_chars = [], [], 0
         prompt = context_line() + "\n\n" + text
         doc = App.ActiveDocument
@@ -391,6 +392,14 @@ class ChatPanel(QtWidgets.QDockWidget):
     def _on_failed(self, message: str) -> None:
         self._busy(False)
         self._note(message, error=True)
+
+    def _note_pending_update(self) -> None:
+        from ..addon import pending_update
+
+        newer = pending_update()
+        if newer and not getattr(self, "_update_noted", False):
+            self._update_noted = True
+            self._note(f"ClaudeBridge {newer} is installed: restart FreeCAD to load it.")
 
     # ----- rendering -----
 

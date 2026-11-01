@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from . import paths, protocol
+from . import audit, paths, protocol
 
 
 class BridgeServer:
@@ -36,6 +36,7 @@ class BridgeServer:
         use_unix = self.transport == "unix" or (self.transport == "auto" and hasattr(socket, "AF_UNIX")
                                                  and sys.platform != "win32")
         if use_unix:
+            paths.remove_stale_sockets()
             path = paths.socket_path(self.pid)
             if os.path.exists(path):
                 os.unlink(path)
@@ -84,6 +85,7 @@ class BridgeServer:
                 token = paths.load_or_create_token()  # re-read so token rotation needs no restart
                 if not protocol.server_handshake(conn, token, self.addon_version, self.pid):
                     self.log("ClaudeBridge: rejected a connection (handshake failed)")
+                    audit.record("auth_failed", address=self.address)
                     return
                 conn.settimeout(None)
                 while True:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from . import platforms
 from .client import list_instances
 
 MAX_OUTPUT = 20000
+KEEP_WORKDIRS = 20  # older headless work folders are removed
 BANNER = re.compile(r"^(FreeCAD \d+\.\d+.*Libs:.*|\(C\) \d{4}-\d{4} FreeCAD contributors|"
                     r"FreeCAD is free and open-source software.*|.*LGPL2\+ license\.)$")
 
@@ -82,8 +84,11 @@ async def run_headless(script: str, timeout_s: float = 600) -> dict[str, Any]:
     cmd = find_freecadcmd()
     if not cmd:
         raise RuntimeError("freecadcmd not found; start FreeCAD once with the addon or run /freecad:setup")
-    workdir = Path(platforms.bridge_dir()) / "headless" / time.strftime("%Y%m%d-%H%M%S")
+    root = Path(platforms.bridge_dir()) / "headless"
+    workdir = root / time.strftime("%Y%m%d-%H%M%S")
     workdir.mkdir(parents=True, exist_ok=True)
+    for old in sorted(p for p in root.iterdir() if p.is_dir())[:-KEEP_WORKDIRS]:
+        shutil.rmtree(old, ignore_errors=True)
     script_path = workdir / "script.py"
     script_path.write_text(script, encoding="utf-8")
     wrapper = workdir / "wrapper.py"
@@ -109,6 +114,9 @@ async def run_headless(script: str, timeout_s: float = 600) -> dict[str, Any]:
             proc.kill()
             await proc.wait()
     parsed = parse_output(b"".join(chunks).decode("utf-8", "replace"))
+    platforms.audit_record("run_headless", script=script[:20_000], workdir=str(workdir), exit_code=proc.returncode,
+                           timed_out=timed_out, ok=parsed["status"] == "ok" and not timed_out,
+                           ms=round((time.monotonic() - t0) * 1000))
     return {"exit_code": proc.returncode, "timed_out": timed_out, "duration_s": round(time.monotonic() - t0, 1),
             "ok": parsed["status"] == "ok" and not timed_out, "result": parsed["result"],
             "output": parsed["output"], "workdir": str(workdir)}

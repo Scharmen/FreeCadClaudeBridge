@@ -108,3 +108,18 @@ def test_minor_versions_compatible():
 def test_mac_is_role_bound():
     token = protocol.new_token()
     assert protocol.mac(token, "client", "n") != protocol.mac(token, "server", "n")
+
+
+def test_handshake_rejects_large_frames_before_auth():
+    import socket
+    import struct
+
+    import pytest
+
+    from freecad_bridge import protocol
+
+    a, b = socket.socketpair()
+    with a, b:
+        a.sendall(struct.pack(">I", protocol.MAX_HANDSHAKE_FRAME + 1))
+        with pytest.raises(protocol.ProtocolError):
+            protocol.recv_msg(b, protocol.MAX_HANDSHAKE_FRAME)
