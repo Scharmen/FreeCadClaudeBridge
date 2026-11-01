@@ -111,9 +111,10 @@ FreeCadClaudeBridge/
 │   ├── addon/ClaudeBridge/      # FreeCAD addon
 │   │   ├── Init.py
 │   │   ├── InitGui.py
-│   │   ├── bridge/              # transport, protocol, executor, journal, inspect, snapshot
-│   │   ├── panel/               # chat panel: dock UI, Claude Code process, history
-│   │   └── Resources/icons/
+│   │   └── claudebridge/        # one package, so generic names don't clash on FreeCAD's sys.path
+│   │       ├── addon.py         # lifecycle, menu commands
+│   │       ├── bridge/          # transport, protocol, executor, ops, paths, childenv, serialize (+ journal, inspect, snapshot later)
+│   │       └── panel/           # chat panel: dock UI, Claude Code process, stream parser, secrets
 │   └── server/                  # Python package "freecad-bridge"
 │       ├── pyproject.toml       # entry points: freecad-bridge-mcp, freecad-bridge
 │       └── src/freecad_bridge/  # mcp_server, client, protocol, installer, platforms
@@ -178,7 +179,7 @@ The addon starts automatically with FreeCAD, accepts requests and runs them in t
 - **Stop:** The stop button sends SIGINT so Claude Code ends the turn cleanly; only after a grace period does `terminate()`/`kill()` follow. SIGTERM alone leaves the turn without a result.
 - **Automatic context:** Active document and current selection are prepended to each message as a short line, for example "Selection: Body/Pad001, Face6". So "make this face 2 mm thicker" is enough.
 - **Permissions:** Nobody can answer prompts in background mode (since Claude Code 2.1.302, `-p` starts in Manual mode). The panel therefore passes the allowed tools with `--allowedTools` and starts with `--permission-prompts none`. Denied calls arrive as `system/permission_denied` and in `result.permission_denials`; the panel shows them with an "allow for this session" button and resends the message with the extended list. Possible later: `--permission-prompt-tool` with a tool that asks directly in the panel.
-- **Path to Claude Code:** GUI apps on macOS don't inherit the shell's PATH. `/freecad:setup` therefore writes the absolute path of `claude` into the addon settings. With the absolute path, `claude` finds the subscription login even without a shell environment (Phase 0).
+- **Path to Claude Code:** GUI apps on macOS don't inherit the shell's PATH. `/freecad:setup` therefore records the absolute path of `claude` in `config.json` in the bridge directory (not in FreeCAD's parameters, which FreeCAD rewrites on exit). The MCP server refreshes `plugin_root` there on every start, so the panel's `--plugin-dir` follows plugin updates. With the absolute path, `claude` finds the subscription login even without a shell environment (Phase 0). Loading the plugin via `--plugin-dir` while it is also installed is harmless: Claude Code merges both into one plugin (Phase 1).
 - **History:** Conversations are saved per document and can be resumed; you can also continue the same session in the terminal with `claude --resume`.
 - **Login:** The "Subscription" setting uses the Claude Code login (start `claude` once in the terminal and log in). The "API key" setting passes the key at startup as the environment variable `ANTHROPIC_API_KEY`. The key lives in the system keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service), as a fallback in a file with permissions 0600, never in the FreeCAD parameters. The panel always shows which mode is active. According to the docs, `--bare` will become the default for `-p`; bare mode doesn't use the subscription login. The panel therefore never passes `--bare`, checks `apiKeySource` at startup and reports when subscription mode no longer applies.
 
@@ -404,6 +405,7 @@ The next phase starts only once the previous gate is met. Phase 5 is optional an
 - Login in the chat panel: subscription/API key toggle, key stored in the keychain, active mode displayed.
 - `clean_child_env()` for all child processes, startup check via `system/init`.
 - Remaining items from Phase 0: launch FreeCAD from the Dock and check the chat; try the Addon Manager with `<subdirectory>` on a test branch; check whether `ANTHROPIC_API_KEY` takes precedence over the subscription login.
+- **Result (2026-10-31):** implemented as 0.1.0; see `docs/phase1.md` for what is verified and what still needs a manual check (fresh user account, API key mode, Dock launch, Addon Manager).
 - **Gate:** On a fresh Mac user account, the three installation steps take under 5 minutes. In the chat panel in FreeCAD, Claude builds a cube, sketch and pad on request and exports STEP; the same works from the terminal. Both work once with the subscription and once with an API key. The GUI stays usable during the response, and the stop button aborts cleanly. Ctrl/Cmd+Z in FreeCAD undoes exactly the last Claude step. Faulty code leaves no object behind.
 
 **Phase 2: Full control (4 to 6 days)**

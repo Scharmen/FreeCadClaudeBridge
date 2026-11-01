@@ -1,0 +1,9 @@
+line-length = 120
+target-version = "py311"
+extend-exclude = ["spikes"]
+
+[lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[lint.isort]
+known-first-party = ["claudebridge", "freecad_bridge"]

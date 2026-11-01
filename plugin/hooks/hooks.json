@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx --from \"${CLAUDE_PLUGIN_ROOT}/server\" freecad-bridge doctor --quiet",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

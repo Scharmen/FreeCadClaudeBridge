@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 – Phase 1: MVP on macOS (2026-10-31)
+
+- Claude Code plugin `freecad` with marketplace `freecad-claude`, `/freecad:setup`, `/freecad:status`, SessionStart check and a `freecad` skill.
+- MCP server `freecad-bridge-mcp` (MCP SDK 2.x) with `status`, `get_tree`, `get_object`, `run_python`, `document`, `export`.
+- FreeCAD addon ClaudeBridge: autostart, discovery via instance files, Unix socket with mutual HMAC handshake, execution in the GUI thread with one undo transaction per call and rollback on errors, changes/errors in every response.
+- "Claude" chat panel in FreeCAD: Claude Code as an asynchronous QProcess with cleaned environment, streamed answers, tool rows, stop button (SIGINT), session resume per document, selection as context, subscription or API key (macOS Keychain).
+- Installer (`freecad-bridge install`) for macOS with backup of a previous addon and `--uninstall`; `freecad-bridge doctor`.
+- 45 unit tests and 15 GUI integration tests; CI for unit tests, lint and plugin validation.
+
 ## Phase 0 – Spikes (2026-10-31)
 
 - Added `docs/PLAN.md` and `CLAUDE.md`.
