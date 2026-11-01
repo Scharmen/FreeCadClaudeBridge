@@ -10,10 +10,11 @@ ADDON = ROOT / "plugin/addon/ClaudeBridge"
 SERVER = ROOT / "plugin/server"
 
 
-def test_protocol_copies_identical():
-    a = (ADDON / "claudebridge/bridge/protocol.py").read_bytes()
-    b = (SERVER / "src/freecad_bridge/protocol.py").read_bytes()
-    assert a == b, "protocol.py differs between addon and server"
+def test_shared_copies_identical():
+    for name in ("protocol.py", "settings.py"):
+        a = (ADDON / "claudebridge/bridge" / name).read_bytes()
+        b = (SERVER / "src/freecad_bridge" / name).read_bytes()
+        assert a == b, f"{name} differs between addon and server"
 
 
 def _versions():

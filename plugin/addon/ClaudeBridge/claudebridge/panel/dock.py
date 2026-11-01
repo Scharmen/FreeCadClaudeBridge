@@ -200,6 +200,8 @@ class ChatPanel(QtWidgets.QDockWidget):
         menu.addAction("Remove stored API key").triggered.connect(self.clear_api_key)
         menu.addSeparator()
         menu.addAction("New conversation").triggered.connect(self.new_conversation)
+        menu.addSeparator()
+        menu.addAction("Settings…").triggered.connect(self._open_settings)
         return menu
 
     def set_mode(self, mode: str) -> None:
@@ -392,6 +394,11 @@ class ChatPanel(QtWidgets.QDockWidget):
     def _on_failed(self, message: str) -> None:
         self._busy(False)
         self._note(message, error=True)
+
+    def _open_settings(self) -> None:
+        from .prefs import show
+
+        show()
 
     def _note_pending_update(self) -> None:
         from ..addon import pending_update

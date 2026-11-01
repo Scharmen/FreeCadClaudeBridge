@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 – settings (unreleased)
+
+- Settings you can change: in FreeCAD under *Preferences → Claude Bridge* (also *Claude → Settings…* and ⚙ → Settings… in the chat panel), in a terminal with `freecad-bridge settings [set <key> <value> | reset [<key>]]`, or with `/freecad:settings` in Claude Code.
+- Headless job limits: share of RAM kept free (15 %), minimum kept free (2 GB), the most one job may use (75 % of RAM), the size from which a job counts as the cause of low memory (512 MB), default time limit (600 s). Every value has an allowed range and is clamped; the page shows what the values mean on this computer.
+- The addon switches (autostart, chat panel, connection type) are on the same page.
+- Stored in `settings.json` in the bridge folder (only changed values; kept on uninstall unless `--purge`). `FREECAD_BRIDGE_HEADLESS_MAX_MB` still overrides the job limit. The settings module is an identical copy in addon and server, checked by CI.
+
 ## 1.1.1 – memory guard for run_headless (unreleased)
 
 - `run_headless` stops a job before it exhausts memory. The budget comes from the machine it runs on, at run time: the job is killed when the system's available memory drops below a reserve (15 % of RAM, at least 2 GB) while the job holds more than 512 MB, or when the job alone passes 75 % of RAM (`FREECAD_BRIDGE_HEADLESS_MAX_MB` overrides that cap). Polled every 50 ms through `libproc` (macOS), `/proc` (Linux) or the Win32 API; the whole process group is killed.

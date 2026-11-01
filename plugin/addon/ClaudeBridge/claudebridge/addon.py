@@ -14,7 +14,7 @@ from . import __version__
 
 PARAMS = "User parameter:BaseApp/Preferences/Mod/ClaudeBridge"
 COMMANDS = ["ClaudeBridge_TogglePanel", "ClaudeBridge_Status", "ClaudeBridge_Restart", "ClaudeBridge_RotateToken",
-            "ClaudeBridge_OpenLog"]
+            "ClaudeBridge_OpenLog", "ClaudeBridge_Settings"]
 _state: dict[str, Any] = {}
 
 
@@ -29,6 +29,12 @@ def log(msg: str) -> None:
 def boot() -> None:
     """Called from InitGui.py. Defers the real start until the event loop runs."""
     _register_commands()
+    try:
+        from .panel import prefs
+
+        prefs.register()
+    except Exception as e:
+        App.Console.PrintError(f"ClaudeBridge: could not add the preferences page: {e}\n")
     QtCore.QTimer.singleShot(0, start)
 
 
@@ -171,6 +177,12 @@ def open_log() -> None:
     QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
 
 
+def _show_settings() -> None:
+    from .panel import prefs
+
+    prefs.show()
+
+
 def _register_commands() -> None:
     if _state.get("commands"):
         return
@@ -181,4 +193,6 @@ def _register_commands() -> None:
     Gui.addCommand(COMMANDS[3], _Command("Rotate token", "Create a new shared token for Claude Code", rotate_token))
     Gui.addCommand(COMMANDS[4], _Command("Open audit log", "Open the log of everything Claude ran in FreeCAD",
                                          open_log))
+    Gui.addCommand(COMMANDS[5], _Command("Settings…", "Claude Bridge settings: chat panel, connection, memory "
+                                         "limits of headless jobs", _show_settings))
     _state["commands"] = True

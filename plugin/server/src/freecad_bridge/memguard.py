@@ -3,9 +3,13 @@
 A boolean on near-tangent freeform surfaces can make OpenCascade allocate without
 bound (seen: 140 GB). Instead of a fixed number, a job is stopped when
 
-- the system's available memory drops below a reserve (15 % of RAM, at least 2 GB)
-  while the job itself is a real contributor (over 512 MB), or
-- the job alone exceeds a hard cap (75 % of RAM, or FREECAD_BRIDGE_HEADLESS_MAX_MB).
+- the system's available memory drops below a reserve (default 15 % of RAM, at least
+  2 GB) while the job itself is a real contributor (default over 512 MB), or
+- the job alone exceeds a hard cap (default 75 % of RAM; FREECAD_BRIDGE_HEADLESS_MAX_MB
+  overrides it).
+
+The percentages and minimums are user settings (settings.py), applied to the RAM of
+the computer the job runs on.
 
 Standard library only: macOS (sysctl, vm_stat), Linux (/proc), Windows (Win32 API).
 """
@@ -17,13 +21,13 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from typing import Any
+
+from . import platforms, settings
 
 ENV_MAX_MB = "FREECAD_BRIDGE_HEADLESS_MAX_MB"
 MB = 1024 ** 2
 GB = 1024 ** 3
-RESERVE_FRACTION, RESERVE_MIN = 0.15, 2 * GB
-HARD_CAP_FRACTION = 0.75
-CONTRIBUTOR_MIN = 512 * MB
 POLL_S = 0.05
 GROUP_EVERY = 10  # also count other processes in the job's group every 10th poll (AppImages fork)
 
@@ -33,23 +37,26 @@ class Budget:
     total: int
     reserve: int
     hard_cap: int
+    contributor_min: int
 
     @classmethod
-    def for_total(cls, total: int, hard_cap: int | None = None) -> Budget:
-        return cls(total, max(RESERVE_MIN, int(total * RESERVE_FRACTION)),
-                   hard_cap if hard_cap is not None else int(total * HARD_CAP_FRACTION))
+    def for_total(cls, total: int, hard_cap: int | None = None,
+                  values: dict[str, Any] | None = None) -> Budget:
+        b = settings.memory_budget(total, values or settings.defaults())
+        return cls(total, b["reserve"], hard_cap if hard_cap is not None else b["hard_cap"], b["contributor_min"])
 
     @classmethod
     def current(cls) -> Budget:
+        """Budget for this computer now: user settings, then the environment override for the cap."""
         override = os.environ.get(ENV_MAX_MB)
         cap = int(override) * MB if override and override.isdigit() else None
-        return cls.for_total(total_memory(), cap)
+        return cls.for_total(total_memory(), cap, settings.load(platforms.bridge_dir()))
 
     def check(self, rss: int, available: int | None) -> str | None:
         """Why the job must stop now, or None."""
         if rss > self.hard_cap:
             return f"over the memory limit: job uses {rss // MB} MB, limit {self.hard_cap // MB} MB"
-        if available is not None and available < self.reserve and rss > CONTRIBUTOR_MIN:
+        if available is not None and available < self.reserve and rss > self.contributor_min:
             return (f"system memory nearly exhausted: {available // MB} MB left (reserve {self.reserve // MB} MB), "
                     f"job uses {rss // MB} MB")
         return None
@@ -61,11 +68,7 @@ class Budget:
 # ---------- system figures
 
 def total_memory() -> int:
-    if sys.platform == "darwin":
-        return int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout)
-    if sys.platform == "win32":
-        return _win_memory_status()[0]
-    return _meminfo()["MemTotal"]
+    return settings.total_memory()
 
 
 def available_memory() -> int | None:

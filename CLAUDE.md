@@ -21,7 +21,7 @@ Control FreeCAD by chat, in the "Claude" chat panel inside FreeCAD or in Claude 
 - Skill references: every ```python block in `plugin/skills/freecad/references/` must pass `tests/gui/test_references.py` against FreeCAD.
 - Every child process started from FreeCAD (Claude Code, `uvx`, `freecadcmd`) gets a cleaned environment; otherwise FreeCAD passes on `PYTHONHOME` and bundle paths.
 - Addon: standard library only plus FreeCAD's bundled Python (macOS bundle 1.1.x: 3.11) and PySide; no third-party packages.
-- `protocol.py` exists as an identical copy in addon and server; CI checks this.
+- `protocol.py` and `settings.py` exist as identical copies in addon and server; CI checks this.
 - Plugin, addon and package versions are identical.
 - ruff, pytest, type annotations everywhere.
 

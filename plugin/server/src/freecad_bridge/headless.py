@@ -13,7 +13,7 @@ from typing import Any
 
 import anyio
 
-from . import memguard, platforms
+from . import memguard, platforms, settings
 from .client import list_instances
 
 MAX_OUTPUT = 20000
@@ -80,7 +80,9 @@ def parse_output(stdout: str) -> dict[str, Any]:
     return {"status": status, "result": result, "output": text}
 
 
-async def run_headless(script: str, timeout_s: float = 600) -> dict[str, Any]:
+async def run_headless(script: str, timeout_s: float | None = None) -> dict[str, Any]:
+    if timeout_s is None:
+        timeout_s = float(settings.load(platforms.bridge_dir())["headless.timeout_s"])
     cmd = find_freecadcmd()
     if not cmd:
         raise RuntimeError("freecadcmd not found; start FreeCAD once with the addon or run /freecad:setup")

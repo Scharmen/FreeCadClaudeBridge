@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
 
-from . import __version__, installer, platforms, protocol
+from . import __version__, installer, memguard, platforms, protocol, settings
 from .client import BridgeError, call, fix_for, list_instances
 
 
@@ -61,6 +62,35 @@ def doctor(quiet: bool = False, addon_src: str | None = None) -> int:
     return 1 if any(level == "FAIL" for level, _ in lines) and not quiet else 0
 
 
+def settings_cmd(action: str | None, key: str | None, value: str | None) -> int:
+    bd = platforms.bridge_dir()
+    try:
+        if action == "set":
+            if key is None or value is None:
+                print("usage: freecad-bridge settings set <key> <value>")
+                return 2
+            settings.save(bd, {key: value})
+        elif action == "reset":
+            settings.reset(bd, key)
+    except KeyError as e:
+        print(f"error: {e.args[0]}")
+        return 2
+    except ValueError as e:
+        print(f"error: {e}")
+        return 2
+    values = settings.load(bd)
+    print(f"Settings ({settings.path(bd)}):")
+    for k, (default, lo, hi, unit, text) in settings.SCHEMA.items():
+        mark = "" if values[k] == default else "  (changed)"
+        print(f"  {k} = {values[k]:g} {unit}{mark}\n      {text}; default {default:g}, allowed {lo:g}-{hi:g}")
+    b = memguard.Budget.current()
+    print(f"On this computer ({b.total / settings.GB:.1f} GB RAM): {b.reserve / settings.GB:.1f} GB always stay free, "
+          f"a headless job may use up to {b.hard_cap / settings.GB:.1f} GB.")
+    if memguard.ENV_MAX_MB in os.environ:
+        print(f"  note: {memguard.ENV_MAX_MB} overrides the job limit")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="freecad-bridge", description=f"FreeCAD × Claude Code bridge {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -76,6 +106,10 @@ def main(argv: list[str] | None = None) -> int:
     p_tok = sub.add_parser("token", help="manage the shared token")
     p_tok.add_argument("--rotate", action="store_true", help="create a new token")
     sub.add_parser("instances", help="list running FreeCAD instances as JSON")
+    p_set = sub.add_parser("settings", help="show or change user settings (memory limits of headless jobs, ...)")
+    p_set.add_argument("action", nargs="?", choices=["show", "set", "reset"], default="show")
+    p_set.add_argument("key", nargs="?")
+    p_set.add_argument("value", nargs="?")
     args = parser.parse_args(argv)
 
     if args.cmd == "install":
@@ -92,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(platforms.token_path() if platforms.read_token() else "no token")
         return 0
+    if args.cmd == "settings":
+        return settings_cmd(args.action, args.key, args.value)
     if args.cmd == "instances":
         print(json.dumps([i.info for i in list_instances()], indent=2))
         return 0

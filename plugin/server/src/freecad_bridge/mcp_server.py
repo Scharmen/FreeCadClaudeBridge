@@ -318,12 +318,13 @@ async def snapshot(action: Literal["create", "list", "restore"] = "list", doc: s
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
           structured_output=False)
-async def run_headless(script: str, timeout_s: float = 600) -> str:
+async def run_headless(script: str, timeout_s: float | None = None) -> str:
     """Run a Python script in a separate freecadcmd process (no GUI, no open documents):
     for heavy booleans, fillets on big models, batch conversions. A crash or a long run
     never blocks the user's FreeCAD. `WORKDIR` is a scratch folder for files; set `_result`
     to return a value. Open/save documents by path inside the script. A job that would exhaust
-    memory (budget derived from this machine's RAM) is stopped and reported in `killed`."""
+    memory (budget derived from this machine's RAM) is stopped and reported in `killed`.
+    Without timeout_s the user's default applies (setting headless.timeout_s, 600 s)."""
     try:
         return _dump(await headless.run_headless(script, timeout_s))
     except RuntimeError as e:
