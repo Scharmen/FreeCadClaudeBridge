@@ -8,7 +8,7 @@ You control the user's running FreeCAD through the `freecad` MCP tools. The user
 
 ## Flow
 
-1. Start with `status` (is FreeCAD running, which document is active, what is selected), then `get_tree`.
+1. Start with `status` (is FreeCAD running, which document is active, what is selected), then `get_tree`. If `status` warns that several FreeCADs are running and the user has not said which one, call `instances` and `select_instance` (by document name) before changing anything.
 2. Change things with `run_python`. Predefined: `App`, `Gui`, `FreeCAD`, `FreeCADGui`, `Part`, `Sketcher`, `doc` (active document), `Vector`, `Placement`, `Rotation`. Variables persist between calls. Set `_result` to return a value.
 3. After each change check `changes` and `errors` in the response, and confirm dimensions with `get_object` (volume, bounding box) instead of assuming.
 4. No screenshots; text is enough.

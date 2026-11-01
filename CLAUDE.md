@@ -5,7 +5,7 @@
 Control FreeCAD by chat, in the "Claude" chat panel inside FreeCAD or in Claude Code. The full plan is in `docs/PLAN.md` (kept locally, not in Git); it is binding.
 
 - **Plugin `freecad`** (Claude Code, marketplace `freecad-claude` = this repo `Scharmen/FreeCadClaudeBridge`) bundles MCP server, skill, `/freecad:setup`, `/freecad:status` and a SessionStart hook.
-- **MCP server `freecad-bridge-mcp`** (stdio, Python 3.12, official MCP SDK, started via `uvx`) offers 19 generic tools, first of all `run_python`.
+- **MCP server `freecad-bridge-mcp`** (stdio, Python 3.12, official MCP SDK, started via `uvx`) offers 21 generic tools, first of all `run_python`.
 - **Transport:** Unix socket (macOS/Linux) or TCP on 127.0.0.1 only (Windows, fallback); 4-byte length prefix plus JSON, mutual HMAC-SHA256 handshake with a 32-byte token.
 - **Addon `ClaudeBridge`** in the FreeCAD GUI process: a listener thread accepts, execution happens in the GUI thread via Qt signal; each call is exactly one undo transaction. The journal distinguishes `user`/`claude`.
 - **Chat panel** in the addon starts `claude -p --output-format stream-json` as an asynchronous `QProcess`; login via subscription or API key (`ANTHROPIC_API_KEY`, key in the system keychain).

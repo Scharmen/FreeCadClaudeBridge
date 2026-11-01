@@ -15,6 +15,8 @@ from freecad_bridge import __version__, client, platforms, protocol
 def bridge(tmp_path, monkeypatch):
     d = tmp_path / "b"
     monkeypatch.setenv("FREECAD_BRIDGE_DIR", str(d))
+    monkeypatch.delenv(client.INSTANCE_ENV, raising=False)
+    monkeypatch.setattr(client, "_selected", None)
     (d / "instances").mkdir(parents=True)
     platforms.write_token(protocol.new_token())
     return d
@@ -120,3 +122,46 @@ def test_wrong_token_fails(bridge):
     finally:
         platforms.read_token = real_read
         assert platforms.read_token() == original
+
+
+# ---------- several FreeCAD instances ----------
+
+def _two_instances(bridge):
+    """Two fake FreeCADs; pids must be alive, so use this process and its parent."""
+    older, newer = os.getppid(), os.getpid()
+    echo = lambda pid: (lambda m: {"ok": True, "result": {"pid": pid, "op": m["op"]}})  # noqa: E731
+    fake_addon(bridge, older, echo(older), started=time.time() - 100)
+    fake_addon(bridge, newer, echo(newer), started=time.time())
+    return older, newer
+
+
+def test_several_instances_use_newest_and_warn(bridge):
+    older, newer = _two_instances(bridge)
+    res = client.call("get_tree")
+    assert res.result["pid"] == newer
+    assert any("2 FreeCAD instances" in w and "select_instance" in w for w in res.warnings)
+
+
+def test_selection_sticks_and_silences_warning(bridge):
+    older, newer = _two_instances(bridge)
+    client.select_instance(older)
+    res = client.call("get_tree")
+    assert res.result["pid"] == older and res.warnings == []
+    assert client.call("get_tree", instance=newer).result["pid"] == newer, "explicit instance wins"
+    client.select_instance(None)
+    assert client.call("get_tree").result["pid"] == newer
+
+
+def test_env_pins_the_panel_to_its_own_freecad(bridge, monkeypatch):
+    older, newer = _two_instances(bridge)
+    monkeypatch.setenv(client.INSTANCE_ENV, str(older))
+    res = client.call("get_tree")
+    assert res.result["pid"] == older and res.warnings == []
+
+
+def test_selected_instance_gone_is_an_error_not_a_fallback(bridge):
+    _two_instances(bridge)
+    client.select_instance(999999)
+    with pytest.raises(client.BridgeError) as e:
+        client.call("get_tree")
+    assert e.value.code == client.NOT_RUNNING and "999999" in e.value.message

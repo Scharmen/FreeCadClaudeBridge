@@ -13,7 +13,9 @@ from typing import Any
 from . import __version__, platforms, protocol
 
 NOT_RUNNING = "NOT_RUNNING"
+INSTANCE_ENV = "FREECAD_BRIDGE_INSTANCE"  # set by the chat panel: the FreeCAD it runs in
 _ids = itertools.count(1)
+_selected: int | None = None  # chosen with select_instance, for the lifetime of this MCP server
 
 # What to do about errors that come from setup or the connection rather than from FreeCAD code.
 FIXES = {
@@ -103,16 +105,43 @@ def list_instances(cleanup: bool = True) -> list[Instance]:
     return sorted(out, key=lambda i: i.started, reverse=True)
 
 
-def pick_instance(pid: int | None = None) -> Instance:
+def select_instance(pid: int | None) -> None:
+    """Make `pid` the default instance for later calls; None goes back to automatic choice."""
+    global _selected
+    _selected = pid
+
+
+def default_instance() -> int | None:
+    """The selected instance, else the one the chat panel pinned through the environment."""
+    if _selected is not None:
+        return _selected
+    try:
+        return int(os.environ[INSTANCE_ENV])
+    except (KeyError, ValueError):
+        return None
+
+
+def choose_instance(pid: int | None = None) -> tuple[Instance, list[Instance]]:
+    """The instance to talk to plus the other running ones it was chosen over automatically.
+
+    An explicit or selected instance that is gone is an error: silently switching to another
+    FreeCAD could change the wrong document.
+    """
     instances = list_instances()
-    if pid is not None:
+    wanted = pid if pid is not None else default_instance()
+    if wanted is not None:
         for inst in instances:
-            if inst.pid == pid:
-                return inst
-        raise BridgeError(NOT_RUNNING, f"no FreeCAD instance with pid {pid}")
+            if inst.pid == wanted:
+                return inst, []
+        raise BridgeError(NOT_RUNNING, f"the selected FreeCAD (pid {wanted}) is not running; call `instances` and "
+                          "`select_instance` to pick another one.")
     if not instances:
         raise BridgeError(NOT_RUNNING, "FreeCAD with the ClaudeBridge addon is not running.")
-    return instances[0]
+    return instances[0], instances[1:]
+
+
+def pick_instance(pid: int | None = None) -> Instance:
+    return choose_instance(pid)[0]
 
 
 def connect(inst: Instance, timeout: float) -> socket.socket:
@@ -138,23 +167,28 @@ class CallResult:
     result: Any
     instance: Instance
     hello: dict[str, Any]
+    others: list[Instance] = field(default_factory=list)
 
     @property
     def warnings(self) -> list[str]:
+        out = []
+        if self.others:
+            out.append(f"{len(self.others) + 1} FreeCAD instances are running; this went to the newest (pid "
+                       f"{self.instance.pid}). Call `instances` and `select_instance` to choose another.")
         addon = self.hello.get("addon_version")
         if not addon or addon == __version__:
-            return []
+            return out
         from .installer import version_tuple  # installer imports this module
 
         if version_tuple(addon) < version_tuple(__version__):
-            return [f"FreeCAD still runs ClaudeBridge {addon}; restart FreeCAD to load {__version__}."]
-        return [f"FreeCAD runs ClaudeBridge {addon}, newer than this plugin ({__version__}): "
+            return [*out, f"FreeCAD still runs ClaudeBridge {addon}; restart FreeCAD to load {__version__}."]
+        return [*out, f"FreeCAD runs ClaudeBridge {addon}, newer than this plugin ({__version__}): "
                 "run `claude plugin update freecad@freecad-claude`."]
 
 
 def call(op: str, args: dict[str, Any] | None = None, timeout_s: float = 60,
          instance: int | None = None) -> CallResult:
-    inst = pick_instance(instance)
+    inst, others = choose_instance(instance)
     token = platforms.read_token()
     if token is None:
         raise BridgeError(protocol.AUTH_FAILED, "no token file")
@@ -180,4 +214,4 @@ def call(op: str, args: dict[str, Any] | None = None, timeout_s: float = 60,
         err = resp.get("error") or {}
         raise BridgeError(err.get("code", protocol.INTERNAL), err.get("message", "unknown error"),
                           err.get("traceback"))
-    return CallResult(resp.get("result"), inst, hello)
+    return CallResult(resp.get("result"), inst, hello, others)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 – Phase 5: several FreeCAD instances (unreleased)
+
+- New tools `instances` (every running FreeCAD with pid, versions, start time and open documents) and `select_instance` (by pid or by document name/label; without arguments back to automatic). 21 tools in total.
+- The selection lasts for the Claude Code session; a selected FreeCAD that has quit is an error, never a silent switch to another one.
+- Without a selection, calls still go to the newest FreeCAD, and the result warns when others are running.
+- Fixed: the chat panel of an older FreeCAD window controlled the newest one. It now pins its own FreeCAD (`FREECAD_BRIDGE_INSTANCE`).
+- Phase 5 options Flatpak/Snap, WSL and network access with TLS are not built.
+
 ## 1.0.0 – Phase 4: hardening (unreleased, tagged after the manual acceptance on Windows 11 and Ubuntu)
 
 - Updates need only a FreeCAD restart: after a plugin update the SessionStart hook and the MCP server point the config at the new plugin and replace an older addon (backups outside `Mod`, last 3 kept, never a downgrade). The chat panel, `/freecad:status` and tool results say when FreeCAD still runs the old addon.

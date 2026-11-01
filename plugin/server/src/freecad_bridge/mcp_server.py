@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import sys
+import time
 from typing import Any, Literal
 
 import anyio
@@ -17,7 +18,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
-from . import __version__, headless, installer
+from . import __version__, client, headless, installer
 from .client import NOT_RUNNING, BridgeError, call, fix_for
 
 MAX_CHARS = 38000  # ~10k tokens; Claude Code warns above that
@@ -77,6 +78,78 @@ async def status(instance: int | None = None) -> str:
         if str(e).startswith(NOT_RUNNING):
             return _dump({"connected": False, "server_version": __version__, "hint": str(e)})
         raise
+
+
+async def _instance_infos() -> list[dict[str, Any]]:
+    """Every running FreeCAD with its open documents; queried in parallel, busy ones without details."""
+    instances = await anyio.to_thread.run_sync(client.list_instances)
+    default = client.default_instance()
+    infos: list[dict[str, Any]] = []
+
+    async def one(inst: client.Instance) -> None:
+        info: dict[str, Any] = {
+            "pid": inst.pid, "freecad_version": inst.info.get("freecad_version"),
+            "addon_version": inst.info.get("addon_version"),
+            "started": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(inst.started)),
+            "selected": inst.pid == default}
+        try:
+            st = (await anyio.to_thread.run_sync(lambda: call("status", timeout_s=5, instance=inst.pid))).result
+            info.update(documents=[{"name": d["name"], "label": d["label"], "modified": d.get("modified")}
+                                   for d in st.get("documents", [])],
+                        active_document=st.get("active_document"), busy=st.get("busy"))
+        except BridgeError as e:
+            info["error"] = f"{e.code}: {e.message}"
+        infos.append(info)
+
+    async with anyio.create_task_group() as tg:
+        for inst in instances:
+            tg.start_soon(one, inst)
+    return sorted(infos, key=lambda i: i["started"], reverse=True)
+
+
+def _match_document(infos: list[dict[str, Any]], document: str) -> dict[str, Any]:
+    """The one instance with a document whose name or label matches (case-insensitive)."""
+    want = document.casefold()
+    hits = [i for i in infos if any(want in (d["name"].casefold(), d["label"].casefold())
+                                    for d in i.get("documents", []))]
+    if len(hits) == 1:
+        return hits[0]
+    open_docs = sorted({d["label"] for i in infos for d in i.get("documents", [])})
+    if not hits:
+        raise ToolError(f"no running FreeCAD has a document '{document}' open; open documents: "
+                        f"{', '.join(open_docs) or 'none'}")
+    raise ToolError(f"'{document}' is open in several FreeCADs (pids {', '.join(str(i['pid']) for i in hits)}); "
+                    "select one by pid")
+
+
+@mcp.tool(annotations=READ, structured_output=False)
+async def instances() -> str:
+    """All running FreeCAD instances with pid, versions, start time, open documents and which
+    one is selected. Use it when status warns that several FreeCADs are running."""
+    infos = await _instance_infos()
+    if not infos:
+        return _dump({"instances": [], "hint": f"{NOT_RUNNING}: {fix_for(NOT_RUNNING)}"})
+    return _dump({"instances": infos, "automatic": client.default_instance() is None})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
+                                      openWorldHint=False), structured_output=False)
+async def select_instance(pid: int | None = None, document: str | None = None) -> str:
+    """Choose which FreeCAD all further calls go to: by `pid`, or by the name or label of a
+    document open in it. Without arguments, go back to the automatic choice (the newest).
+    The choice lasts for this Claude Code session."""
+    infos = await _instance_infos()
+    if pid is None and document is None:
+        client.select_instance(None)
+        return _dump({"selected": None, "note": "automatic: calls go to the newest FreeCAD", "running": len(infos)})
+    if document is not None:
+        target = _match_document(infos, document)
+    else:
+        target = next((i for i in infos if i["pid"] == pid), None)
+        if target is None:
+            raise ToolError(f"no FreeCAD with pid {pid}; running: {', '.join(str(i['pid']) for i in infos) or 'none'}")
+    client.select_instance(target["pid"])
+    return _dump({"selected": {**target, "selected": True}})
 
 
 @mcp.tool(annotations=READ, structured_output=False)

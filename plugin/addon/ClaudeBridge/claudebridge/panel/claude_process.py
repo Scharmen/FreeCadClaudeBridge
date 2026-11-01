@@ -69,6 +69,7 @@ class ClaudeRun(QtCore.QObject):
         env = clean_child_env(dict(os.environ), App.getHomePath(),
                               os.path.join(App.getUserAppDataDir(), "Mod"))
         env.pop("ANTHROPIC_API_KEY", None)
+        env["FREECAD_BRIDGE_INSTANCE"] = str(os.getpid())  # the MCP server talks to this FreeCAD, not the newest
         if self.mode == "api_key":
             key = secrets.get_api_key()
             if not key:
