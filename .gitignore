@@ -12,3 +12,6 @@ build/
 docs/PLAN.md
 docs/spikes.md
 docs/phase*.md
+
+# Scenario run output
+tests/scenarios/results.json

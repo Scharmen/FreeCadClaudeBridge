@@ -1,6 +1,6 @@
 [project]
 name = "freecad-bridge"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server and installer that connect Claude Code to a running FreeCAD"
 readme = "README.md"
 license = "MIT"
@@ -20,3 +20,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/freecad_bridge"]
+
+[tool.uv]
+# uvx --from <this dir> rebuilds only when a cache key changes; include the sources so code edits
+# take effect without a version bump (by default only pyproject.toml counts).
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]

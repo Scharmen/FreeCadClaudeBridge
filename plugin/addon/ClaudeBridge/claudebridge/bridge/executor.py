@@ -18,6 +18,8 @@ from PySide import QtCore
 from . import protocol
 
 BUSY_WAIT_S = 30.0
+READ_ONLY_OPS = {"status_gui", "get_tree", "get_object", "inspect_shape", "inspect_sketch", "get_changes",
+                 "get_console", "list_commands"}
 
 
 class OpError(Exception):
@@ -40,9 +42,20 @@ class Executor(QtCore.QObject):
         self.namespace: dict[str, Any] = {}
         self.request.connect(self._run, QtCore.Qt.QueuedConnection)
         from . import ops
+        from .console import ConsoleBuffer
+        from .journal import Journal, install_observers
 
         self.ops = ops
         self.recorder = ops.ChangeRecorder()
+        self.journal = Journal()
+        self._observers = install_observers(self.journal)
+        self.console = ConsoleBuffer()
+        try:
+            from .console import ReportViewWatcher
+
+            self._console_watcher = ReportViewWatcher(self.console)
+        except Exception:  # Report view not available; get_console stays empty
+            self._console_watcher = None
 
     @property
     def busy(self) -> bool:
@@ -56,7 +69,7 @@ class Executor(QtCore.QObject):
             return {"ok": False, "error": protocol.error(
                 protocol.GUI_BUSY, "FreeCAD's GUI thread is still working on an earlier call")}
         fut: Future = Future()
-        self.request.emit((op, args, fut))
+        self.request.emit((op, {**args, "_timeout": timeout}, fut))
         try:
             return fut.result(timeout=timeout)
         except FutureTimeout:
@@ -68,6 +81,7 @@ class Executor(QtCore.QObject):
     def _run(self, item: tuple) -> None:
         op, args, fut = item
         self._busy.set()
+        self.journal.claude_active = op not in READ_ONLY_OPS
         try:
             if not fut.set_running_or_notify_cancel():
                 return
@@ -82,5 +96,6 @@ class Executor(QtCore.QObject):
                 fut.set_result({"ok": False, "error": protocol.error(
                     protocol.INTERNAL, f"{type(e).__name__}: {e}", traceback.format_exc())})
         finally:
+            self.journal.claude_active = False
             self._busy.clear()
             self._slot.release()

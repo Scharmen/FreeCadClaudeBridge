@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 – Phase 2: full control (2026-10-31)
+
+- 13 new MCP tools (19 in total): `inspect_shape`, `inspect_sketch`, `get_changes`, `get_console`, `api_help`, `list_commands`, `run_command`, `task_dialog`, `selection`, `import`, `view` (optional screenshot), `run_headless` (separate `freecadcmd` process), `snapshot`.
+- Journal of GUI events with source `user`/`claude`, Report view capture, time limit for Python loops (trace hook, rolled back), response size cap, snapshots before closing unsaved documents.
+- Skill references for Part, PartDesign, Sketcher, Assembly, TechDraw, VarSet/Spreadsheet and export; every snippet is tested against FreeCAD 1.1.
+- Chat panel: conversation per document, link to allow a blocked tool, change/error summary per answer, picture of the 3D view.
+- Fixed: tool results were double-encoded by the MCP SDK's structured output; `uvx` did not rebuild after source changes.
+- Verified with six reference scenarios end-to-end from the chat panel and a 10-minute headless job with a responsive GUI.
+
 ## 0.1.0 – Phase 1: MVP on macOS (2026-10-31)
 
 - Claude Code plugin `freecad` with marketplace `freecad-claude`, `/freecad:setup`, `/freecad:status`, SessionStart check and a `freecad` skill.

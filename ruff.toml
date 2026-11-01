@@ -7,3 +7,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [lint.isort]
 known-first-party = ["claudebridge", "freecad_bridge"]
+
+[lint.per-file-ignores]
+# Scenario prompts and bridge check code are long string literals.
+"tests/scenarios/run_scenarios.py" = ["E501"]

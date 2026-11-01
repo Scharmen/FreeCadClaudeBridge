@@ -2,7 +2,7 @@
 
 Control FreeCAD by chat with Claude, either in a **"Claude" chat panel inside FreeCAD** or from **Claude Code**. Claude works on your open document through FreeCAD's Python API: it creates and changes geometry, reads the model tree and properties, and exports files. Every Claude step is exactly one undo step, and failed code leaves nothing behind.
 
-> Status: 0.1.0 (MVP, macOS). Windows and Linux support is planned. See [CHANGELOG.md](CHANGELOG.md).
+> Status: 0.2.0 (macOS). Windows and Linux support is planned. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
@@ -20,13 +20,18 @@ Check everything with `/freecad:status`. Remove it with `/freecad:setup --uninst
 
 ## Use
 
-- **In FreeCAD:** type into the Claude panel, e.g. "Make a 40×30×10 mm block with a 10 mm hole in the middle and export it as STEP to ~/Desktop/block.step". The active document and your current selection are sent along, so "make this face 2 mm thicker" works. Tool calls show up as rows; **Stop** ends the turn. Toggle the panel with Ctrl+Alt+K or the *Claude* menu of the "Claude Bridge" workbench.
+- **In FreeCAD:** type into the Claude panel, e.g. "Make a 40×30×10 mm block with a 10 mm hole in the middle and export it as STEP to ~/Desktop/block.step". The active document and your current selection are sent along, so "make this face 2 mm thicker" works. Tool calls show up as rows, followed by a summary of created/changed objects and any errors; **Stop** ends the turn. Each document keeps its own conversation; 📷 inserts a picture of the 3D view. If Claude needs a tool the panel doesn't allow, a link lets you allow it for that conversation. Toggle the panel with Ctrl+Alt+K or the *Claude* menu of the "Claude Bridge" workbench.
 - **In Claude Code:** just ask; the `freecad` tools talk to the running FreeCAD.
 - **Login:** the panel uses your Claude subscription (Claude Code's login) by default. Switch to pay-as-you-go with **⚙ → Use API key**; the key is stored in the macOS Keychain, never in FreeCAD's settings.
 
-## Tools (Phase 1)
+## Tools
 
-`status`, `get_tree`, `get_object`, `run_python`, `document`, `export`. In Claude Code they are named `mcp__plugin_freecad_freecad__<tool>`; allow all of them with `mcp__plugin_freecad_freecad__*` in `permissions.allow` (note that `run_python` runs arbitrary code in FreeCAD).
+19 tools; in Claude Code they are named `mcp__plugin_freecad_freecad__<tool>`.
+
+- **Read:** `status`, `get_tree`, `get_object`, `inspect_shape` (faces/edges with geometry), `inspect_sketch` (constraints, degrees of freedom, conflicts), `get_changes` (what you did in the GUI meanwhile), `get_console` (Report view), `api_help` (API of the installed FreeCAD), `list_commands`.
+- **Act:** `run_python` (one undo step per call, rolled back on errors), `run_command`, `task_dialog`, `selection`, `document`, `export`, `import`, `view` (optional screenshot), `run_headless` (heavy work in a separate `freecadcmd` process so FreeCAD stays responsive), `snapshot`.
+
+Allow all of them with `mcp__plugin_freecad_freecad__*` in `permissions.allow` (note that `run_python` runs arbitrary code in FreeCAD). The bundled skill carries tested FreeCAD 1.1 patterns for Part, PartDesign, Sketcher, Assembly, TechDraw, VarSet/Spreadsheet and export.
 
 ## Security
 
@@ -36,12 +41,12 @@ The addon listens only locally (Unix socket with permissions 0600) and both side
 
 ```bash
 make test     # unit tests, no FreeCAD needed
-make itest    # GUI integration tests against a running FreeCAD with the addon
+make itest    # GUI integration tests against a running FreeCAD with the addon (incl. every skill snippet)
 make lint
 make validate # claude plugin validate .
 ```
 
-Layout: `plugin/` is the Claude Code plugin (`server/` = Python package `freecad-bridge`, `addon/ClaudeBridge/` = FreeCAD addon, `skills/`, `commands/`, `hooks/`). `uv run --project plugin/server …` always uses the current code; `uvx --from plugin/server` caches the built package. Conventions are in [CLAUDE.md](CLAUDE.md).
+Layout: `plugin/` is the Claude Code plugin (`server/` = Python package `freecad-bridge`, `addon/ClaudeBridge/` = FreeCAD addon, `skills/`, `commands/`, `hooks/`). `uvx --from plugin/server` rebuilds automatically after code changes (sources are uv cache keys). Restart FreeCAD to load a changed addon. Conventions are in [CLAUDE.md](CLAUDE.md).
 
 ## License
 

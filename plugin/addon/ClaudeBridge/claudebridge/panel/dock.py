@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import os
@@ -15,7 +16,7 @@ from PySide import QtCore, QtGui, QtWidgets
 from ..bridge import paths
 from . import secrets
 from .claude_process import ClaudeRun
-from .stream import check_init, short_tool_name
+from .stream import check_init, short_tool_name, turn_summary
 
 PARAMS = "User parameter:BaseApp/Preferences/Mod/ClaudeBridge"
 OBJECT_NAME = "ClaudeChatPanel"
@@ -46,6 +47,42 @@ def _save_sessions(data: dict[str, str]) -> None:
             json.dump(data, f, indent=2)
     except OSError:
         pass
+
+
+def _history_path(key: str) -> str:
+    return os.path.join(paths.bridge_dir(), "history", hashlib.sha1(key.encode()).hexdigest()[:16] + ".html")
+
+
+def _load_history(key: str) -> str:
+    try:
+        with open(_history_path(key), encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _save_history(key: str, content: str) -> None:
+    if key == NO_DOC:
+        return
+    try:
+        os.makedirs(os.path.dirname(_history_path(key)), exist_ok=True)
+        with open(_history_path(key), "w", encoding="utf-8") as f:
+            f.write(content)
+    except OSError:
+        pass
+
+
+class _ActiveDocWatcher:
+    """Switch the panel's conversation when the user activates another document."""
+
+    def __init__(self, panel: ChatPanel) -> None:
+        self.panel = panel
+
+    def slotActivateDocument(self, doc: Any) -> None:  # noqa: N802 (FreeCAD API)
+        QtCore.QTimer.singleShot(0, self.panel.switch_document)
+
+    def slotDeletedDocument(self, doc: Any) -> None:  # noqa: N802
+        QtCore.QTimer.singleShot(0, self.panel.switch_document)
 
 
 def _doc_key() -> str:
@@ -88,6 +125,12 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.tool_rows: dict[str, tuple[str, float]] = {}
         self.text_open = False
         self.turn_started = 0.0
+        self.current_key = _doc_key()
+        self.allowed_extra: dict[str, list[str]] = {}  # per conversation, approved via the panel's links
+        self.last_text = ""
+        self.turn_results: list[str] = []
+        self.turn_denied: list[str] = []
+        self.max_result_chars = 0
 
         body = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(body)
@@ -100,11 +143,17 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.menu_btn.setText("⚙")
         self.menu_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.menu_btn.setMenu(self._build_menu())
+        self.camera_btn = QtWidgets.QToolButton()
+        self.camera_btn.setText("📷")
+        self.camera_btn.setToolTip("Insert a picture of the 3D view into the conversation")
+        self.camera_btn.clicked.connect(self.insert_view_image)
+        head.addWidget(self.camera_btn)
         head.addWidget(self.menu_btn)
         lay.addLayout(head)
 
         self.view = QtWidgets.QTextBrowser()
-        self.view.setOpenExternalLinks(True)
+        self.view.setOpenLinks(False)
+        self.view.anchorClicked.connect(self._on_link)
         lay.addWidget(self.view, 1)
 
         self.input = _Input()
@@ -128,6 +177,9 @@ class ChatPanel(QtWidgets.QDockWidget):
 
         self.setWidget(body)
         self._update_mode_label()
+        self.view.setHtml(_load_history(self.current_key))
+        self._doc_watcher = _ActiveDocWatcher(self)
+        App.addDocumentObserver(self._doc_watcher)
 
     # ----- settings -----
 
@@ -184,19 +236,60 @@ class ChatPanel(QtWidgets.QDockWidget):
         self._note("API key removed. Mode: subscription.")
 
     def new_conversation(self) -> None:
-        self.sessions.pop(_doc_key(), None)
+        key = _doc_key()
+        self.sessions.pop(key, None)
+        self.allowed_extra.pop(key, None)
         _save_sessions(self.sessions)
         self.view.clear()
         self._note("New conversation.")
+        _save_history(key, self.view.toHtml())
+
+    def switch_document(self) -> None:
+        """Show the conversation of the now active document (deferred while Claude is working)."""
+        key = _doc_key()
+        if key == self.current_key or (self.run and self.run.running()):
+            return
+        _save_history(self.current_key, self.view.toHtml())
+        self.current_key = key
+        self.view.setHtml(_load_history(key))
+        self._scroll()
+
+    def insert_view_image(self) -> None:
+        gdoc = Gui.ActiveDocument
+        if gdoc is None:
+            self._note("No document open.", error=True)
+            return
+        folder = os.path.join(paths.bridge_dir(), "history", "img")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, time.strftime("%Y%m%d-%H%M%S") + ".png")
+        width = max(200, min(600, self.view.viewport().width() - 30))
+        gdoc.ActiveView.saveImage(path, width, int(width * 0.75), "Current")
+        self._append(f"<p><img src='{QtCore.QUrl.fromLocalFile(path).toString()}' width='{width}'></p>")
+        _save_history(self.current_key, self.view.toHtml())
+
+    def _on_link(self, url: QtCore.QUrl) -> None:
+        if url.scheme() == "allow":
+            tool = url.path() or url.toString()[len("allow:"):]
+            allowed = self.allowed_extra.setdefault(self.current_key, [])
+            if tool not in allowed:
+                allowed.append(tool)
+            self._note(f"Allowed {tool} for this conversation. Sending your last message again…")
+            if self.last_text:
+                self.send(self.last_text, echo=False)
+        else:
+            QtGui.QDesktopServices.openUrl(url)
 
     # ----- chat -----
 
-    def send(self) -> None:
-        text = self.input.toPlainText().strip()
+    def send(self, text: str | None = None, echo: bool = True) -> None:
+        text = (text if isinstance(text, str) else self.input.toPlainText()).strip()
         if not text or (self.run and self.run.running()):
             return
-        self.input.clear()
-        self._append(f"<p style='margin-top:10px'><b>You:</b> {html.escape(text)}</p>")
+        if echo:
+            self.input.clear()
+            self._append(f"<p style='margin-top:10px'><b>You:</b> {html.escape(text)}</p>")
+        self.last_text = text
+        self.turn_results, self.turn_denied, self.max_result_chars = [], [], 0
         prompt = context_line() + "\n\n" + text
         doc = App.ActiveDocument
         cwd = os.path.dirname(doc.FileName) if doc is not None and doc.FileName else os.path.expanduser("~")
@@ -204,7 +297,8 @@ class ChatPanel(QtWidgets.QDockWidget):
         # Without a document there is nothing to tie a conversation to: start fresh each time.
         session = None if self.current_key == NO_DOC else self.sessions.get(self.current_key)
         self.run = ClaudeRun(prompt, session, self.mode(), cwd,
-                             load_plugin_dir=_params().GetBool("LoadPluginDir", True), parent=self)
+                             load_plugin_dir=_params().GetBool("LoadPluginDir", True),
+                             extra_allowed=self.allowed_extra.get(self.current_key), parent=self)
         self.run.event.connect(self._on_event)
         self.run.finished.connect(self._on_finished)
         self.run.failed.connect(self._on_failed)
@@ -245,18 +339,23 @@ class ChatPanel(QtWidgets.QDockWidget):
         elif kind == "tool_result":
             name, t0 = self.tool_rows.pop(ev.get("id"), ("tool", time.time()))
             dt = time.time() - t0
+            self.max_result_chars = max(self.max_result_chars, int(ev.get("size", 0)))
+            if not ev.get("is_error") and ev.get("content"):
+                self.turn_results.append(ev["content"])
             if ev.get("is_error"):
                 self._append(f"<div style='color:#b00'>✗ <code>{html.escape(name)}</code> {dt:.1f} s: "
                              f"{html.escape(ev.get('summary', ''))}</div>")
             else:
                 self._append(f"<div style='color:#2a7'>✓ <code>{html.escape(name)}</code> {dt:.1f} s</div>")
         elif kind == "permission_denied":
-            self._note(f"Blocked: {ev.get('tool')} {ev.get('message', '')}", error=True)
+            if ev.get("tool") and ev["tool"] not in self.turn_denied:
+                self.turn_denied.append(ev["tool"])
         elif kind == "result":
             if ev.get("is_error") and ev.get("text"):
                 self._note(ev["text"], error=True)
             for tool in ev.get("denials") or []:
-                self._note(f"Not allowed in the chat panel: {tool}", error=True)
+                if tool not in self.turn_denied:
+                    self.turn_denied.append(tool)
         elif kind == "invalid":
             App.Console.PrintLog(f"ClaudeBridge chat: {ev.get('line')}\n")
 
@@ -268,7 +367,26 @@ class ChatPanel(QtWidgets.QDockWidget):
             self._note("Stopped.")
         elif code != 0:
             self._note(f"Claude Code exited with code {code}. See Report view for details.", error=True)
+        self._render_turn_summary()
+        for tool in self.turn_denied:
+            self._append(f"<div style='color:#b00'>⚠ Blocked in the chat panel: <code>{html.escape(tool)}</code> "
+                         f"<a href='allow:{html.escape(tool)}'>Allow for this conversation</a></div>")
         self.status.setText(f"Done in {dt:.0f} s" if not stopped else "Stopped")
+        _save_history(self.current_key, self.view.toHtml())
+        QtCore.QTimer.singleShot(0, self.switch_document)  # catch up on a document switch during the turn
+
+    def _render_turn_summary(self) -> None:
+        s = turn_summary(self.turn_results)
+        parts = []
+        for key, label in (("created", "created"), ("changed", "changed"), ("deleted", "deleted")):
+            if s[key]:
+                names = ", ".join(s[key][:4]) + (" …" if len(s[key]) > 4 else "")
+                parts.append(f"{len(s[key])} {label} ({html.escape(names)})")
+        if parts:
+            self._append(f"<div style='color:#666'>Changes: {'; '.join(parts)}</div>")
+        for e in s["errors"][:5]:
+            self._append(f"<div style='color:#b00'>⚠ {html.escape(e.get('label') or e.get('name', '?'))} is in an "
+                         f"error state ({html.escape(', '.join(e.get('state', [])))})</div>")
 
     def _on_failed(self, message: str) -> None:
         self._busy(False)

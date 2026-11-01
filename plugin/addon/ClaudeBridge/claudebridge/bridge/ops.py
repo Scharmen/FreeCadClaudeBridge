@@ -8,6 +8,8 @@ from __future__ import annotations
 import io
 import linecache
 import os
+import sys
+import time
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
@@ -21,6 +23,26 @@ from .serialize import result_value, shape_summary, to_jsonable
 
 MAX_OUTPUT = 20000
 SKIP_PROPS = {"Shape", "Proxy", "ExpressionEngine", "_Body", "Label2"}
+
+
+class ScriptTimeout(Exception):
+    """Raised by the trace hook inside user code when the deadline passes."""
+
+
+def _deadline_tracer(deadline: float, filename: str) -> Any:
+    """Trace only frames of the user's code (cheap) and abort pure-Python loops after the deadline.
+
+    C++/OCCT operations can't be interrupted; they finish and the call then times out.
+    """
+    def local(frame: Any, event: str, arg: Any) -> Any:
+        if event == "line" and time.monotonic() > deadline:
+            raise ScriptTimeout("time limit reached; use run_headless for long computations")
+        return local
+
+    def global_(frame: Any, event: str, arg: Any) -> Any:
+        return local if frame.f_code.co_filename == filename else None
+
+    return global_
 
 
 class ChangeRecorder:
@@ -175,13 +197,24 @@ def run_python(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     filename = "<claude>"
     linecache.cache[filename] = (len(code), None, code.splitlines(True), filename)
     out, err = io.StringIO(), io.StringIO()
+    snapshot_path = None
+    if args.get("snapshot") and doc is not None:
+        from .action_ops import create_snapshot
+
+        snapshot_path = create_snapshot(doc)
     before = _snapshot()
     if doc is not None:
         doc.openTransaction(args.get("transaction") or "Claude")
     ex.recorder.start()
+    deadline = time.monotonic() + max(1.0, float(args.get("_timeout", 60)) - 1.5)
+    previous_trace = sys.gettrace()
     try:
         with redirect_stdout(out), redirect_stderr(err):
-            exec(compile(code, filename, "exec"), ns)
+            sys.settrace(_deadline_tracer(deadline, filename))
+            try:
+                exec(compile(code, filename, "exec"), ns)
+            finally:
+                sys.settrace(previous_trace)
             if args.get("recompute", True):
                 for d in {id(x): x for x in (doc, App.ActiveDocument) if _alive(x)}.values():
                     d.recompute()
@@ -194,6 +227,9 @@ def run_python(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         tb = "".join(traceback.format_exception(type(e), e, e.__traceback__))
         user_tb = tb.split('File "<claude>"', 1)
         tb = ('File "<claude>"' + user_tb[1]) if len(user_tb) > 1 else tb
+        if isinstance(e, ScriptTimeout):
+            raise OpError(protocol.TIMEOUT, f"{e} (transaction rolled back)", _trunc(tb),
+                          {"stdout": _trunc(out.getvalue())}) from None
         raise OpError(protocol.PY_EXCEPTION, f"{type(e).__name__}: {e} (transaction rolled back)", _trunc(tb),
                       {"stdout": _trunc(out.getvalue()), "stderr": _trunc(err.getvalue())}) from None
     changed = ex.recorder.stop()
@@ -214,6 +250,7 @@ def run_python(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         "changes": {"created": created, "changed": changed_names[:200], "deleted": deleted},
         "errors": _errors(touched),
         "document": home or (App.ActiveDocument.Name if App.ActiveDocument else None),
+        **({"snapshot": snapshot_path} if snapshot_path else {}),
     }
 
 
@@ -304,11 +341,17 @@ def document(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         return {"document": doc.Name, "file": doc.FileName}
     if action == "close":
         gd = Gui.getDocument(doc.Name)
-        if getattr(gd, "Modified", False) and not args.get("force"):
+        modified = bool(getattr(gd, "Modified", False))
+        if modified and not args.get("force"):
             raise OpError(protocol.INVALID_ARGS, f"'{doc.Name}' has unsaved changes; save it or pass force=true")
+        snap = None
+        if modified and doc.Objects:  # closing without saving: keep a snapshot so nothing is lost
+            from .action_ops import create_snapshot
+
+            snap = create_snapshot(doc)
         closed = doc.Name
         App.closeDocument(closed)
-        return {"closed": closed}
+        return {"closed": closed, **({"snapshot": snap} if snap else {})}
     if action == "activate":
         App.setActiveDocument(doc.Name)
         try:
@@ -370,6 +413,8 @@ def export(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     return {"path": path, "format": fmt, "objects": [o.Name for o in objs], "size_bytes": os.path.getsize(path)}
 
 
+from . import action_ops, inspect_ops  # noqa: E402 (they import helpers from this module)
+
 OPS = {
     "status_gui": status_gui,
     "run_python": run_python,
@@ -377,4 +422,16 @@ OPS = {
     "get_object": get_object,
     "document": document,
     "export": export,
+    "inspect_shape": inspect_ops.inspect_shape,
+    "inspect_sketch": inspect_ops.inspect_sketch,
+    "api_help": inspect_ops.api_help,
+    "list_commands": inspect_ops.list_commands,
+    "get_changes": inspect_ops.get_changes,
+    "get_console": inspect_ops.get_console,
+    "run_command": action_ops.run_command,
+    "task_dialog": action_ops.task_dialog,
+    "selection": action_ops.selection,
+    "import": action_ops.import_file,
+    "view": action_ops.view,
+    "snapshot": action_ops.snapshot,
 }

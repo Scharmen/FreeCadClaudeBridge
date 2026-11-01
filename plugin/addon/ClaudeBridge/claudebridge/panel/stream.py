@@ -20,6 +20,7 @@ import json
 from typing import Any
 
 FREECAD_TOOL_PREFIX = "mcp__plugin_freecad_freecad__"
+MAX_CONTENT = 60000
 
 
 class StreamParser:
@@ -110,16 +111,56 @@ def _tool_results(ev: dict[str, Any]) -> list[dict[str, Any]]:
         return out
     for block in content:
         if isinstance(block, dict) and block.get("type") == "tool_result":
+            text = _text(block.get("content"))
             out.append({"kind": "tool_result", "id": block.get("tool_use_id"),
-                        "is_error": bool(block.get("is_error")), "summary": _summary(block.get("content"))})
+                        "is_error": bool(block.get("is_error")), "summary": _summary(text),
+                        "size": len(text), "content": text[:MAX_CONTENT]})
     return out
 
 
-def _summary(content: Any, limit: int = 300) -> str:
+def _text(content: Any) -> str:
     if isinstance(content, list):
-        content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
-    text = str(content or "").replace("\n", " ")
+        return " ".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
+    return str(content or "")
+
+
+def _summary(text: str, limit: int = 300) -> str:
+    text = text.replace("\n", " ")
     return text if len(text) <= limit else text[:limit] + "…"
+
+
+def turn_summary(results: list[str]) -> dict[str, Any]:
+    """Aggregate `changes` and `errors` from the JSON results of freecad tool calls in one turn."""
+    created: list[str] = []
+    changed: list[str] = []
+    deleted: list[str] = []
+    errors: dict[str, dict[str, Any]] = {}
+    for text in results:
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict) and set(data) == {"result"} and isinstance(data["result"], str):
+                data = json.loads(data["result"])  # structured-output wrapper of older servers
+        except ValueError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        ch = data.get("changes") or {}
+        for src, dst in ((ch.get("created"), created), (ch.get("changed"), changed), (ch.get("deleted"), deleted)):
+            for name in src or []:
+                if name not in dst:
+                    dst.append(name)
+        for name in data.get("created", []) if isinstance(data.get("created"), list) else []:
+            n = name.get("name") if isinstance(name, dict) else name
+            if n and n not in created:
+                created.append(n)
+        if "errors" in data:  # the latest state per object wins
+            for e in data.get("errors") or []:
+                errors[e.get("name", "?")] = e
+            for name in list(errors):
+                if name in (ch.get("changed") or []) and name not in {e.get("name") for e in data["errors"]}:
+                    errors.pop(name)
+    changed = [c for c in changed if c not in created]
+    return {"created": created, "changed": changed, "deleted": deleted, "errors": list(errors.values())}
 
 
 def check_init(init: dict[str, Any], mode: str) -> list[str]:
@@ -142,15 +183,19 @@ def check_init(init: dict[str, Any], mode: str) -> list[str]:
 
 
 def build_args(prompt: str, session_id: str | None = None, plugin_dir: str | None = None,
-               allowed_tools: list[str] | None = None) -> list[str]:
-    """Arguments for `claude` in the chat panel. Never `--bare`: it drops the subscription login."""
+               allowed_tools: list[str] | None = None, extra_allowed: list[str] | None = None) -> list[str]:
+    """Arguments for `claude` in the chat panel. Never `--bare`: it drops the subscription login.
+
+    `extra_allowed` are tools the user approved for this conversation with the panel's button.
+    """
     args = ["-p", prompt, "--output-format", "stream-json", "--verbose",
             "--include-partial-messages", "--permission-prompts", "none"]
     if session_id:
         args += ["--resume", session_id]
     if plugin_dir:
         args += ["--plugin-dir", plugin_dir]
-    tools = allowed_tools if allowed_tools is not None else [FREECAD_TOOL_PREFIX + "*"]
+    tools = list(allowed_tools if allowed_tools is not None else [FREECAD_TOOL_PREFIX + "*"])
+    tools += [t for t in extra_allowed or [] if t not in tools]
     if tools:
         args += ["--allowedTools", ",".join(tools)]
     return args
