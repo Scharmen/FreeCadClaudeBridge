@@ -1,4 +1,10 @@
+import sys
+
+import pytest
+
 from claudebridge.bridge.childenv import clean_child_env
+
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="macOS-style PATH with ':'")
 
 BUNDLE = "/Applications/FreeCAD.app/Contents/Resources"
 MOD = "/Users/k/Library/Application Support/FreeCAD/v1-1/Mod"
@@ -23,6 +29,7 @@ def freecad_env():
     }
 
 
+@posix_only
 def test_strips_python_and_bundle_vars():
     env = clean_child_env(freecad_env(), BUNDLE + "/", MOD)
     for key in ("PYTHONHOME", "PYTHONPATH", "PYTHONDONTWRITEBYTECODE", "LD_LIBRARY_PATH", "SSL_CERT_FILE",
@@ -32,6 +39,7 @@ def test_strips_python_and_bundle_vars():
     assert env["ANTHROPIC_API_KEY"] == "keep-decided-by-caller"
 
 
+@posix_only
 def test_path_without_bundle_entries_and_deduplicated():
     parts = clean_child_env(freecad_env(), BUNDLE, MOD)["PATH"].split(":")
     assert not any(p.startswith(BUNDLE) or p.startswith(MOD) for p in parts)
