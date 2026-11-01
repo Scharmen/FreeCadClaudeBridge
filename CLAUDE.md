@@ -16,7 +16,9 @@ Control FreeCAD by chat, in the "Claude" chat panel inside FreeCAD or in Claude 
 
 - Repository content (code, comments, docs, commits, PRs) is in English.
 - Server: Python 3.12 (`requires-python = ">=3.12,<3.13"`), official MCP SDK 2.x (`from mcp.server.mcpserver import MCPServer`; examples using `FastMCP` are 1.x), package under `plugin/server/`.
-- Development: `uvx --from <path>` caches by version, so code changes only take effect with `uvx --refresh` or `uv run --project plugin/server`. uv lives in `~/.local/bin`.
+- Development: `pyproject.toml` lists the sources as uv `cache-keys`, so `uvx --from plugin/server` rebuilds after code edits (`--refresh` alone does not). The running FreeCAD keeps the old addon until it restarts or the module is reloaded. uv lives in `~/.local/bin`.
+- MCP tools return compact JSON text with `structured_output=False`; otherwise SDK 2.x wraps it as `{"result": "<escaped JSON>"}`.
+- Skill references: every ```python block in `plugin/skills/freecad/references/` must pass `tests/gui/test_references.py` against FreeCAD.
 - Every child process started from FreeCAD (Claude Code, `uvx`, `freecadcmd`) gets a cleaned environment; otherwise FreeCAD passes on `PYTHONHOME` and bundle paths.
 - Addon: standard library only plus FreeCAD's bundled Python (macOS bundle 1.1.x: 3.11) and PySide; no third-party packages.
 - `protocol.py` exists as an identical copy in addon and server; CI checks this.

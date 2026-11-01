@@ -7,3 +7,6 @@ __pycache__/
 dist/
 build/
 .DS_Store
+
+# Scenario run output
+tests/scenarios/results.json

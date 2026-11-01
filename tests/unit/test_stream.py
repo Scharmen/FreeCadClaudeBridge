@@ -83,3 +83,40 @@ def test_build_args():
 def test_build_args_first_message():
     args = build_args("hi")
     assert "--resume" not in args and "--plugin-dir" not in args
+
+
+def test_tool_result_carries_content_and_size():
+    tr = next(e for e in parse_all(FIXTURE.read_bytes()) if e["kind"] == "tool_result")
+    assert tr["size"] == len(tr["content"]) and '"created":["Cube"]' in tr["content"]
+
+
+def test_extra_allowed_tools():
+    args = build_args("hi", extra_allowed=["Bash", "mcp__plugin_freecad_freecad__*"])
+    assert args[args.index("--allowedTools") + 1] == "mcp__plugin_freecad_freecad__*,Bash"
+
+
+def test_turn_summary_aggregates_changes_and_latest_errors():
+    from claudebridge.panel.stream import turn_summary
+
+    results = [
+        '{"changes":{"created":["Body","Pad"],"changed":["Sketch"],"deleted":[]},"errors":[{"name":"Pad","state":["Invalid"]}]}',
+        '{"changes":{"created":[],"changed":["Pad","Sketch"],"deleted":[]},"errors":[]}',
+        '{"document":"D","created":[{"name":"Imported"}],"errors":[]}',
+        "not json",
+    ]
+    s = turn_summary(results)
+    assert s["created"] == ["Body", "Pad", "Imported"]
+    assert s["changed"] == ["Sketch"]
+    assert s["errors"] == []
+    s2 = turn_summary(results[:1])
+    assert [e["name"] for e in s2["errors"]] == ["Pad"]
+
+
+def test_turn_summary_unwraps_structured_output():
+    import json
+
+    from claudebridge.panel.stream import turn_summary
+
+    inner = json.dumps({"changes": {"created": ["CylA"], "changed": [], "deleted": []}, "errors": []})
+    wrapped = json.dumps({"result": inner})
+    assert turn_summary([wrapped])["created"] == ["CylA"]

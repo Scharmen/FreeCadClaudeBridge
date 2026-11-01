@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from freecad_bridge import client, platforms, protocol
+from freecad_bridge import __version__, client, platforms, protocol
 
 
 @pytest.fixture
@@ -20,7 +20,7 @@ def bridge(tmp_path, monkeypatch):
     return d
 
 
-def fake_addon(bridge_dir, pid, handler, addon_version="0.1.0", started=None):
+def fake_addon(bridge_dir, pid, handler, addon_version=__version__, started=None):
     path = f"/tmp/fcb-test-{pid}-{os.urandom(3).hex()}.sock"  # tmp_path is too long for AF_UNIX on macOS
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(path)

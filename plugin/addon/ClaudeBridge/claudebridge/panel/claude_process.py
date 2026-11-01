@@ -21,7 +21,7 @@ from .stream import StreamParser, build_args
 
 SYSTEM_PROMPT = (
     "You are running inside the 'Claude' chat panel of the user's FreeCAD. Use the freecad MCP tools "
-    "(status, get_tree, get_object, run_python, document, export) to inspect and change the open model. "
+    "to inspect and change the open model (get_changes shows what the user did in the GUI meanwhile). "
     "Bundle related changes into one run_python call: each call is one undo step. Keep replies short; "
     "the panel is narrow. Each message starts with a [FreeCAD] line giving the active document and selection."
 )
@@ -42,10 +42,11 @@ class ClaudeRun(QtCore.QObject):
     failed = QtCore.Signal(str)     # could not start
 
     def __init__(self, prompt: str, session_id: str | None, mode: str, cwd: str,
-                 load_plugin_dir: bool = False, parent: Any = None) -> None:
+                 load_plugin_dir: bool = False, extra_allowed: list[str] | None = None, parent: Any = None) -> None:
         super().__init__(parent)
         self.prompt, self.session_id, self.mode, self.cwd = prompt, session_id, mode, cwd
         self.load_plugin_dir = load_plugin_dir
+        self.extra_allowed = extra_allowed or []
         self.parser = StreamParser()
         self.proc: QtCore.QProcess | None = None
         self.started_at = 0.0
@@ -66,7 +67,8 @@ class ClaudeRun(QtCore.QObject):
                 return
             env["ANTHROPIC_API_KEY"] = key
         plugin_dir = paths.load_config().get("plugin_root") if self.load_plugin_dir else None
-        args = build_args(self.prompt, self.session_id, plugin_dir) + ["--append-system-prompt", SYSTEM_PROMPT]
+        args = build_args(self.prompt, self.session_id, plugin_dir, extra_allowed=self.extra_allowed)
+        args += ["--append-system-prompt", SYSTEM_PROMPT]
         qenv = QtCore.QProcessEnvironment()
         for k, v in env.items():
             qenv.insert(k, v)

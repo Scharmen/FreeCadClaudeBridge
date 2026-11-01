@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from freecad_bridge import client, protocol
+from freecad_bridge import __version__, client, protocol
 
 pytestmark = pytest.mark.skipif(not client.list_instances(), reason="no running FreeCAD with ClaudeBridge")
 
@@ -41,7 +41,7 @@ def fresh_doc():
 
 def test_status_and_versions():
     s = call("status")
-    assert s["connected"] and s["addon_version"] == "0.1.0"
+    assert s["connected"] and s["addon_version"] == __version__
     assert s["freecad_version"].startswith("1.")
     assert s["active_document"] == DOC
     assert s["busy"] is False
