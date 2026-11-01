@@ -18,6 +18,7 @@
 | 12 | No network traffic from addon or server: no telemetry, no update checks; updates come only through the plugin marketplace | – | `test_no_network_access_and_loopback_only` |
 | 13 | Protocol version check in the handshake; plugin/addon version differences are reported with the fix | `protocol.compatible`, `client.CallResult.warnings` | `test_version_warning`, `test_newer_addon_asks_for_plugin_update` |
 | 14 | Uninstall removes addon, token, config, instance files, sockets and the API key; snapshots, chat history and the audit log only with `--purge` | `installer.uninstall` | `test_uninstall_removes_everything`, `test_uninstall_keeps_user_data_unless_purged`, verified live |
+| 16 | Headless jobs cannot exhaust memory: killed when available memory falls below a reserve (15 % of RAM, min. 2 GB) or the job passes 75 % of RAM; budget computed per host at run time | `memguard.py`, `headless.run_headless` | `tests/unit/test_memguard.py`, verified live with freecadcmd |
 | 15 | Third-party content: texts inside models are data, not instructions (skill rule); FCStd files from unknown sources are treated like code (README) | `skills/freecad/SKILL.md`, README | review |
 
 ## Known limits

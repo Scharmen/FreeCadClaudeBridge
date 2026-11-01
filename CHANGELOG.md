@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 – memory guard for run_headless (unreleased)
+
+- `run_headless` stops a job before it exhausts memory. The budget comes from the machine it runs on, at run time: the job is killed when the system's available memory drops below a reserve (15 % of RAM, at least 2 GB) while the job holds more than 512 MB, or when the job alone passes 75 % of RAM (`FREECAD_BRIDGE_HEADLESS_MAX_MB` overrides that cap). Polled every 50 ms through `libproc` (macOS), `/proc` (Linux) or the Win32 API; the whole process group is killed.
+- Results report `killed` and `memory` (total, reserve, cap, peak); the audit log records both.
+- Found while modelling: a boolean union of near-tangent freeform surfaces made OpenCascade allocate about 140 GB.
+
 ## 1.1.0 – Phase 5: several FreeCAD instances (unreleased)
 
 - New tools `instances` (every running FreeCAD with pid, versions, start time and open documents) and `select_instance` (by pid or by document name/label; without arguments back to automatic). 21 tools in total.
