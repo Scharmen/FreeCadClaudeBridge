@@ -1,6 +1,6 @@
 {
   "name": "freecad",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Controls a running FreeCAD: Python API, GUI commands, selection, export",
   "author": { "name": "Kevin Kraemer" },
   "repository": "https://github.com/Scharmen/FreeCadClaudeBridge",

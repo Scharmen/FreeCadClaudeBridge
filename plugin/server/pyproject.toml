@@ -1,11 +1,11 @@
 [project]
 name = "freecad-bridge"
-version = "1.2.0"
+version = "1.3.0"
 description = "MCP server and installer that connect Claude Code to a running FreeCAD"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12,<3.13"
-dependencies = ["mcp>=2.3,<3"]
+dependencies = ["mcp>=2.3,<3", "pillow>=10", "numpy>=1.26"]
 
 [project.scripts]
 freecad-bridge-mcp = "freecad_bridge.mcp_server:main"

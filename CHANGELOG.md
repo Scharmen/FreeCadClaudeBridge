@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0 – pictures to 3D, learning from feedback (unreleased)
+
+- New tool `image_to_3d` (local, no upload): `show` lets Claude look at a picture; `outline` turns the picture's shapes (with holes) into a profile that is extruded or revolved (side silhouettes of vases, figures); `relief` makes a closed, printable height mesh from brightness; `reference` places the picture as a scaled image plane to model against. Dark-on-light pictures and transparent backgrounds work; `invert`/`threshold` correct the rest. New server dependencies: Pillow, NumPy.
+- Chat panel: 🖼 attaches a picture to the message.
+- Learning: after a turn that changed the model the panel offers 👍 / 〜 / 👎; for "partly" and "no" you say what should change, Claude fixes it and stores one general lesson. In Claude Code, Claude asks after larger models and stores the answer with the new `record_feedback` tool; `get_preferences` and the SessionStart hook give the lessons to every new session, and the panel adds them to its system prompt.
+- Lessons live in `preferences.md` in the bridge folder (one per line, edit freely), ratings in `feedback.jsonl`; both stay on this computer, survive uninstall unless `--purge`. Settings page: switch for asking, open the lessons, forget everything. CLI: `freecad-bridge preferences [show|forget]`.
+- Fixed: "Settings…" opened FreeCAD's modal Preferences dialog from Python, which holds the GIL and froze the bridge until it closed; it now opens a non-modal window (Edit → Preferences still has the page).
+- 24 tools in total; `learning.py` is a third module shared identically by addon and server.
+
 ## 1.2.0 – settings (unreleased)
 
 - Settings you can change: in FreeCAD under *Preferences → Claude Bridge* (also *Claude → Settings…* and ⚙ → Settings… in the chat panel), in a terminal with `freecad-bridge settings [set <key> <value> | reset [<key>]]`, or with `/freecad:settings` in Claude Code.

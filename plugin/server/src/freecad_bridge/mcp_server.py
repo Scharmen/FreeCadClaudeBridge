@@ -18,7 +18,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
-from . import __version__, client, headless, installer
+from . import __version__, client, headless, imaging, installer, learning, platforms, settings
 from .client import NOT_RUNNING, BridgeError, call, fix_for
 
 MAX_CHARS = 38000  # ~10k tokens; Claude Code warns above that
@@ -329,6 +329,178 @@ async def run_headless(script: str, timeout_s: float | None = None) -> str:
         return _dump(await headless.run_headless(script, timeout_s))
     except RuntimeError as e:
         raise ToolError(str(e)) from e
+
+
+# ---------- image to 3D (local) and learning from feedback
+
+OUTLINE_CODE = '''
+import json as _json
+_d = _json.loads({data!r})
+if doc is None:
+    doc = App.newDocument("ImageTo3D")
+_faces = []
+for _s in _d["shapes"]:
+    _wires = []
+    for _loop in [_s["outer"]] + _s["holes"]:
+        _pts = [Vector(x, y, 0) for x, y in _loop]
+        _wires.append(Part.makePolygon(_pts + [_pts[0]]))
+    _faces.append(Part.makeFace(_wires, "Part::FaceMakerBullseye"))
+_solids = []
+if {revolve}:
+    _ax = _d["width_mm"] / 2.0
+    for _f in _faces:
+        _half = _f.common(Part.makeBox(_d["width_mm"], _d["height_mm"] + 2, 2, Vector(_ax, -1, -1)))
+        for _hf in _half.Faces:
+            _hf.translate(Vector(-_ax, 0, 0))
+            _hf.rotate(Vector(0, 0, 0), Vector(1, 0, 0), 90)
+            _solids.append(_hf.revolve(Vector(0, 0, 0), Vector(0, 0, 1), 360))
+else:
+    _solids = [_f.extrude(Vector(0, 0, {depth})) for _f in _faces]
+    if {plane!r} == "XZ":
+        for _so in _solids:
+            _so.rotate(Vector(0, 0, 0), Vector(1, 0, 0), 90)
+_shape = _solids[0] if len(_solids) == 1 else Part.makeCompound(_solids)
+_obj = doc.addObject("Part::Feature", {name!r})
+_obj.Shape = _shape
+_bb = _shape.BoundBox
+_result = {{"object": _obj.Name, "valid": _shape.isValid(), "solids": len(_shape.Solids),
+           "size_mm": [round(_bb.XLength, 2), round(_bb.YLength, 2), round(_bb.ZLength, 2)]}}
+'''
+
+RELIEF_CODE = '''
+import json as _json, Mesh
+_d = _json.loads({data!r})
+if doc is None:
+    doc = App.newDocument("ImageTo3D")
+_nx, _ny, _dx, _H = _d["nx"], _d["ny"], _d["dx"], _d["heights"]
+_W, _D = _dx * (_nx - 1), _dx * (_ny - 1)
+def _P(i, j, top=True):
+    return (i * _dx, (_ny - 1 - j) * _dx, _H[j * _nx + i] if top else 0.0)
+_f = []
+for j in range(_ny - 1):
+    for i in range(_nx - 1):
+        a, b, c, e = _P(i, j), _P(i + 1, j), _P(i + 1, j + 1), _P(i, j + 1)
+        _f += [(a, e, c), (a, c, b)]
+_ring = ([(i, 0) for i in range(_nx - 1)] + [(_nx - 1, j) for j in range(_ny - 1)]
+         + [(i, _ny - 1) for i in range(_nx - 1, 0, -1)] + [(0, j) for j in range(_ny - 1, 0, -1)])
+_ctr = (_W / 2, _D / 2, 0.0)
+for k in range(len(_ring)):
+    (i0, j0), (i1, j1) = _ring[k], _ring[(k + 1) % len(_ring)]
+    t0, t1, b0, b1 = _P(i0, j0), _P(i1, j1), _P(i0, j0, False), _P(i1, j1, False)
+    _f += [(t0, t1, b1), (t0, b1, b0), (b0, b1, _ctr)]
+_m = Mesh.Mesh(_f)
+_m.harmonizeNormals()
+if _m.Volume < 0:
+    _m.flipNormals()
+_obj = doc.addObject("Mesh::Feature", {name!r})
+_obj.Mesh = _m
+if {plane!r} == "XZ":
+    _obj.Placement = App.Placement(Vector(0, 0, 0), App.Rotation(Vector(1, 0, 0), 90))
+_result = {{"object": _obj.Name, "facets": _m.CountFacets, "solid": _m.isSolid(),
+           "size_mm": [round(_W, 2), round(_D, 2), round(max(_H), 2)]}}
+'''
+
+REFERENCE_CODE = '''
+if doc is None:
+    doc = App.newDocument("ImageTo3D")
+_obj = doc.addObject("Image::ImagePlane", {name!r})
+_obj.ImageFile = {path!r}
+_obj.XSize, _obj.YSize = {w}, {h}
+if {plane!r} == "XZ":
+    _obj.Placement = App.Placement(Vector({w} / 2, 0, {h} / 2), App.Rotation(Vector(1, 0, 0), 90))
+else:
+    _obj.Placement = App.Placement(Vector({w} / 2, {h} / 2, 0), App.Rotation())
+if hasattr(_obj, "ViewObject") and _obj.ViewObject and hasattr(_obj.ViewObject, "Transparency"):
+    _obj.ViewObject.Transparency = 35
+_result = {{"object": _obj.Name, "size_mm": [{w}, {h}], "plane": {plane!r}}}
+'''
+
+
+@mcp.tool(annotations=WRITE, structured_output=False)
+async def image_to_3d(path: str, mode: Literal["show", "outline", "relief", "reference"] = "show",
+                      size_mm: float = 40.0, fit: Literal["width", "height"] = "width", depth_mm: float = 3.0,
+                      revolve: bool = False, plane: Literal["XY", "XZ"] = "XY", invert: bool = False,
+                      threshold: float | None = None, detail: float = 0.7, max_height_mm: float = 3.0,
+                      base_mm: float = 1.0, resolution: int = 200, name: str | None = None,
+                      doc: str | None = None, instance: int | None = None) -> list[Any]:
+    """Turn a picture (PNG/JPG/... path on this computer) into 3D, locally, no upload.
+    show: return the picture so you can look at it and model it yourself in detail.
+    outline: the picture's shapes (with holes) as a profile size_mm wide (fit=height: high),
+      extruded depth_mm, or revolved around the vertical centre line (revolve=true, for vases
+      and figures from a side silhouette). Dark object on light background, or transparency.
+    relief: brightness as height (dark = high; invert flips), base_mm + up to max_height_mm,
+      as a printable mesh. reference: the picture as an image plane size_mm wide to trace.
+    plane=XZ stands the result upright. Each call is one undo step."""
+    def fail(e: Exception) -> ToolError:
+        return ToolError(f"INVALID_ARGS: {e}")
+
+    try:
+        if mode == "show":
+            meta = {"path": path, "note": "look at the picture; then model it, or use mode outline/relief/reference"}
+            png = await anyio.to_thread.run_sync(imaging.preview_png, path)
+            return [_dump(meta), Image(data=png, format="png")]
+        label = name or {"outline": "ImageProfile", "relief": "ImageRelief", "reference": "ImageReference"}[mode]
+        if mode == "outline":
+            prof = await anyio.to_thread.run_sync(
+                lambda: imaging.outline_profile(path, size_mm, fit, threshold, invert, detail))
+            code = OUTLINE_CODE.format(data=json.dumps(prof), revolve=bool(revolve), depth=float(depth_mm),
+                                       plane=plane, name=label)
+            extra = {"shapes": len(prof["shapes"]), "holes": sum(len(s["holes"]) for s in prof["shapes"]),
+                     "points": prof["points"]}
+        elif mode == "relief":
+            grid = await anyio.to_thread.run_sync(
+                lambda: imaging.height_grid(path, size_mm, max_height_mm, base_mm, resolution, invert))
+            code = RELIEF_CODE.format(data=json.dumps(grid), plane=plane, name=label)
+            extra = {"grid": [grid["nx"], grid["ny"]]}
+        else:
+            from PIL import Image as PILImage
+
+            with PILImage.open(os.path.expanduser(path)) as im:
+                w_px, h_px = im.size
+            w = size_mm if fit == "width" else size_mm * w_px / h_px
+            h = w * h_px / w_px
+            code = REFERENCE_CODE.format(path=os.path.abspath(os.path.expanduser(path)), w=round(w, 3),
+                                         h=round(h, 3), plane=plane, name=label)
+            extra = {}
+    except imaging.ImageError as e:
+        raise fail(e) from e
+    res = await _raw("run_python", {"code": code, "doc": doc, "transaction": f"Image to 3D ({mode})"},
+                     timeout_s=300, instance=instance)
+    if isinstance(res, dict):
+        res = {"mode": mode, **extra, **res}
+    out: list[Any] = [_dump(res)]
+    if mode == "reference":
+        out.append(Image(data=await anyio.to_thread.run_sync(imaging.preview_png, path), format="png"))
+    return out
+
+
+@mcp.tool(annotations=READ, structured_output=False)
+async def get_preferences() -> str:
+    """What this user prefers, learned from their feedback on earlier models, plus whether
+    they want to be asked for feedback. Follow the lessons unless the request says otherwise."""
+    bd = platforms.bridge_dir()
+    recent = [{k: r.get(k) for k in ("rating", "comment", "request")} for r in learning.recent_feedback(bd)]
+    return _dump({"ask_for_feedback": bool(settings.load(bd)["learning.ask_for_feedback"]),
+                  "lessons": learning.lessons(bd), "recent_feedback": recent,
+                  "file": os.path.join(str(bd), learning.PREFERENCES)})
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+          structured_output=False)
+async def record_feedback(rating: Literal["good", "partly", "bad"], comment: str | None = None,
+                          request: str | None = None, result: str | None = None,
+                          lesson: str | None = None) -> str:
+    """Store the user's verdict on a model you made, after asking them whether it matched.
+    comment: their words. request/result: what they asked for and what you built (short).
+    lesson: one general sentence to remember for future models (not specific to this
+    object), e.g. "Sizes like '5 cm high' mean the overall height including the base"."""
+    bd = platforms.bridge_dir()
+    try:
+        entry = learning.record_feedback(bd, rating, comment or "", request or "", result or "",
+                                         source="claude-code", lesson=lesson or "")
+    except ValueError as e:
+        raise ToolError(f"INVALID_ARGS: {e}") from e
+    return _dump({"recorded": True, "lesson_added": entry["lesson_added"], "lessons": len(learning.lessons(bd))})
 
 
 def _refresh_config() -> None:

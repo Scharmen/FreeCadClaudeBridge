@@ -7,8 +7,9 @@ from freecad_bridge import mcp_server
 EXPECTED = {"status", "get_tree", "get_object", "inspect_shape", "inspect_sketch", "get_changes", "get_console",
             "api_help", "list_commands", "run_python", "run_command", "task_dialog", "selection", "document",
             "export", "import", "view", "run_headless", "snapshot", "instances",
-            "select_instance"}
-READ_ONLY = {"status", "instances", "get_tree", "get_object", "inspect_shape", "inspect_sketch", "get_changes",
+            "select_instance", "image_to_3d", "record_feedback", "get_preferences"}
+READ_ONLY = {"status", "instances", "get_preferences", "get_tree", "get_object", "inspect_shape", "inspect_sketch",
+             "get_changes",
              "get_console",
              "api_help", "list_commands"}
 

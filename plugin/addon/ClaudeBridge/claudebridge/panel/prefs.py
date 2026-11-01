@@ -47,6 +47,8 @@ class PreferencesPage:
         jf = QtWidgets.QFormLayout(job_box)
         self.spins: dict[str, Any] = {}
         for key, (default, lo, hi, unit, text) in settings.SCHEMA.items():
+            if not key.startswith("headless."):
+                continue
             if isinstance(default, int):
                 spin = QtWidgets.QSpinBox()
             else:
@@ -68,6 +70,25 @@ class PreferencesPage:
         jf.addRow(QtWidgets.QLabel("<small>Applies to the next headless job; no restart needed. "
                                    "Also available as <code>freecad-bridge settings</code>.</small>"))
         layout.addWidget(job_box)
+
+        learn_box = QtWidgets.QGroupBox("Learning from your feedback")
+        lf = QtWidgets.QVBoxLayout(learn_box)
+        self.ask_feedback = QtWidgets.QCheckBox("Ask after each model whether it matched what I wanted")
+        lf.addWidget(self.ask_feedback)
+        self.lessons_label = QtWidgets.QLabel()
+        self.lessons_label.setWordWrap(True)
+        lf.addWidget(self.lessons_label)
+        buttons = QtWidgets.QHBoxLayout()
+        open_btn = QtWidgets.QPushButton("Open learned preferences")
+        open_btn.clicked.connect(self._open_lessons)
+        forget_btn = QtWidgets.QPushButton("Forget everything")
+        forget_btn.clicked.connect(self._forget)
+        buttons.addWidget(open_btn)
+        buttons.addWidget(forget_btn)
+        lf.addLayout(buttons)
+        lf.addWidget(QtWidgets.QLabel("<small>Stored only on this computer (preferences.md, feedback.jsonl in the "
+                                      "bridge folder); you can edit the lessons in any text editor.</small>"))
+        layout.addWidget(learn_box)
         layout.addStretch(1)
         self._total = settings.total_memory()
 
@@ -79,8 +100,11 @@ class PreferencesPage:
         self.show_panel.setChecked(p.GetBool("ShowPanel", True))
         transport = p.GetString("Transport", "auto")
         self.transport.setCurrentIndex(TRANSPORTS.index(transport) if transport in TRANSPORTS else 0)
-        for key, value in settings.load(paths.bridge_dir()).items():
-            self.spins[key].setValue(value)
+        values = settings.load(paths.bridge_dir())
+        for key, spin in self.spins.items():
+            spin.setValue(values[key])
+        self.ask_feedback.setChecked(bool(values["learning.ask_for_feedback"]))
+        self._update_lessons()
         self._update_preview()
 
     def saveSettings(self) -> None:  # noqa: N802 (FreeCAD API)
@@ -88,7 +112,8 @@ class PreferencesPage:
         p.SetBool("Autostart", self.autostart.isChecked())
         p.SetBool("ShowPanel", self.show_panel.isChecked())
         p.SetString("Transport", self.transport.currentText())
-        settings.save(paths.bridge_dir(), self.values())
+        settings.save(paths.bridge_dir(), {**self.values(),
+                                           "learning.ask_for_feedback": int(self.ask_feedback.isChecked())})
 
     # ----- helpers
 
@@ -96,8 +121,31 @@ class PreferencesPage:
         return {key: spin.value() for key, spin in self.spins.items()}
 
     def _restore_defaults(self) -> None:
-        for key, value in settings.defaults().items():
-            self.spins[key].setValue(value)
+        defaults = settings.defaults()
+        for key, spin in self.spins.items():
+            spin.setValue(defaults[key])
+
+    def _update_lessons(self) -> None:
+        from ..bridge import learning
+
+        items = learning.lessons(paths.bridge_dir())
+        self.lessons_label.setText(f"{len(items)} lesson(s) learned so far." if items
+                                   else "Nothing learned yet.")
+
+    def _open_lessons(self) -> None:
+        from PySide import QtCore, QtGui
+
+        from ..bridge import learning
+
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(learning.ensure_file(paths.bridge_dir())))
+
+    def _forget(self) -> None:
+        from ..bridge import learning
+
+        sure = QtWidgets.QMessageBox.question(self.form, GROUP, "Delete all feedback and learned preferences?")
+        if sure == QtWidgets.QMessageBox.Yes:
+            learning.forget(paths.bridge_dir())
+            self._update_lessons()
 
     def _update_preview(self, *_: Any) -> None:
         if not self._total:
@@ -115,7 +163,39 @@ def register() -> None:
     Gui.addPreferencePage(PreferencesPage, GROUP)
 
 
+_window: Any = None
+
+
 def show() -> None:
+    """Open the page in its own non-modal window.
+
+    Gui.showPreferences() runs the modal Preferences dialog inside a Python call, which holds
+    the GIL until the dialog closes and so freezes the bridge's listener thread. A non-modal
+    window returns at once; Edit → Preferences still shows the same page.
+    """
+    global _window
     import FreeCADGui as Gui
 
-    Gui.showPreferences(GROUP)
+    if _window is not None and _window.isVisible():
+        _window.raise_()
+        _window.activateWindow()
+        return
+    page = PreferencesPage()
+    page.loadSettings()
+    dlg = QtWidgets.QDialog(Gui.getMainWindow())
+    dlg.setWindowTitle(GROUP)
+    lay = QtWidgets.QVBoxLayout(dlg)
+    lay.addWidget(page.form)
+    buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+    lay.addWidget(buttons)
+
+    def accept() -> None:
+        page.saveSettings()
+        dlg.accept()
+
+    buttons.accepted.connect(accept)
+    buttons.rejected.connect(dlg.reject)
+    dlg.page = page  # keep the page alive with the window
+    dlg.setModal(False)
+    dlg.show()
+    _window = dlg

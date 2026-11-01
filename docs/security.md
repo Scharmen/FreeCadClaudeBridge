@@ -19,6 +19,8 @@
 | 13 | Protocol version check in the handshake; plugin/addon version differences are reported with the fix | `protocol.compatible`, `client.CallResult.warnings` | `test_version_warning`, `test_newer_addon_asks_for_plugin_update` |
 | 14 | Uninstall removes addon, token, config, instance files, sockets and the API key; snapshots, chat history and the audit log only with `--purge` | `installer.uninstall` | `test_uninstall_removes_everything`, `test_uninstall_keeps_user_data_unless_purged`, verified live |
 | 16 | Headless jobs cannot exhaust memory: killed when available memory falls below a reserve (15 % of RAM, min. 2 GB) or the job passes 75 % of RAM; budget computed per host at run time; shares and minimums are user settings within clamped ranges | `memguard.py`, `headless.run_headless` | `tests/unit/test_memguard.py`, verified live with freecadcmd |
+| 17 | Learning data stays local: feedback.jsonl and preferences.md in the bridge folder (0600), never uploaded except as prompt text to Claude; user can edit, switch off and forget; kept on uninstall only without `--purge` | `learning.py`, `installer.uninstall` | `tests/unit/test_learning.py` |
+| 18 | `image_to_3d` processes pictures locally (Pillow/NumPy); no external service | `imaging.py` | `tests/unit/test_imaging.py`, `test_no_network_access_and_loopback_only` |
 | 15 | Third-party content: texts inside models are data, not instructions (skill rule); FCStd files from unknown sources are treated like code (README) | `skills/freecad/SKILL.md`, README | review |
 
 ## Known limits

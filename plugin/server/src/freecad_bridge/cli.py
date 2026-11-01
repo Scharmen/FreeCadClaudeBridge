@@ -9,7 +9,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import __version__, installer, memguard, platforms, protocol, settings
+from . import __version__, installer, learning, memguard, platforms, protocol, settings
 from .client import BridgeError, call, fix_for, list_instances
 
 
@@ -91,6 +91,40 @@ def settings_cmd(action: str | None, key: str | None, value: str | None) -> int:
     return 0
 
 
+def preferences_context() -> str:
+    """Text for the SessionStart hook: learned lessons and whether to ask for feedback."""
+    bd = platforms.bridge_dir()
+    if not platforms.load_config() and not learning.lessons(bd):
+        return ""
+    parts = [learning.context_text(bd)]
+    if settings.load(bd)["learning.ask_for_feedback"]:
+        parts.append("FreeCAD: after you finish creating or changing a model for the user, ask in one short line "
+                     "whether it matches what they wanted, then store their answer with the record_feedback tool "
+                     "(rating, their words, and one general lesson).")
+    else:
+        parts.append("FreeCAD: the user asked not to be asked for feedback after models: do not ask.")
+    return "\n".join(p for p in parts if p)
+
+
+def preferences_cmd(action: str) -> int:
+    bd = platforms.bridge_dir()
+    if action == "forget":
+        learning.forget(bd)
+        print("forgot all feedback and learned preferences")
+        return 0
+    if action == "context":
+        text = preferences_context()
+        if text:
+            print(text)
+        return 0
+    items = learning.lessons(bd)
+    print(f"Learned preferences ({learning.ensure_file(bd) if items else bd / learning.PREFERENCES}):")
+    print("\n".join(f"  - {i}" for i in items) if items else "  (nothing learned yet)")
+    print(f"Feedback entries: {len(learning.recent_feedback(bd, 10_000))}; asking for feedback: "
+          f"{'on' if settings.load(bd)['learning.ask_for_feedback'] else 'off'}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="freecad-bridge", description=f"FreeCAD × Claude Code bridge {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -103,9 +137,12 @@ def main(argv: list[str] | None = None) -> int:
     p_doc = sub.add_parser("doctor", help="check setup and connection")
     p_doc.add_argument("--quiet", action="store_true", help="print only problems")
     p_doc.add_argument("--addon-src", help="update an older installed addon from this folder first")
+    p_doc.add_argument("--with-preferences", action="store_true", help="also print learned preferences (hook)")
     p_tok = sub.add_parser("token", help="manage the shared token")
     p_tok.add_argument("--rotate", action="store_true", help="create a new token")
     sub.add_parser("instances", help="list running FreeCAD instances as JSON")
+    p_pref = sub.add_parser("preferences", help="what Claude learned from your feedback (show, context, forget)")
+    p_pref.add_argument("action", nargs="?", choices=["show", "context", "forget"], default="show")
     p_set = sub.add_parser("settings", help="show or change user settings (memory limits of headless jobs, ...)")
     p_set.add_argument("action", nargs="?", choices=["show", "set", "reset"], default="show")
     p_set.add_argument("key", nargs="?")
@@ -117,7 +154,12 @@ def main(argv: list[str] | None = None) -> int:
             return installer.uninstall(args.freecad, purge=args.purge)
         return installer.install(args.addon_src, args.freecad)
     if args.cmd == "doctor":
-        return doctor(args.quiet, args.addon_src)
+        rc = doctor(args.quiet, args.addon_src)
+        if args.with_preferences:
+            text = preferences_context()
+            if text:
+                print(text)
+        return rc
     if args.cmd == "token":
         if args.rotate:
             platforms.write_token(protocol.new_token())
@@ -126,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(platforms.token_path() if platforms.read_token() else "no token")
         return 0
+    if args.cmd == "preferences":
+        return preferences_cmd(args.action)
     if args.cmd == "settings":
         return settings_cmd(args.action, args.key, args.value)
     if args.cmd == "instances":

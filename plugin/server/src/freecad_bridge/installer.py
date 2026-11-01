@@ -367,14 +367,16 @@ def uninstall(freecad: str | None = None, out=print, purge: bool = False) -> int
         out(f"removed {platforms.instances_dir()}")
     for what in clear_api_key():
         out(f"removed {what}")
-    user_data = ("snapshots", "history", "sessions.json", "settings.json", "headless", "backups")
+    user_data = ("snapshots", "history", "sessions.json", "settings.json", "preferences.md", "feedback.jsonl",
+                 "headless", "backups")
     kept = [p for p in (*(bd / n for n in user_data), *bd.glob("bridge-log*.jsonl")) if p.exists()]
     for p in kept:
         if purge:
             shutil.rmtree(p) if p.is_dir() else p.unlink()
             out(f"removed {p}")
     if kept and not purge:
-        out(f"kept snapshots, chat history, settings, headless work folders, backups and the audit log in {bd} "
+        out(f"kept snapshots, chat history, settings, learned preferences, headless work folders, backups and the "
+            f"audit log in {bd} "
             "(add --purge to remove them)")
     if bd.is_dir() and not any(bd.iterdir()):
         bd.rmdir()

@@ -1,3 +1,3 @@
 # ClaudeBridge: connects Claude Code to this FreeCAD. Runs headless too; the
 # bridge server and chat panel only start from InitGui.py.
-CLAUDE_BRIDGE_VERSION = "1.2.0"
+CLAUDE_BRIDGE_VERSION = "1.3.0"

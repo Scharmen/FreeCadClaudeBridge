@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx --from \"${CLAUDE_PLUGIN_ROOT}/server\" freecad-bridge doctor --quiet --addon-src \"${CLAUDE_PLUGIN_ROOT}/addon/ClaudeBridge\"",
+            "command": "uvx --from \"${CLAUDE_PLUGIN_ROOT}/server\" freecad-bridge doctor --quiet --with-preferences --addon-src \"${CLAUDE_PLUGIN_ROOT}/addon/ClaudeBridge\"",
             "timeout": 60
           }
         ]

@@ -23,7 +23,10 @@ SYSTEM_PROMPT = (
     "You are running inside the 'Claude' chat panel of the user's FreeCAD. Use the freecad MCP tools "
     "to inspect and change the open model (get_changes shows what the user did in the GUI meanwhile). "
     "Bundle related changes into one run_python call: each call is one undo step. Keep replies short; "
-    "the panel is narrow. Each message starts with a [FreeCAD] line giving the active document and selection."
+    "the panel is narrow. Each message starts with a [FreeCAD] line giving the active document and selection. "
+    "A [Reference image: <path>] line is a picture the user attached: look at it with "
+    "image_to_3d(path, mode='show') and use mode outline, relief or reference where it fits. "
+    "The panel asks the user for feedback itself, so do not ask whether the result matches."
 )
 
 
@@ -78,7 +81,10 @@ class ClaudeRun(QtCore.QObject):
             env["ANTHROPIC_API_KEY"] = key
         plugin_dir = paths.load_config().get("plugin_root") if self.load_plugin_dir else None
         args = build_args(self.prompt, self.session_id, plugin_dir, extra_allowed=self.extra_allowed)
-        args += ["--append-system-prompt", SYSTEM_PROMPT]
+        from ..bridge import learning
+
+        learned = learning.context_text(paths.bridge_dir())
+        args += ["--append-system-prompt", SYSTEM_PROMPT + ("\n\n" + learned if learned else "")]
         qenv = QtCore.QProcessEnvironment()
         for k, v in env.items():
             qenv.insert(k, v)

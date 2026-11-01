@@ -28,6 +28,7 @@ SCHEMA: dict[str, tuple[Any, Any, Any, str, str]] = {
     "headless.contributor_min_mb": (512, 64, 16384, "MB",
                                     "Stop a job for low system memory only if it uses more than this"),
     "headless.timeout_s": (600, 10, 86400, "s", "Default time limit of run_headless"),
+    "learning.ask_for_feedback": (1, 0, 1, "", "Ask after each model whether it matched (1 = yes, 0 = no)"),
 }
 
 

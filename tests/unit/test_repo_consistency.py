@@ -11,7 +11,7 @@ SERVER = ROOT / "plugin/server"
 
 
 def test_shared_copies_identical():
-    for name in ("protocol.py", "settings.py"):
+    for name in ("protocol.py", "settings.py", "learning.py"):
         a = (ADDON / "claudebridge/bridge" / name).read_bytes()
         b = (SERVER / "src/freecad_bridge" / name).read_bytes()
         assert a == b, f"{name} differs between addon and server"

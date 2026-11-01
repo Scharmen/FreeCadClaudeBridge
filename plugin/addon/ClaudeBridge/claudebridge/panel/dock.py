@@ -148,6 +148,12 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.camera_btn.setToolTip("Insert a picture of the 3D view into the conversation")
         self.camera_btn.clicked.connect(self.insert_view_image)
         head.addWidget(self.camera_btn)
+        self.image_btn = QtWidgets.QToolButton()
+        self.image_btn.setText("🖼")
+        self.image_btn.setToolTip("Attach a picture: Claude can look at it, trace it, or turn it into an outline "
+                                  "or relief")
+        self.image_btn.clicked.connect(self.attach_image)
+        head.addWidget(self.image_btn)
         head.addWidget(self.menu_btn)
         lay.addLayout(head)
 
@@ -269,7 +275,61 @@ class ChatPanel(QtWidgets.QDockWidget):
         self._append(f"<p><img src='{QtCore.QUrl.fromLocalFile(path).toString()}' width='{width}'></p>")
         _save_history(self.current_key, self.view.toHtml())
 
+    def attach_image(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Attach a picture", os.path.expanduser("~"),
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)")
+        if not path:
+            return
+        self.input.insertPlainText(("\n" if self.input.toPlainText().strip() else "") + f"[Reference image: {path}]\n")
+        self._append(f"<p><img src='{QtCore.QUrl.fromLocalFile(path).toString()}' width='160'></p>")
+        self.input.setFocus()
+
+    def _ask_feedback(self) -> None:
+        """After a turn that changed the model: offer a rating (learning.ask_for_feedback)."""
+        from ..bridge import settings
+
+        if not settings.load(paths.bridge_dir())["learning.ask_for_feedback"]:
+            return
+        self.feedback_turn = getattr(self, "feedback_turn", 0) + 1
+        n = self.feedback_turn
+        self.feedback_ctx = {"turn": n, "request": self.last_text, "result": self.last_result,
+                             "doc": self.current_key}
+        self._append(f"<div style='color:#666'>Did this match what you wanted? "
+                     f"<a href='feedback:good:{n}'>👍 Yes</a> · <a href='feedback:partly:{n}'>〜 Partly</a> · "
+                     f"<a href='feedback:bad:{n}'>👎 No</a></div>")
+
+    def _on_feedback(self, rating: str, turn: int) -> None:
+        from ..bridge import learning
+
+        ctx = getattr(self, "feedback_ctx", None)
+        if not ctx or ctx["turn"] != turn or ctx.get("done"):
+            self._note("This rating is no longer current.")
+            return
+        ctx["done"] = True
+        if rating == "good":
+            learning.record_feedback(paths.bridge_dir(), "good", request=ctx["request"] or "",
+                                     result=ctx["result"] or "", doc=ctx["doc"] or "", source="panel")
+            self._note("Thanks, noted.")
+            return
+        comment, ok = QtWidgets.QInputDialog.getMultiLineText(
+            self, "Claude", "What should be different? (Claude fixes it and remembers the lesson)")
+        comment = comment.strip() if ok else ""
+        if not comment:
+            learning.record_feedback(paths.bridge_dir(), rating, request=ctx["request"] or "",
+                                     result=ctx["result"] or "", doc=ctx["doc"] or "", source="panel")
+            self._note("Noted.")
+            return
+        self.send(f"Feedback from the panel on your last result: {rating}. The user says: \"{comment}\". "
+                  f"First call record_feedback with rating \"{rating}\", the user's words, the request and one "
+                  f"general lesson worth remembering for future models; then fix the model accordingly.")
+
     def _on_link(self, url: QtCore.QUrl) -> None:
+        if url.scheme() == "feedback":
+            rating, _, turn = (url.path() or url.toString()[len("feedback:"):]).partition(":")
+            if rating in ("good", "partly", "bad") and turn.isdigit():
+                self._on_feedback(rating, int(turn))
+            return
         if url.scheme() == "allow":
             tool = url.path() or url.toString()[len("allow:"):]
             allowed = self.allowed_extra.setdefault(self.current_key, [])
@@ -370,7 +430,9 @@ class ChatPanel(QtWidgets.QDockWidget):
             self._note("Stopped.")
         elif code != 0:
             self._note(f"Claude Code exited with code {code}. See Report view for details.", error=True)
-        self._render_turn_summary()
+        changed = self._render_turn_summary()
+        if changed and not stopped and code == 0:
+            self._ask_feedback()
         for tool in self.turn_denied:
             self._append(f"<div style='color:#b00'>⚠ Blocked in the chat panel: <code>{html.escape(tool)}</code> "
                          f"<a href='allow:{html.escape(tool)}'>Allow for this conversation</a></div>")
@@ -378,18 +440,20 @@ class ChatPanel(QtWidgets.QDockWidget):
         _save_history(self.current_key, self.view.toHtml())
         QtCore.QTimer.singleShot(0, self.switch_document)  # catch up on a document switch during the turn
 
-    def _render_turn_summary(self) -> None:
+    def _render_turn_summary(self) -> bool:
         s = turn_summary(self.turn_results)
         parts = []
         for key, label in (("created", "created"), ("changed", "changed"), ("deleted", "deleted")):
             if s[key]:
                 names = ", ".join(s[key][:4]) + (" …" if len(s[key]) > 4 else "")
                 parts.append(f"{len(s[key])} {label} ({html.escape(names)})")
+        self.last_result = "; ".join(parts)
         if parts:
             self._append(f"<div style='color:#666'>Changes: {'; '.join(parts)}</div>")
         for e in s["errors"][:5]:
             self._append(f"<div style='color:#b00'>⚠ {html.escape(e.get('label') or e.get('name', '?'))} is in an "
                          f"error state ({html.escape(', '.join(e.get('state', [])))})</div>")
+        return bool(s["created"] or s["changed"] or s["deleted"])
 
     def _on_failed(self, message: str) -> None:
         self._busy(False)
