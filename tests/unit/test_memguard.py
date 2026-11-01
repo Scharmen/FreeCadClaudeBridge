@@ -50,7 +50,7 @@ def _fake_freecadcmd(monkeypatch, tmp_path):
 
 def test_run_headless_normal_job_reports_memory(monkeypatch, tmp_path):
     _fake_freecadcmd(monkeypatch, tmp_path)
-    res = anyio.run(headless.run_headless, "_result = 2 + 3", 60)
+    res = anyio.run(headless.run_headless, "import time\ntime.sleep(0.5)\n_result = 2 + 3", 60)
     assert res["ok"] and res["result"] == 5 and res["killed"] is None
     assert res["memory"]["peak_mb"] > 0 and res["memory"]["reserve_mb"] >= 2048
 

@@ -109,7 +109,8 @@ def process_rss(pid: int) -> int:
     if sys.platform == "darwin":
         return _mac_rss(pid)
     if sys.platform == "win32":
-        return _win_rss(pid)
+        # also the children: a venv python.exe or a launcher runs the real interpreter as a child
+        return sum(_win_rss(p) for p in [pid, *_win_descendants(pid)])
     try:
         with open(f"/proc/{pid}/statm") as f:
             return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
@@ -136,7 +137,7 @@ def _mac_rss(pid: int) -> int:
 def process_tree_rss(pid: int) -> int:
     """Resident memory of a process and everything in its process group (AppImages fork)."""
     if sys.platform == "win32":
-        return _win_rss(pid)
+        return process_rss(pid)
     try:
         pgid = os.getpgid(pid)
         out = subprocess.run(["ps", "-A", "-o", "pgid=,rss="], capture_output=True, text=True, timeout=2).stdout
@@ -162,16 +163,59 @@ def _win_rss(pid: int) -> int:  # pragma: no cover - Windows only
                     ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
 
     k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
     handle = k32.OpenProcess(0x1000 | 0x0010, False, pid)  # QUERY_LIMITED_INFORMATION | VM_READ
     if not handle:
         return 0
     try:
         pmc = PMC()
         pmc.cb = ctypes.sizeof(pmc)
-        ok = ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb)  # type: ignore[attr-defined]
+        ok = k32.K32GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb)
         return int(pmc.WorkingSetSize) if ok else 0
     finally:
         k32.CloseHandle(handle)
+
+
+def _win_descendants(pid: int) -> list[int]:  # pragma: no cover - Windows only
+    """All descendant process ids, from one Toolhelp32 snapshot."""
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESSENTRY32W(ctypes.Structure):  # noqa: N801 (Win32 name)
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD),
+                    ("szExeFile", ctypes.c_wchar * 260)]
+
+    k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    k32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    k32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    snap = k32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == wintypes.HANDLE(-1).value:
+        return []
+    children: dict[int, list[int]] = {}
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        ok = k32.Process32FirstW(snap, ctypes.byref(entry))
+        while ok:
+            children.setdefault(entry.th32ParentProcessID, []).append(entry.th32ProcessID)
+            ok = k32.Process32NextW(snap, ctypes.byref(entry))
+    finally:
+        k32.CloseHandle(snap)
+    out, todo = [], [pid]
+    while todo:
+        for child in children.get(todo.pop(), []):
+            if child not in out and child != pid:
+                out.append(child)
+                todo.append(child)
+    return out
 
 
 def kill_tree(pid: int) -> None:
