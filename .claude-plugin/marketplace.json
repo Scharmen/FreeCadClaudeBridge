@@ -1,0 +1,14 @@
+{
+  "name": "freecad-claude",
+  "description": "FreeCAD × Claude Code: control a running FreeCAD by chat",
+  "owner": {
+    "name": "Kevin Kraemer"
+  },
+  "plugins": [
+    {
+      "name": "freecad",
+      "source": "./plugin",
+      "description": "Control a running FreeCAD from Claude Code and from a chat panel inside FreeCAD"
+    }
+  ]
+}
