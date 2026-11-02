@@ -1,0 +1,123 @@
+# Organic shapes that look real (FreeCAD 1.1)
+
+Tested by `tests/gui/test_references.py`. FreeCAD is a CAD program, not a sculpting tool: there is no clay brush. What works:
+
+| Subject | Technique |
+| --- | --- |
+| Figures, faces, animals, hair, beards, cloth, plants, rocks, terrain | `sculpt` tool: smoothly blended primitives → watertight mesh (below) |
+| Smooth products: bottles, handles, grips, shells, vases | Loft through closed B-spline sections; tapered sweep |
+| Freeform panels, reliefs, terrain patches | B-spline surface from a point grid, thickened |
+| Coins, plaques, lithophanes from a picture | `image_to_3d` mode `relief` |
+| Mechanical parts | PartDesign (see `partdesign.md`) |
+
+## The `sculpt` tool
+
+Describe the form as primitives that melt into each other with a blend radius, like clay. It runs outside FreeCAD and imports a smooth, watertight mesh per part (one undo step), so it cannot crash FreeCAD.
+
+```json
+{"blend": 1.2, "detail": {"amplitude": 0.15, "scale": 1.5},
+ "parts": [
+  {"name": "Body", "color": [0.85, 0.65, 0.52], "primitives": [
+    {"type": "ellipsoid", "center": [0, 0, 30], "radii": [7, 4.5, 9]},
+    {"type": "ellipsoid", "center": [0, -0.5, 44], "radii": [3.4, 3.8, 4.4]},
+    {"type": "capsule", "a": [0, 0, 38], "b": [0, -0.3, 41], "radius": 1.6},
+    {"type": "capsule", "a": [-6, 0, 36], "b": [-9, -2, 27], "radius": 1.9, "radius_b": 1.5},
+    {"type": "capsule", "a": [-9, -2, 27], "b": [-8, -5, 20], "radius": 1.5, "radius_b": 1.1},
+    {"type": "sphere", "center": [-1.3, -3.6, 44.5], "radius": 0.7, "op": "subtract", "blend": 0.4}]},
+  {"name": "Hair", "color": [0.45, 0.3, 0.18], "blend": 0.6, "detail": {"amplitude": 0.08, "scale": 0.6},
+   "primitives": [
+    {"type": "strand", "points": [[0, 1, 48.5], [0.5, 3.5, 46], [0.8, 4.5, 41], [0.5, 4.8, 36]],
+     "radius": 1.2, "radius_end": 0.35}]}]}
+```
+
+Rules that make it look real instead of plastic:
+
+- **Proportions first.** Adult figure 7.5–8 heads tall (heroic 8–8.5, child 5–6); shoulders about 2 head widths; the eyes sit halfway down the head; the hand reaches mid-thigh; the elbow is at the waist. Animals: work from the skeleton masses (skull, rib cage, pelvis) outwards.
+- **Ellipsoids and tapered capsules, not spheres.** Equal spheres in a row read as bubbles. Limbs taper (`radius_b`); muscles are flattened ellipsoids rotated along the limb.
+- **Hair, beards, fur: many tapered strands.** 20–80 strands with 3–5 points each, thick at the root and fine at the tip (`radius_end` ≈ 0.3 × `radius`), slightly different lengths and curves, in overlapping layers and following the head's shape; a small blend (0.3–0.8 mm) so they merge into locks; a little detail noise along them.
+- **Faces:** subtract the eye sockets and the mouth line with a small blend; add brow ridge, cheekbones, nose and chin as small ellipsoids. Break the symmetry slightly; real faces are not mirror-perfect.
+- **Cloth:** folds as long thin capsules added (ridges) and subtracted (valleys) along the direction of pull; hems as a torus or a strand.
+- **Surface detail scales with the object:** `detail.amplitude` 0.1–0.3 % of the size for skin, 1–3 % for stone or bark; `scale` is the feature size. Give each material its own part, color and detail.
+- **Resolution:** default about 1/200 of the size; set `voxel_mm` to roughly a third of the finest feature (0.15–0.3 mm for a 5 cm figure). Very fine settings take longer; split large scenes into parts.
+- **Iterate:** block out with a few primitives, look at it from front and side, then add.
+
+## Smooth CAD forms in FreeCAD
+
+**Loft through closed B-spline sections.** Same point count on every section, start points aligned (all start at angle 0), `ruled=False` for smooth transitions; `maxDegree` 3 keeps it from overshooting.
+
+```python
+import math
+
+
+def section(z, rx, ry, wobble=0.0, phase=0.0, n=24):
+    pts = []
+    for i in range(n):
+        a = 2 * math.pi * i / n
+        k = 1 + wobble * math.sin(3 * a + phase)
+        pts.append(Vector(rx * k * math.cos(a), ry * k * math.sin(a), z))
+    curve = Part.BSplineCurve()
+    curve.interpolate(pts, PeriodicFlag=True)
+    return Part.Wire(curve.toShape())
+
+
+profiles = [section(0, 14, 10), section(25, 18, 13, 0.04), section(55, 11, 9, 0.06, 0.5),
+            section(80, 16, 12, 0.03), section(95, 6, 6)]
+vase = Part.makeLoft(profiles, True, False, False, 3)   # solid, ruled, closed, maxDegree
+obj = doc.addObject("Part::Feature", "Vase")
+obj.Shape = vase
+assert vase.isValid() and len(vase.Solids) == 1 and vase.Volume > 1000
+```
+
+**Tapered sweep** for horns, tails, handles and limbs as solids: a circle at each end of a B-spline path.
+
+```python
+path = [Vector(0, 0, 0), Vector(10, 0, 20), Vector(30, 0, 35), Vector(55, 0, 38)]
+spine = Part.BSplineCurve()
+spine.interpolate(path)
+wire = Part.Wire(spine.toShape())
+start = Part.Wire(Part.Circle(path[0], spine.tangent(spine.FirstParameter)[0], 8).toShape())
+tip = Part.Wire(Part.Circle(path[-1], spine.tangent(spine.LastParameter)[0], 1.5).toShape())
+horn = wire.makePipeShell([start, tip], True, True)     # solid, Frenet
+doc.addObject("Part::Feature", "Horn").Shape = horn
+assert horn.isValid() and horn.Volume > 0
+```
+
+**B-spline surface from a grid**, thickened into a solid (terrain, a freeform panel, a relief).
+
+```python
+import math
+
+grid = [[Vector(x * 10, y * 10, 3 * math.sin(x * 0.8) * math.cos(y * 0.6)) for y in range(7)] for x in range(9)]
+surf = Part.BSplineSurface()
+surf.interpolate(grid)
+panel = surf.toShape().makeOffsetShape(2.0, 0.01, fill=True)
+doc.addObject("Part::Feature", "Panel").Shape = panel
+assert panel.isValid() and panel.Volume > 0
+```
+
+## Meshes, safely
+
+Build a mesh from triangles given as **coordinates** (FreeCAD builds the topology itself) or read a file with `Mesh.Mesh(path)`. Never hand raw point/index lists to the C++ API: one bad index crashed FreeCAD (SIGSEGV in `MeshKernel::AddFacets`). Smooth with `smooth("Taubin", n)` (the docstring's `smooth(iteration)` is outdated), reduce with `decimate()`, and set `CreaseAngle` so it shades round.
+
+```python
+import math
+
+import Mesh
+
+src = Mesh.createSphere(10, 40)
+points, facets = src.Topology
+bumped = [p * (1 + 0.06 * math.sin(p.x * 0.9) * math.cos(p.y * 0.7)) for p in points]
+rock = Mesh.Mesh([[bumped[i] for i in f] for f in facets])   # triangles as coordinates
+rock.smooth("Taubin", 2)   # Method "Taubin" (keeps the volume) or "Laplace" (shrinks), iterations
+rock.harmonizeNormals()
+obj = doc.addObject("Mesh::Feature", "Rock")
+obj.Mesh = rock
+obj.ViewObject.CreaseAngle = 70
+assert rock.isSolid() and rock.CountFacets == src.CountFacets
+```
+
+## What breaks (learned the hard way)
+
+- **Many curved solids fused together** (dozens of ellipsoids and pipes) make OpenCascade's booleans slow, memory-hungry (tens of GB) or crash on near-tangent surfaces. For organic forms use `sculpt`, or few lofts and sweeps; keep separate pieces as a compound instead of fusing everything.
+- **Raw mesh data through `Mesh.Mesh(points, indices)`** can segfault on a bad index: use coordinates or files (above).
+- **Heavy or risky geometry** belongs in `run_headless`: if it crashes, the user's FreeCAD and their unsaved work survive.

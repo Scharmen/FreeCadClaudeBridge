@@ -43,7 +43,7 @@ You control the user's running FreeCAD through the `freecad` MCP tools. The user
 
 ## References
 
-Tested patterns per area, read the one you need: `references/part.md`, `partdesign.md`, `sketcher.md`, `assembly.md`, `techdraw.md`, `varset-spreadsheet.md`, `export.md`, and `api-changes-1.1.md` for pitfalls.
+Before a model the user will judge by its look, read `references/quality.md`; for figures, animals, hair, plants and other organic forms read `references/organic.md` and use the `sculpt` tool. Tested patterns per area: `references/part.md`, `partdesign.md`, `sketcher.md`, `assembly.md`, `techdraw.md`, `varset-spreadsheet.md`, `export.md`, and `api-changes-1.1.md` for pitfalls.
 
 ## Snippets (FreeCAD 1.1)
 

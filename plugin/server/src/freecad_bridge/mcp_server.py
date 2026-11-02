@@ -503,6 +503,64 @@ async def record_feedback(rating: Literal["good", "partly", "bad"], comment: str
     return _dump({"recorded": True, "lesson_added": entry["lesson_added"], "lessons": len(learning.lessons(bd))})
 
 
+SCULPT_CODE = """
+import json as _json, Mesh
+_parts = _json.loads({parts!r})
+if doc is None:
+    doc = App.newDocument("Sculpt")
+_grp = doc.addObject("App::DocumentObjectGroup", {name!r})
+_made = []
+for _p in _parts:
+    _m = Mesh.Mesh(_p["path"])          # FreeCAD's own STL reader: no raw facet data through the C++ API
+    _m.harmonizeNormals()
+    _o = doc.addObject("Mesh::Feature", _p["name"])
+    _o.Mesh = _m
+    _grp.addObject(_o)
+    _vo = getattr(_o, "ViewObject", None)
+    if _vo is not None:
+        if hasattr(_vo, "CreaseAngle"):
+            _vo.CreaseAngle = 70           # smooth shading: organic surfaces look round, not faceted
+        if _p.get("color") and hasattr(_vo, "ShapeColor"):
+            _vo.ShapeColor = tuple(float(c) for c in _p["color"][:3])
+    _bb = _m.BoundBox
+    _made.append({{"object": _o.Name, "triangles": _m.CountFacets, "watertight": _m.isSolid(),
+                  "size_mm": [round(_bb.XLength, 2), round(_bb.YLength, 2), round(_bb.ZLength, 2)]}})
+_result = {{"group": _grp.Name, "parts": _made}}
+"""
+
+
+@mcp.tool(annotations=WRITE, structured_output=False)
+async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | None = None, smooth: int = 4,
+                 doc: str | None = None, instance: int | None = None) -> str:
+    """Sculpt organic shapes (figures, animals, faces, hair, plants, rocks, terrain) from smoothly
+    blended primitives, like clay: they melt into each other instead of meeting at hard seams.
+    scene = {"blend": 1.5, "detail": {...}, "parts": [{"name", "color": [r,g,b] 0..1, "blend",
+    "detail", "primitives": [...]}, ...]} (or a single part's keys at the top level).
+    Primitives (mm): sphere {center, radius}; ellipsoid {center, radii, rotate:[rx,ry,rz] deg};
+    capsule {a, b, radius, radius_b} (tapered limb/finger); strand {points:[[x,y,z]...], radius,
+    radius_end} (hair lock, tail, beard, vine); box {center, size, round, rotate}; torus {center,
+    radius, thickness, rotate}; cylinder {a, b, radius}. Each may set "op": add|subtract|intersect
+    and its own "blend" (mm, 0 = hard edge). "detail": {"amplitude": mm, "scale": mm, "seed"}
+    adds skin/stone/fur texture. voxel_mm sets the resolution (default: automatic, about 1/200 of
+    the size); smooth = Taubin passes. The meshes are computed outside FreeCAD and imported as
+    Mesh objects in a group (one undo step); export them as STL/3MF for printing."""
+    from . import sculpt as sculpt_mod
+
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name) or "Sculpt"
+    out_dir = os.path.join(str(platforms.bridge_dir()), "sculpt", f"{safe}-{time.strftime('%Y%m%d-%H%M%S')}")
+    try:
+        res = await anyio.to_thread.run_sync(lambda: sculpt_mod.sculpt_scene(scene, out_dir, voxel_mm, smooth))
+    except ValueError as e:
+        raise ToolError(f"INVALID_ARGS: {e}") from e
+    code = SCULPT_CODE.format(parts=json.dumps(res["parts"]), name=safe)
+    out = await _raw("run_python", {"code": code, "doc": doc, "transaction": f"Sculpt {safe}"}, timeout_s=300,
+                     instance=instance)
+    if isinstance(out, dict):
+        warnings = {p["name"]: p["warning"] for p in res["parts"] if p.get("warning")}
+        out = {"computed_in_s": res["seconds"], **out, **({"part_warnings": warnings} if warnings else {})}
+    return _dump(out)
+
+
 def _refresh_config() -> None:
     """After a plugin update: point config.json at the new plugin path and update the addon."""
     try:
