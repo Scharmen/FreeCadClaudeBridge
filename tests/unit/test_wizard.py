@@ -86,7 +86,7 @@ def test_everything_present_installs_plugin_and_addon():
     cmds = [" ".join(c[1:]) for c in s.commands]
     assert f"plugin marketplace add {wizard.MARKETPLACE}" in cmds
     assert f"plugin install {wizard.PLUGIN}" in cmds
-    assert calls["addon"][0] == "/u/.claude/plugins/cache/freecad/addon/ClaudeBridge"
+    assert Path(calls["addon"][0]) == Path("/u/.claude/plugins/cache/freecad/addon/ClaudeBridge")
     assert "FreeCAD 1.1.4" in s.text() and "Claude Desktop" in s.text() and "logged in" in s.text().lower()
 
 
