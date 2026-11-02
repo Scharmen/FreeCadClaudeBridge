@@ -27,6 +27,18 @@ def _params() -> Any:
     return App.ParamGet(PARAMS)
 
 
+def _when(stamp: float) -> str:
+    """Short time like the Desktop app's list: 14:05 today, Mon, or 03.11."""
+    if not stamp:
+        return ""
+    now, t = time.localtime(), time.localtime(stamp)
+    if t[:3] == now[:3]:
+        return time.strftime("%H:%M", t)
+    if time.time() - stamp < 6 * 86400:
+        return time.strftime("%a %H:%M", t)
+    return time.strftime("%d.%m.%Y", t)
+
+
 def _history_path(key: str) -> str:
     return os.path.join(paths.bridge_dir(), "history", hashlib.sha1(key.encode()).hexdigest()[:16] + ".html")
 
@@ -82,6 +94,59 @@ def context_line() -> str:
     return f"[FreeCAD] Active document: {doc.Label} ({doc.Name}). Selection: {sel}."
 
 
+SUBTITLE_ROLE = QtCore.Qt.UserRole + 1
+
+
+class _ConversationDelegate(QtWidgets.QStyledItemDelegate):
+    """Two-line rows like the Claude Desktop sidebar: title (elided) over a small grey subtitle."""
+
+    def paint(self, painter: QtGui.QPainter, option: Any, index: Any) -> None:  # noqa: N802 (Qt API)
+        if index.data(QtCore.Qt.UserRole) is None:             # section header
+            super().paint(painter, option, index)
+            return
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        r = option.rect.adjusted(2, 1, -4, -1)
+        pal = option.palette
+        fg = pal.text().color()
+        if option.state & QtWidgets.QStyle.State_Selected:
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.setBrush(pal.highlight())
+            painter.drawRoundedRect(r, 6, 6)
+            fg = pal.highlightedText().color()
+        elif option.state & QtWidgets.QStyle.State_MouseOver:
+            hover = QtGui.QColor(fg)
+            hover.setAlphaF(0.08)
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.setBrush(hover)
+            painter.drawRoundedRect(r, 6, 6)
+        text = r.adjusted(8, 5, -8, -4)
+        font = QtGui.QFont(option.font)
+        fm = QtGui.QFontMetrics(font)
+        painter.setFont(font)
+        painter.setPen(fg)
+        title = str(index.data(QtCore.Qt.DisplayRole) or "")
+        painter.drawText(text.x(), text.y() + fm.ascent(), fm.elidedText(title, QtCore.Qt.ElideRight, text.width()))
+        small = QtGui.QFont(font)
+        small.setPointSizeF(max(7.0, font.pointSizeF() * 0.85))
+        sfm = QtGui.QFontMetrics(small)
+        grey = QtGui.QColor(fg)
+        grey.setAlphaF(0.6)
+        painter.setFont(small)
+        painter.setPen(grey)
+        sub = str(index.data(SUBTITLE_ROLE) or "")
+        painter.drawText(text.x(), text.y() + fm.height() + 2 + sfm.ascent(),
+                         sfm.elidedText(sub, QtCore.Qt.ElideRight, text.width()))
+        painter.restore()
+
+    def sizeHint(self, option: Any, index: Any) -> QtCore.QSize:  # noqa: N802 (Qt API)
+        if index.data(QtCore.Qt.UserRole) is None:
+            hint = super().sizeHint(option, index)
+            return QtCore.QSize(hint.width(), hint.height() + 8)
+        fm = QtGui.QFontMetrics(option.font)
+        return QtCore.QSize(option.rect.width(), fm.height() * 2 + 12)
+
+
 class _Input(QtWidgets.QPlainTextEdit):
     submitted = QtCore.Signal()
 
@@ -110,10 +175,28 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.max_result_chars = 0
 
         body = QtWidgets.QWidget()
-        lay = QtWidgets.QVBoxLayout(body)
+        outer = QtWidgets.QHBoxLayout(body)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+        outer.addWidget(self.splitter)
+        self.sidebar = self._build_sidebar()
+        self.splitter.addWidget(self.sidebar)
+        chat = QtWidgets.QWidget()
+        self.splitter.addWidget(chat)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.splitterMoved.connect(self._remember_sidebar_width)
+        lay = QtWidgets.QVBoxLayout(chat)
         lay.setContentsMargins(6, 6, 6, 6)
 
         head = QtWidgets.QHBoxLayout()
+        self.side_btn = QtWidgets.QToolButton()
+        self.side_btn.setText("☰")
+        self.side_btn.setCheckable(True)
+        self.side_btn.setToolTip("Show or hide the conversation list")
+        self.side_btn.toggled.connect(self._toggle_sidebar)
+        head.addWidget(self.side_btn)
         self.mode_label = QtWidgets.QLabel()
         head.addWidget(self.mode_label, 1)
         self.menu_btn = QtWidgets.QToolButton()
@@ -133,25 +216,6 @@ class ChatPanel(QtWidgets.QDockWidget):
         head.addWidget(self.image_btn)
         head.addWidget(self.menu_btn)
         lay.addLayout(head)
-
-        bar = QtWidgets.QHBoxLayout()
-        self.conv_box = QtWidgets.QComboBox()
-        self.conv_box.setToolTip("Conversations of this document, and other Claude Code sessions in its folder "
-                                 "(terminal, Claude Desktop)")
-        self.conv_box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.conv_box.activated.connect(self._on_conversation_chosen)
-        bar.addWidget(self.conv_box, 1)
-        new_btn = QtWidgets.QToolButton()
-        new_btn.setText("＋")
-        new_btn.setToolTip("New conversation")
-        new_btn.clicked.connect(self.new_conversation)
-        bar.addWidget(new_btn)
-        desk_btn = QtWidgets.QToolButton()
-        desk_btn.setText("↗")
-        desk_btn.setToolTip("Open this conversation in the Claude Desktop app")
-        desk_btn.clicked.connect(self.open_in_desktop)
-        bar.addWidget(desk_btn)
-        lay.addLayout(bar)
 
         self.view = QtWidgets.QTextBrowser()
         self.view.setOpenLinks(False)
@@ -179,6 +243,11 @@ class ChatPanel(QtWidgets.QDockWidget):
 
         self.setWidget(body)
         self._update_mode_label()
+        visible = _params().GetBool("SidebarVisible", True)
+        self.side_btn.setChecked(visible)
+        self.sidebar.setVisible(visible)
+        width = _params().GetInt("SidebarWidth", 180)
+        self.splitter.setSizes([width, max(260, self.width() - width)])
         self._render_active()
         self._doc_watcher = _ActiveDocWatcher(self)
         App.addDocumentObserver(self._doc_watcher)
@@ -244,6 +313,46 @@ class ChatPanel(QtWidgets.QDockWidget):
 
     # ----- conversations -----
 
+    def _build_sidebar(self) -> QtWidgets.QWidget:
+        side = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(side)
+        v.setContentsMargins(6, 6, 0, 6)
+        top = QtWidgets.QHBoxLayout()
+        title = QtWidgets.QLabel("<b>Conversations</b>")
+        top.addWidget(title, 1)
+        new_btn = QtWidgets.QToolButton()
+        new_btn.setText("＋")
+        new_btn.setToolTip("New conversation")
+        new_btn.clicked.connect(self.new_conversation)
+        top.addWidget(new_btn)
+        desk_btn = QtWidgets.QToolButton()
+        desk_btn.setText("↗")
+        desk_btn.setToolTip("Open the current conversation in the Claude Desktop app")
+        desk_btn.clicked.connect(self.open_in_desktop)
+        top.addWidget(desk_btn)
+        v.addLayout(top)
+        self.conv_list = QtWidgets.QListWidget()
+        self.conv_list.setItemDelegate(_ConversationDelegate(self.conv_list))
+        self.conv_list.setMouseTracking(True)
+        self.conv_list.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.conv_list.setStyleSheet("QListWidget { background: transparent; }")
+        self.conv_list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.conv_list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.conv_list.customContextMenuRequested.connect(self._conversation_menu)
+        self.conv_list.itemClicked.connect(self._on_conversation_item)
+        v.addWidget(self.conv_list, 1)
+        side.setMinimumWidth(130)
+        return side
+
+    def _toggle_sidebar(self, visible: bool) -> None:
+        self.sidebar.setVisible(visible)
+        _params().SetBool("SidebarVisible", visible)
+
+    def _remember_sidebar_width(self, *_: Any) -> None:
+        sizes = self.splitter.sizes()
+        if sizes and sizes[0] > 0:
+            _params().SetInt("SidebarWidth", sizes[0])
+
     def _hist_key(self) -> str:
         item = self.store.active(self.current_key)
         return f"session:{item['id']}" if item else f"pending:{self.current_key}"
@@ -253,24 +362,45 @@ class ChatPanel(QtWidgets.QDockWidget):
         return os.path.dirname(doc.FileName) if doc is not None and doc.FileName else os.path.expanduser("~")
 
     def refresh_conversations(self) -> None:
-        box = self.conv_box
-        box.blockSignals(True)
-        box.clear()
+        lst = self.conv_list
+        lst.clear()
         active = self.store.active(self.current_key)
-        items = sorted(self.store.items(self.current_key), key=lambda c: c.get("created", 0), reverse=True)
+        role = QtCore.Qt.UserRole
+
+        def header(text: str) -> None:
+            it = QtWidgets.QListWidgetItem(text.upper())
+            it.setFlags(QtCore.Qt.NoItemFlags)
+            font = it.font()
+            font.setPointSizeF(max(7.0, font.pointSizeF() * 0.8))
+            font.setBold(True)
+            it.setFont(font)
+            it.setForeground(QtGui.QColor("#888"))
+            lst.addItem(it)
+
+        def entry(text: str, sub: str, data: tuple, tip: str, current: bool) -> None:
+            it = QtWidgets.QListWidgetItem(text)
+            it.setData(role, data)
+            it.setData(SUBTITLE_ROLE, sub)
+            it.setToolTip(tip)
+            lst.addItem(it)
+            if current:
+                lst.setCurrentItem(it)
+
+        doc = App.ActiveDocument
+        header(doc.Label if doc is not None else "No document")
         if active is None:
-            box.addItem("New conversation", ("pending", None))
-        for c in items:
-            box.addItem(c["title"], ("doc", c["id"]))
-            if active and c["id"] == active["id"]:
-                box.setCurrentIndex(box.count() - 1)
+            entry("New conversation", "not started yet", ("pending", None), "Type a message to start it", True)
+        for c in sorted(self.store.items(self.current_key), key=lambda c: c.get("created", 0), reverse=True):
+            path = conversations.session_path(c["cwd"], c["id"])
+            stamp = os.path.getmtime(path) if path and os.path.exists(path) else c.get("created", 0)
+            entry(c["title"], _when(stamp), ("doc", c["id"]), f"{c['title']}\nSession {c['id']}",
+                  bool(active and c["id"] == active["id"]))
         others = conversations.folder_sessions(self._doc_folder(), exclude=self.store.linked_ids())
         if others:
-            box.insertSeparator(box.count())
+            header("In this folder")
             for info in others:
-                when = time.strftime("%d.%m. %H:%M", time.localtime(info["updated"]))
-                box.addItem(f"↘ {info['title']}  ({info['source'] or 'session'}, {when})", ("ext", info))
-        box.blockSignals(False)
+                entry(info["title"], f"{info['source'] or 'session'} · {_when(info['updated'])}", ("ext", info),
+                      f"{info['title']}\nStarted in: {info['source'] or '?'}\nClick to continue it here", False)
 
     def _render_active(self) -> None:
         """Show the active conversation: the panel's own record, or the session file if it is newer
@@ -297,8 +427,26 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.refresh_conversations()
         self._scroll()
 
-    def _on_conversation_chosen(self, index: int) -> None:
-        kind, value = self.conv_box.itemData(index) or (None, None)
+    def _on_conversation_item(self, item: QtWidgets.QListWidgetItem) -> None:
+        kind, value = item.data(QtCore.Qt.UserRole) or (None, None)
+        self._choose(kind, value)
+
+    def _conversation_menu(self, pos: QtCore.QPoint) -> None:
+        item = self.conv_list.itemAt(pos)
+        data = item.data(QtCore.Qt.UserRole) if item else None
+        if not data or data[0] == "pending":
+            return
+        self._choose(*data)
+        menu = QtWidgets.QMenu(self)
+        menu.addAction("Rename…").triggered.connect(self.rename_conversation)
+        menu.addAction("Open in Claude Desktop").triggered.connect(self.open_in_desktop)
+        menu.addSeparator()
+        menu.addAction("Delete…").triggered.connect(self.delete_conversation)
+        menu.exec(self.conv_list.viewport().mapToGlobal(pos))
+
+    def _choose(self, kind: str | None, value: Any) -> None:
+        if kind is None:
+            return
         if self.run and self.run.running():
             self.refresh_conversations()
             self._note("Wait until Claude is done, or press Stop, before switching conversations.")
@@ -633,6 +781,9 @@ def ensure_panel(show: bool = True) -> ChatPanel:
         panel = ChatPanel(mw)
         mw.addDockWidget(QtCore.Qt.RightDockWidgetArea, panel)
         _panel["widget"] = panel
+        if not _params().GetBool("SidebarIntroduced", False):    # once: room for the conversation list
+            _params().SetBool("SidebarIntroduced", True)
+            QtCore.QTimer.singleShot(0, lambda: mw.resizeDocks([panel], [580], QtCore.Qt.Horizontal))
     panel.setVisible(show)
     if show:
         panel.raise_()

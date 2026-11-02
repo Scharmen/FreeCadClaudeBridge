@@ -2,7 +2,7 @@
 
 ## 1.4.0 – several conversations, shared with Claude Code and the Desktop app (unreleased)
 
-- The chat panel keeps several conversations per document: a list above the chat to switch, ＋ for a new one, rename and delete in the ⚙ menu.
+- The chat panel keeps several conversations per document in a sidebar on the left, like the Claude Desktop app: two-line rows (title, source and time), ＋ for a new one, right-click to rename, delete or open in the Desktop app, ☰ to hide the list. Width and visibility are remembered; the panel is widened once to make room.
 - Every conversation is a normal Claude Code session. The list also offers the other sessions in the document's folder (started in a terminal or the Claude Desktop app) to continue in the panel; ↗ (or ⚙ → Open in Claude Desktop) opens the current conversation in the Desktop app with `claude --desktop --resume <id>`.
 - When a conversation went on outside the panel, switching back redraws it from the session file, so nothing is missing.
 - A conversation is resumed in the folder its session lives in, so saving an unsaved document no longer loses it. The old one-session-per-document map is migrated.
