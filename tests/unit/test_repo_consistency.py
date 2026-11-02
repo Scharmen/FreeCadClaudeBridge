@@ -18,12 +18,14 @@ def test_shared_copies_identical():
 
 
 def _versions():
-    plugin = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text())["version"]
-    pyproject = tomllib.loads((SERVER / "pyproject.toml").read_text())["project"]["version"]
-    server_init = re.search(r'__version__ = "(.+?)"', (SERVER / "src/freecad_bridge/__init__.py").read_text())[1]
-    addon_init = re.search(r'__version__ = "(.+?)"', (ADDON / "claudebridge/__init__.py").read_text())[1]
-    init_py = re.search(r'CLAUDE_BRIDGE_VERSION = "(.+?)"', (ADDON / "Init.py").read_text())[1]
-    package_xml = re.search(r"<version>(.+?)</version>", (ROOT / "package.xml").read_text())[1]
+    plugin = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+    pyproject = tomllib.loads((SERVER / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    server_text = (SERVER / "src/freecad_bridge/__init__.py").read_text(encoding="utf-8")
+    addon_text = (ADDON / "claudebridge/__init__.py").read_text(encoding="utf-8")
+    server_init = re.search(r'__version__ = "(.+?)"', server_text)[1]
+    addon_init = re.search(r'__version__ = "(.+?)"', addon_text)[1]
+    init_py = re.search(r'CLAUDE_BRIDGE_VERSION = "(.+?)"', (ADDON / "Init.py").read_text(encoding="utf-8"))[1]
+    package_xml = re.search(r"<version>(.+?)</version>", (ROOT / "package.xml").read_text(encoding="utf-8"))[1]
     return {"plugin.json": plugin, "pyproject": pyproject, "server": server_init,
             "addon": addon_init, "Init.py": init_py, "package.xml": package_xml}
 
@@ -34,15 +36,15 @@ def test_versions_match():
 
 
 def test_plugin_names_match():
-    market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
-    plugin = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text())
+    market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+    plugin = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
     assert market["name"] == "freecad-claude"
     assert [p["name"] for p in market["plugins"]] == [plugin["name"]] == ["freecad"]
     assert market["plugins"][0]["source"] == "./plugin"
 
 
 def test_mcp_server_named_freecad():
-    cfg = json.loads((ROOT / "plugin/.mcp.json").read_text())
+    cfg = json.loads((ROOT / "plugin/.mcp.json").read_text(encoding="utf-8"))
     assert list(cfg["mcpServers"]) == ["freecad"]
 
 
@@ -52,7 +54,7 @@ def test_addon_has_no_third_party_imports():
 
     stdlib = set(sys.stdlib_module_names)
     for py in ADDON.rglob("*.py"):
-        for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_][\w]*)", py.read_text(), re.M):
+        for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_][\w]*)", py.read_text(encoding="utf-8"), re.M):
             mod = m[1]
             assert mod in stdlib or mod in allowed or mod == "__future__", f"{py}: imports {mod}"
 
@@ -61,7 +63,7 @@ def test_no_network_access_and_loopback_only():
     """Security checklist: no telemetry or update checks, TCP only on 127.0.0.1."""
     code = [*ADDON.rglob("*.py"), *(SERVER / "src").rglob("*.py")]
     for py in code:
-        text = py.read_text()
+        text = py.read_text(encoding="utf-8")
         assert not re.search(r"^\s*(?:import|from)\s+(?:urllib|http|requests|httpx|aiohttp)\b", text, re.M), py
         for m in re.finditer(r"\.bind\((.+?)\)\n", text):
             assert "127.0.0.1" in m[1] or "path" in m[1], f"{py}: bind({m[1]})"

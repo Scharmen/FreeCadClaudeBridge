@@ -218,7 +218,7 @@ def version_tuple(version: str) -> tuple[int, ...]:
 
 def installed_version(mod_dir: Path) -> str | None:
     try:
-        return json.loads((mod_dir / ADDON_NAME / INSTALLED_MARKER).read_text()).get("version")
+        return json.loads((mod_dir / ADDON_NAME / INSTALLED_MARKER).read_text(encoding="utf-8")).get("version")
     except (OSError, ValueError):
         return None
 
@@ -237,7 +237,7 @@ def copy_addon(addon_src: Path, mod_dir: Path) -> Path | None:
     mod_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(addon_src, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (dest / INSTALLED_MARKER).write_text(json.dumps(
-        {"version": __version__, "source": str(addon_src), "installed_at": time.time()}, indent=2))
+        {"version": __version__, "source": str(addon_src), "installed_at": time.time()}, indent=2), encoding="utf-8")
     return backup
 
 
@@ -338,7 +338,7 @@ def _instance_infos() -> list[dict]:
     infos = []
     for f in platforms.instances_dir().glob("*.json") if platforms.instances_dir().is_dir() else []:
         try:
-            infos.append(json.loads(f.read_text()))
+            infos.append(json.loads(f.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             continue
     return infos

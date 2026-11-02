@@ -19,7 +19,7 @@ DOC = "RefTest"
 def blocks():
     out = []
     for md in sorted([*REFS.glob("*.md"), SKILL]):
-        for i, code in enumerate(re.findall(r"```python\n(.*?)```", md.read_text(), re.S), 1):
+        for i, code in enumerate(re.findall(r"```python\n(.*?)```", md.read_text(encoding="utf-8"), re.S), 1):
             out.append(pytest.param(code, id=f"{md.stem}-{i}"))
     return out
 

@@ -109,7 +109,7 @@ def pending_update() -> str | None:
 
     marker = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".installed.json")
     try:
-        with open(marker) as f:
+        with open(marker, encoding="utf-8") as f:
             installed = json.load(f).get("version")
     except (OSError, ValueError):
         return None

@@ -34,7 +34,7 @@ def _sessions_path() -> str:
 
 def _load_sessions() -> dict[str, str]:
     try:
-        with open(_sessions_path()) as f:
+        with open(_sessions_path(), encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
@@ -43,7 +43,7 @@ def _load_sessions() -> dict[str, str]:
 def _save_sessions(data: dict[str, str]) -> None:
     try:
         paths.ensure_bridge_dir()
-        with open(_sessions_path(), "w") as f:
+        with open(_sessions_path(), "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
     except OSError:
         pass

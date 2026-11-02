@@ -31,7 +31,7 @@ def test_user_edits_to_the_file_are_respected(tmp_path):
     learning.add_lesson(tmp_path, "keep me")
     learning.add_lesson(tmp_path, "delete me")
     p = tmp_path / learning.PREFERENCES
-    p.write_text(p.read_text().replace("- delete me\n", ""))
+    p.write_text(p.read_text(encoding="utf-8").replace("- delete me\n", ""), encoding="utf-8")
     assert learning.lessons(tmp_path) == ["keep me"]
 
 

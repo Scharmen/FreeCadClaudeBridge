@@ -204,7 +204,7 @@ def test_audit_record_is_private_and_rotates(bridge, monkeypatch):
         platforms.audit_record("run_headless", script="x" * 100, n=i)
     log = platforms.audit_path()
     assert log.with_name("bridge-log.1.jsonl").exists()
-    assert all(json.loads(line)["event"] == "run_headless" for line in log.read_text().splitlines())
+    assert all(json.loads(line)["event"] == "run_headless" for line in log.read_text(encoding="utf-8").splitlines())
     if sys.platform != "win32":
         assert oct(os.stat(log).st_mode & 0o777) == "0o600"
 
@@ -215,5 +215,5 @@ def test_addon_audit_clips_and_drops_internal_args(bridge):
     args = audit.call_args({"code": "y" * (audit.MAX_FIELD + 10), "_timeout": 5, "doc": "D"})
     assert "_timeout" not in args and args["doc"] == "D" and len(args["code"]) < audit.MAX_FIELD + 50
     audit.record("call", op="run_python", args=args, ok=True)
-    entry = json.loads(Path(audit.log_path()).read_text())
+    entry = json.loads(Path(audit.log_path()).read_text(encoding="utf-8"))
     assert entry["op"] == "run_python" and entry["ok"] is True

@@ -93,7 +93,7 @@ def list_instances(cleanup: bool = True) -> list[Instance]:
         return out
     for path in d.glob("*.json"):
         try:
-            info = json.loads(path.read_text())
+            info = json.loads(path.read_text(encoding="utf-8"))
             inst = Instance(int(info["pid"]), info["transport"], info["address"], info)
         except (OSError, ValueError, KeyError):
             continue

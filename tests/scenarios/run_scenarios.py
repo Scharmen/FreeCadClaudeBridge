@@ -144,7 +144,7 @@ def run(n: int) -> dict:
 if __name__ == "__main__":
     which = [int(a) for a in sys.argv[1:]] or list(SCENARIOS)
     results_path = HERE / "results.json"
-    results = json.loads(results_path.read_text()) if results_path.exists() else {}
+    results = json.loads(results_path.read_text(encoding="utf-8")) if results_path.exists() else {}
     for n in which:
         r = run(n)
         results[str(n)] = r

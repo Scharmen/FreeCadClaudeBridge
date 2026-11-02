@@ -101,7 +101,7 @@ def write_instance(pid: int, info: dict) -> None:
     ensure_bridge_dir()
     tmp = instance_path(pid) + ".tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(info, f, indent=2)
     os.replace(tmp, instance_path(pid))
 
@@ -116,7 +116,7 @@ def remove_instance(pid: int) -> None:
 
 def load_config() -> dict:
     try:
-        with open(config_path()) as f:
+        with open(config_path(), encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}

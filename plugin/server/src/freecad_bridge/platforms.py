@@ -85,7 +85,7 @@ def audit_record(event: str, **fields: object) -> None:
 
 def load_config() -> dict:
     try:
-        return json.loads(config_path().read_text())
+        return json.loads(config_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
@@ -95,7 +95,7 @@ def update_config(**values: object) -> dict:
     cfg.update({k: v for k, v in values.items() if v is not None})
     bridge_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = config_path().with_suffix(".tmp")
-    tmp.write_text(json.dumps(cfg, indent=2))
+    tmp.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     os.chmod(tmp, 0o600)
     tmp.replace(config_path())
     return cfg

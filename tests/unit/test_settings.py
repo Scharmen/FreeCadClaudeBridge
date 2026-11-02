@@ -29,12 +29,12 @@ def test_save_clamps_and_keeps_only_changes(bridge):
     values = settings.save(bridge, {"headless.reserve_percent": 99, "headless.hard_cap_percent": "60"})
     assert values["headless.reserve_percent"] == 50, "clamped to the allowed range"
     assert values["headless.hard_cap_percent"] == 60
-    stored = json.loads((bridge / settings.FILE_NAME).read_text())
+    stored = json.loads((bridge / settings.FILE_NAME).read_text(encoding="utf-8"))
     assert stored == {"headless.reserve_percent": 50, "headless.hard_cap_percent": 60}
     if sys.platform != "win32":
         assert oct(os.stat(bridge / settings.FILE_NAME).st_mode & 0o777) == "0o600"
     settings.save(bridge, {"headless.reserve_percent": 15})
-    assert "headless.reserve_percent" not in json.loads((bridge / settings.FILE_NAME).read_text())
+    assert "headless.reserve_percent" not in json.loads((bridge / settings.FILE_NAME).read_text(encoding="utf-8"))
 
 
 def test_unknown_key_is_rejected(bridge):
@@ -87,5 +87,5 @@ def test_headless_timeout_default_comes_from_settings(bridge):
 def test_settings_file_survives_uninstall_unless_purged():
     from freecad_bridge import installer
 
-    src = open(installer.__file__).read()
+    src = open(installer.__file__, encoding="utf-8").read()
     assert '"settings.json"' in src
