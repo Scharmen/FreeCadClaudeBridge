@@ -2,7 +2,7 @@
 
 Control FreeCAD by chat with Claude, either in a **"Claude" chat panel inside FreeCAD** or from **Claude Code**. Claude works on your open document through FreeCAD's Python API: it creates and changes geometry, reads the model tree and properties, and exports files. Every Claude step is exactly one undo step, and failed code leaves nothing behind.
 
-> Status: 1.3.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
+> Status: 1.4.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
@@ -26,7 +26,7 @@ Check everything with `/freecad:status`.
 
 ## Use
 
-- **In FreeCAD:** type into the Claude panel, e.g. "Make a 40×30×10 mm block with a 10 mm hole in the middle and export it as STEP to ~/Desktop/block.step". The active document and your current selection are sent along, so "make this face 2 mm thicker" works. Tool calls show up as rows, followed by a summary of created/changed objects and any errors; **Stop** ends the turn. Each document keeps its own conversation; 📷 inserts a picture of the 3D view. If Claude needs a tool the panel doesn't allow, a link lets you allow it for that conversation. Toggle the panel with Ctrl+Alt+K or the *Claude* menu of the "Claude Bridge" workbench.
+- **In FreeCAD:** type into the Claude panel, e.g. "Make a 40×30×10 mm block with a 10 mm hole in the middle and export it as STEP to ~/Desktop/block.step". The active document and your current selection are sent along, so "make this face 2 mm thicker" works. Tool calls show up as rows, followed by a summary of created/changed objects and any errors; **Stop** ends the turn. Each document keeps its own conversations: switch in the list above the chat, start one with ＋, rename or delete it in the ⚙ menu. They are normal Claude Code sessions: ↗ opens the current one in the Claude Desktop app, and sessions you started in a terminal or the Desktop app in the same folder appear in the list to continue here. 📷 inserts a picture of the 3D view. If Claude needs a tool the panel doesn't allow, a link lets you allow it for that conversation. Toggle the panel with Ctrl+Alt+K or the *Claude* menu of the "Claude Bridge" workbench.
 - **In Claude Code:** just ask; the `freecad` tools talk to the running FreeCAD.
 - **From a picture:** attach one with 🖼 in the chat panel, or give Claude a file path ("make a 3 mm thick keychain from ~/logo.png", "revolve this vase silhouette to 12 cm", "a relief plaque from this photo"). Everything runs locally; nothing is uploaded except what Claude sees in the conversation.
 - **Learning:** after each model the panel asks 👍/👎 (Claude Code asks in a line). What you say becomes short lessons in `preferences.md` that every new session follows; view, edit or forget them under *Preferences → Claude Bridge* or with `freecad-bridge preferences`.

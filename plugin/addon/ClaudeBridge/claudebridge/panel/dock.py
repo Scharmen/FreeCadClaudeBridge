@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import html
-import json
 import os
 import time
 from typing import Any
@@ -14,7 +13,7 @@ import FreeCADGui as Gui
 from PySide import QtCore, QtGui, QtWidgets
 
 from ..bridge import paths
-from . import secrets
+from . import conversations, secrets
 from .claude_process import ClaudeRun
 from .stream import check_init, short_tool_name, turn_summary
 
@@ -26,27 +25,6 @@ _panel: dict[str, Any] = {}
 
 def _params() -> Any:
     return App.ParamGet(PARAMS)
-
-
-def _sessions_path() -> str:
-    return os.path.join(paths.bridge_dir(), "sessions.json")
-
-
-def _load_sessions() -> dict[str, str]:
-    try:
-        with open(_sessions_path(), encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
-
-
-def _save_sessions(data: dict[str, str]) -> None:
-    try:
-        paths.ensure_bridge_dir()
-        with open(_sessions_path(), "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-    except OSError:
-        pass
 
 
 def _history_path(key: str) -> str:
@@ -62,8 +40,6 @@ def _load_history(key: str) -> str:
 
 
 def _save_history(key: str, content: str) -> None:
-    if key == NO_DOC:
-        return
     try:
         os.makedirs(os.path.dirname(_history_path(key)), exist_ok=True)
         with open(_history_path(key), "w", encoding="utf-8") as f:
@@ -121,7 +97,8 @@ class ChatPanel(QtWidgets.QDockWidget):
         super().__init__("Claude", parent)
         self.setObjectName(OBJECT_NAME)
         self.run: ClaudeRun | None = None
-        self.sessions = _load_sessions()
+        self.store = conversations.Store(paths.bridge_dir())
+        self.pending: dict[str, str] = {}  # title and folder of a conversation until Claude names its session
         self.tool_rows: dict[str, tuple[str, float]] = {}
         self.text_open = False
         self.turn_started = 0.0
@@ -157,6 +134,25 @@ class ChatPanel(QtWidgets.QDockWidget):
         head.addWidget(self.menu_btn)
         lay.addLayout(head)
 
+        bar = QtWidgets.QHBoxLayout()
+        self.conv_box = QtWidgets.QComboBox()
+        self.conv_box.setToolTip("Conversations of this document, and other Claude Code sessions in its folder "
+                                 "(terminal, Claude Desktop)")
+        self.conv_box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.conv_box.activated.connect(self._on_conversation_chosen)
+        bar.addWidget(self.conv_box, 1)
+        new_btn = QtWidgets.QToolButton()
+        new_btn.setText("＋")
+        new_btn.setToolTip("New conversation")
+        new_btn.clicked.connect(self.new_conversation)
+        bar.addWidget(new_btn)
+        desk_btn = QtWidgets.QToolButton()
+        desk_btn.setText("↗")
+        desk_btn.setToolTip("Open this conversation in the Claude Desktop app")
+        desk_btn.clicked.connect(self.open_in_desktop)
+        bar.addWidget(desk_btn)
+        lay.addLayout(bar)
+
         self.view = QtWidgets.QTextBrowser()
         self.view.setOpenLinks(False)
         self.view.anchorClicked.connect(self._on_link)
@@ -183,7 +179,7 @@ class ChatPanel(QtWidgets.QDockWidget):
 
         self.setWidget(body)
         self._update_mode_label()
-        self.view.setHtml(_load_history(self.current_key))
+        self._render_active()
         self._doc_watcher = _ActiveDocWatcher(self)
         App.addDocumentObserver(self._doc_watcher)
 
@@ -206,6 +202,9 @@ class ChatPanel(QtWidgets.QDockWidget):
         menu.addAction("Remove stored API key").triggered.connect(self.clear_api_key)
         menu.addSeparator()
         menu.addAction("New conversation").triggered.connect(self.new_conversation)
+        menu.addAction("Rename conversation…").triggered.connect(self.rename_conversation)
+        menu.addAction("Delete conversation…").triggered.connect(self.delete_conversation)
+        menu.addAction("Open in Claude Desktop").triggered.connect(self.open_in_desktop)
         menu.addSeparator()
         menu.addAction("Settings…").triggered.connect(self._open_settings)
         return menu
@@ -243,24 +242,133 @@ class ChatPanel(QtWidgets.QDockWidget):
         self._update_mode_label()
         self._note("API key removed. Mode: subscription.")
 
+    # ----- conversations -----
+
+    def _hist_key(self) -> str:
+        item = self.store.active(self.current_key)
+        return f"session:{item['id']}" if item else f"pending:{self.current_key}"
+
+    def _doc_folder(self) -> str:
+        doc = App.ActiveDocument
+        return os.path.dirname(doc.FileName) if doc is not None and doc.FileName else os.path.expanduser("~")
+
+    def refresh_conversations(self) -> None:
+        box = self.conv_box
+        box.blockSignals(True)
+        box.clear()
+        active = self.store.active(self.current_key)
+        items = sorted(self.store.items(self.current_key), key=lambda c: c.get("created", 0), reverse=True)
+        if active is None:
+            box.addItem("New conversation", ("pending", None))
+        for c in items:
+            box.addItem(c["title"], ("doc", c["id"]))
+            if active and c["id"] == active["id"]:
+                box.setCurrentIndex(box.count() - 1)
+        others = conversations.folder_sessions(self._doc_folder(), exclude=self.store.linked_ids())
+        if others:
+            box.insertSeparator(box.count())
+            for info in others:
+                when = time.strftime("%d.%m. %H:%M", time.localtime(info["updated"]))
+                box.addItem(f"↘ {info['title']}  ({info['source'] or 'session'}, {when})", ("ext", info))
+        box.blockSignals(False)
+
+    def _render_active(self) -> None:
+        """Show the active conversation: the panel's own record, or the session file if it is newer
+        (the conversation went on in a terminal or the Desktop app)."""
+        item = self.store.active(self.current_key)
+        saved = _load_history(self._hist_key())
+        path = conversations.session_path(item["cwd"], item["id"]) if item else None
+        newer = path and os.path.exists(path) and (not saved or os.path.getmtime(path) >
+                                                   os.path.getmtime(_history_path(self._hist_key())) + 1)
+        if item and newer:
+            parts = []
+            for role, text in conversations.transcript(path):
+                body = html.escape(text).replace("\n", "<br>")
+                if role == "user":
+                    parts.append(f"<p style='margin-top:10px'><b>You:</b> {body}</p>")
+                elif role == "assistant":
+                    parts.append(f"<p>{body}</p>")
+                else:
+                    parts.append(f"<div style='color:#888'>⚙ {body}</div>")
+            self.view.setHtml("".join(parts))
+            self._note("Redrawn from the session file (it continued outside this panel).")
+        else:
+            self.view.setHtml(saved)
+        self.refresh_conversations()
+        self._scroll()
+
+    def _on_conversation_chosen(self, index: int) -> None:
+        kind, value = self.conv_box.itemData(index) or (None, None)
+        if self.run and self.run.running():
+            self.refresh_conversations()
+            self._note("Wait until Claude is done, or press Stop, before switching conversations.")
+            return
+        _save_history(self._hist_key(), self.view.toHtml())
+        if kind == "doc":
+            self.store.set_active(self.current_key, value)
+        elif kind == "ext":
+            self.store.add(self.current_key, value["id"], value["title"], value["cwd"] or self._doc_folder())
+        elif kind == "pending":
+            return
+        self._render_active()
+
     def new_conversation(self) -> None:
-        key = _doc_key()
-        self.sessions.pop(key, None)
-        self.allowed_extra.pop(key, None)
-        _save_sessions(self.sessions)
+        if self.run and self.run.running():
+            return
+        _save_history(self._hist_key(), self.view.toHtml())
+        self.store.start_new(self.current_key)
+        self.allowed_extra.pop(self.current_key, None)
         self.view.clear()
         self._note("New conversation.")
-        _save_history(key, self.view.toHtml())
+        self.refresh_conversations()
+
+    def rename_conversation(self) -> None:
+        item = self.store.active(self.current_key)
+        if not item:
+            self._note("Start the conversation first.")
+            return
+        title, ok = QtWidgets.QInputDialog.getText(self, "Claude", "Name of this conversation:", text=item["title"])
+        if ok and title.strip():
+            self.store.rename(self.current_key, item["id"], title)
+            self.refresh_conversations()
+
+    def delete_conversation(self) -> None:
+        item = self.store.active(self.current_key)
+        if not item or (self.run and self.run.running()):
+            return
+        sure = QtWidgets.QMessageBox.question(
+            self, "Claude", f"Delete the conversation \"{item['title']}\"? It also disappears from Claude Code "
+                            "(terminal and Desktop app).")
+        if sure != QtWidgets.QMessageBox.Yes:
+            return
+        conversations.delete_session_file(item["cwd"], item["id"])
+        try:
+            os.unlink(_history_path(f"session:{item['id']}"))
+        except OSError:
+            pass
+        self.store.remove(self.current_key, item["id"])
+        self._render_active()
+
+    def open_in_desktop(self) -> None:
+        from .claude_process import open_in_desktop
+
+        item = self.store.active(self.current_key)
+        if not item:
+            self._note("Start the conversation first; then it can be opened in the Claude Desktop app.")
+            return
+        _save_history(self._hist_key(), self.view.toHtml())
+        error = open_in_desktop(item["id"], item["cwd"])
+        self._note(error or "Opened in the Claude Desktop app. Changes made there show up here when you "
+                            "come back to this conversation.", error=bool(error))
 
     def switch_document(self) -> None:
         """Show the conversation of the now active document (deferred while Claude is working)."""
         key = _doc_key()
         if key == self.current_key or (self.run and self.run.running()):
             return
-        _save_history(self.current_key, self.view.toHtml())
+        _save_history(self._hist_key(), self.view.toHtml())
         self.current_key = key
-        self.view.setHtml(_load_history(key))
-        self._scroll()
+        self._render_active()
 
     def insert_view_image(self) -> None:
         gdoc = Gui.ActiveDocument
@@ -273,7 +381,7 @@ class ChatPanel(QtWidgets.QDockWidget):
         width = max(200, min(600, self.view.viewport().width() - 30))
         gdoc.ActiveView.saveImage(path, width, int(width * 0.75), "Current")
         self._append(f"<p><img src='{QtCore.QUrl.fromLocalFile(path).toString()}' width='{width}'></p>")
-        _save_history(self.current_key, self.view.toHtml())
+        _save_history(self._hist_key(), self.view.toHtml())
 
     def attach_image(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -354,11 +462,13 @@ class ChatPanel(QtWidgets.QDockWidget):
         self._note_pending_update()
         self.turn_results, self.turn_denied, self.max_result_chars = [], [], 0
         prompt = context_line() + "\n\n" + text
-        doc = App.ActiveDocument
-        cwd = os.path.dirname(doc.FileName) if doc is not None and doc.FileName else os.path.expanduser("~")
         self.current_key = _doc_key()
-        # Without a document there is nothing to tie a conversation to: start fresh each time.
-        session = None if self.current_key == NO_DOC else self.sessions.get(self.current_key)
+        item = self.store.active(self.current_key)
+        if item and os.path.isdir(item["cwd"]):
+            session, cwd = item["id"], item["cwd"]            # resume where the session file lives
+        else:
+            session, cwd = None, self._doc_folder()
+            self.pending = {"title": text.splitlines()[0][:60], "cwd": cwd}
         self.run = ClaudeRun(prompt, session, self.mode(), cwd,
                              load_plugin_dir=_params().GetBool("LoadPluginDir", True),
                              extra_allowed=self.allowed_extra.get(self.current_key), parent=self)
@@ -383,9 +493,16 @@ class ChatPanel(QtWidgets.QDockWidget):
     def _on_event(self, ev: dict[str, Any]) -> None:
         kind = ev.get("kind")
         if kind == "init":
-            if ev.get("session_id") and self.current_key != NO_DOC:
-                self.sessions[self.current_key] = ev["session_id"]
-                _save_sessions(self.sessions)
+            sid = ev.get("session_id")
+            if sid:
+                item = self.store.active(self.current_key)
+                if item is None:
+                    self.store.add(self.current_key, sid, self.pending.get("title", ""),
+                                   self.pending.get("cwd", self._doc_folder()))
+                    _save_history(f"session:{sid}", self.view.toHtml())
+                elif item["id"] != sid:
+                    self.store.replace(self.current_key, item["id"], sid)
+                self.refresh_conversations()
             for problem in check_init(ev, self.mode()):
                 self._note(problem, error=True)
         elif kind in ("text_delta", "text"):
@@ -437,7 +554,7 @@ class ChatPanel(QtWidgets.QDockWidget):
             self._append(f"<div style='color:#b00'>⚠ Blocked in the chat panel: <code>{html.escape(tool)}</code> "
                          f"<a href='allow:{html.escape(tool)}'>Allow for this conversation</a></div>")
         self.status.setText(f"Done in {dt:.0f} s" if not stopped else "Stopped")
-        _save_history(self.current_key, self.view.toHtml())
+        _save_history(self._hist_key(), self.view.toHtml())
         QtCore.QTimer.singleShot(0, self.switch_document)  # catch up on a document switch during the turn
 
     def _render_turn_summary(self) -> bool:

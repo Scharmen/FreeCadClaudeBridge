@@ -30,6 +30,31 @@ SYSTEM_PROMPT = (
 )
 
 
+def child_env() -> dict[str, str]:
+    """Environment for Claude Code started from FreeCAD (no bundle Python, no stray API key)."""
+    return clean_child_env(dict(os.environ), App.getHomePath(), os.path.join(App.getUserAppDataDir(), "Mod"))
+
+
+def open_in_desktop(session_id: str, cwd: str) -> str | None:
+    """Open a Claude Code session in the Claude Desktop app. Returns an error message or None."""
+    claude = find_claude()
+    if not claude:
+        return "Claude Code not found. Run /freecad:setup in Claude Code."
+    proc = QtCore.QProcess()
+    proc.setProgram(claude)
+    proc.setArguments(["--desktop", "--resume", session_id])
+    proc.setWorkingDirectory(cwd if os.path.isdir(cwd) else os.path.expanduser("~"))
+    qenv = QtCore.QProcessEnvironment()
+    for k, v in child_env().items():
+        qenv.insert(k, v)
+    proc.setProcessEnvironment(qenv)
+    proc.setStandardInputFile(QtCore.QProcess.nullDevice())
+    ok = proc.startDetached()
+    if isinstance(ok, tuple):
+        ok = ok[0]
+    return None if ok else "Could not start Claude Code to open the Desktop app."
+
+
 def claude_candidates() -> list[str]:
     home = os.path.expanduser("~")
     if os.name == "nt":
@@ -69,8 +94,7 @@ class ClaudeRun(QtCore.QObject):
         if not claude:
             self.failed.emit("Claude Code not found. Run /freecad:setup in Claude Code, which records its path.")
             return
-        env = clean_child_env(dict(os.environ), App.getHomePath(),
-                              os.path.join(App.getUserAppDataDir(), "Mod"))
+        env = child_env()
         env.pop("ANTHROPIC_API_KEY", None)
         env["FREECAD_BRIDGE_INSTANCE"] = str(os.getpid())  # the MCP server talks to this FreeCAD, not the newest
         if self.mode == "api_key":

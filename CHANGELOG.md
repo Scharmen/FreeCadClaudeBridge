@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0 – several conversations, shared with Claude Code and the Desktop app (unreleased)
+
+- The chat panel keeps several conversations per document: a list above the chat to switch, ＋ for a new one, rename and delete in the ⚙ menu.
+- Every conversation is a normal Claude Code session. The list also offers the other sessions in the document's folder (started in a terminal or the Claude Desktop app) to continue in the panel; ↗ (or ⚙ → Open in Claude Desktop) opens the current conversation in the Desktop app with `claude --desktop --resume <id>`.
+- When a conversation went on outside the panel, switching back redraws it from the session file, so nothing is missing.
+- A conversation is resumed in the folder its session lives in, so saving an unsaved document no longer loses it. The old one-session-per-document map is migrated.
+
 ## 1.3.0 – pictures to 3D, learning from feedback (unreleased)
 
 - New tool `image_to_3d` (local, no upload): `show` lets Claude look at a picture; `outline` turns the picture's shapes (with holes) into a profile that is extruded or revolved (side silhouettes of vases, figures); `relief` makes a closed, printable height mesh from brightness; `reference` places the picture as a scaled image plane to model against. Dark-on-light pictures and transparent backgrounds work; `invert`/`threshold` correct the rest. New server dependencies: Pillow, NumPy.
