@@ -65,6 +65,8 @@ class StreamParser:
         t, sub = ev.get("type"), ev.get("subtype")
         if t == "system" and sub == "init":
             return [_init(ev)]
+        if t == "system" and sub == "status":
+            return [{"kind": "status", "status": ev.get("status")}]
         if t == "system" and sub == "permission_denied":
             return [{"kind": "permission_denied",
                      "tool": ev.get("tool_name") or ev.get("tool") or "?",
@@ -94,12 +96,17 @@ class StreamParser:
     def _stream_event(self, e: dict[str, Any]) -> list[dict[str, Any]]:
         if e.get("type") == "message_start":
             self._deltas_in_message = False
+        if e.get("type") == "content_block_start" and (e.get("content_block") or {}).get("type") == "thinking":
+            return [{"kind": "thinking_start"}]
         delta = e.get("delta") or {}
         if e.get("type") == "content_block_delta" and delta.get("type") == "text_delta":
             self._deltas_in_message = True
             return [{"kind": "text_delta", "text": delta.get("text", "")}]
         if e.get("type") == "content_block_delta" and delta.get("type") == "thinking_delta":
-            return [{"kind": "thinking_delta", "text": delta.get("thinking", "")}]
+            out = {"kind": "thinking_delta", "text": delta.get("thinking", "")}
+            if delta.get("estimated_tokens") is not None:     # Claude Code sends no thinking text, only progress
+                out["tokens"] = delta["estimated_tokens"]
+            return [out]
         return []
 
     def _assistant(self, ev: dict[str, Any]) -> list[dict[str, Any]]:

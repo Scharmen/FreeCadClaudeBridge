@@ -48,7 +48,11 @@ def fake_addon(bridge_dir, pid, handler, addon_version=__version__, started=None
                     continue
                 msg = protocol.recv_msg(conn)
                 if msg:
-                    protocol.send_msg(conn, {"id": msg["id"], **handler(msg)})
+                    try:
+                        answer = handler(msg)
+                    except RuntimeError:          # the handler simulates FreeCAD dying: no answer
+                        continue
+                    protocol.send_msg(conn, {"id": msg["id"], **answer})
 
     threading.Thread(target=loop, daemon=True).start()
     return srv
@@ -165,3 +169,15 @@ def test_selected_instance_gone_is_an_error_not_a_fallback(bridge):
     with pytest.raises(client.BridgeError) as e:
         client.call("get_tree")
     assert e.value.code == client.NOT_RUNNING and "999999" in e.value.message
+
+
+def test_freecad_crash_during_a_call_is_named(bridge, monkeypatch):
+    def crash(msg):                       # FreeCAD dies while running the call: no answer, process gone
+        monkeypatch.setattr(client, "pid_alive", lambda pid: False)
+        raise RuntimeError("FreeCAD died")
+
+    fake_addon(bridge, os.getpid(), crash)
+    with pytest.raises(client.BridgeError) as e:
+        client.call("run_python", {"code": "crash()"})
+    assert e.value.code == client.FREECAD_CRASHED
+    assert "run_headless" in client.fix_for(client.FREECAD_CRASHED)

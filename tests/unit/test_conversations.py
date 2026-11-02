@@ -109,3 +109,41 @@ def test_pin_order_and_move(tmp_path):
     assert store.active("d2")["id"] == "s1"
     again = conv.Store(tmp_path)
     assert [c["id"] for c in again.ordered("d1")] == ["s2", "s3"]
+
+
+def test_saving_a_document_keeps_its_conversations(tmp_path):
+    store = conv.Store(tmp_path)
+    store.add("unsaved:House", "s1", "Roof", "/home")
+    store.set_label("unsaved:House", "House")
+    store.rekey("unsaved:House", "/p/House.FCStd")
+    assert store.active("/p/House.FCStd")["id"] == "s1"
+    assert store.label("/p/House.FCStd") == "House" and store.items("unsaved:House") == []
+
+
+def test_clicking_does_not_reorder_but_new_activity_does(tmp_path):
+    store = conv.Store(tmp_path)
+    store.add("d", "a", "A", "/w")
+    store.add("d", "b", "B", "/w")
+    store.add("d", "c", "C", "/w")
+    store.touch("d", "a", when=300)
+    store.touch("d", "b", when=200)
+    store.touch("d", "c", when=100)
+    assert [c["id"] for c in store.ordered("d")] == ["a", "b", "c"]
+    store.set_active("d", "c")                                       # just opening it
+    assert [c["id"] for c in store.ordered("d")] == ["a", "b", "c"]
+    store.touch("d", "c", when=400)                                  # a new message
+    assert [c["id"] for c in store.ordered("d")][0] == "c"
+
+
+def test_sidebar_groups_by_project(tmp_path):
+    store = conv.Store(tmp_path)
+    store.add("/p/House.FCStd", "h1", "Roof", "/p")
+    store.set_label("/p/House.FCStd", "House")
+    store.add("unsaved:Viking", "v1", "Statue", "/home")
+    store.set_label("unsaved:Viking", "Viking")
+    store.touch("unsaved:Viking", "v1", when=500)
+    store.touch("/p/House.FCStd", "h1", when=100)
+    groups = store.groups(current="/p/House.FCStd")
+    assert [g["key"] for g in groups] == ["/p/House.FCStd", "unsaved:Viking"], "current project first"
+    assert groups[0]["label"] == "House" and groups[1]["items"][0]["id"] == "v1"
+    assert store.label("/x/Other.FCStd") == "Other", "file name when no label was saved"

@@ -14,7 +14,7 @@ import FreeCADGui as Gui
 from PySide import QtCore, QtGui, QtWidgets
 
 from ..bridge import paths
-from . import conversations, dropping, secrets
+from . import activity, conversations, debuglog, dropping, secrets
 from .claude_process import ClaudeSession
 from .stream import (
     PERMISSION_MODES,
@@ -102,6 +102,16 @@ class _ActiveDocWatcher:
 
     def slotDeletedDocument(self, doc: Any) -> None:  # noqa: N802
         QtCore.QTimer.singleShot(0, self.panel.switch_document)
+
+    def slotCreatedDocument(self, doc: Any) -> None:  # noqa: N802
+        if self.panel._working():             # Claude made it: the conversation follows into it
+            self.panel.created_in_turn.add(doc.Name)
+
+    def slotFinishSaveDocument(self, doc: Any, filename: str) -> None:  # noqa: N802
+        self.panel.on_document_saved(doc.Name, doc.Label, filename)
+
+    def slotRelabelDocument(self, doc: Any) -> None:  # noqa: N802
+        self.panel.store.set_label(doc.FileName or f"unsaved:{doc.Name}", doc.Label)
 
 
 def _doc_key() -> str:
@@ -340,6 +350,11 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.md_buf = ""
         self.stopping = False
         self.restart_after_turn = False
+        self.activity = activity.Activity()
+        self.stall_noted = False
+        self.created_in_turn: set[str] = set()     # documents Claude created during the running turn
+        self.doc_keys: dict[str, str] = {}         # document name -> its key before the next save
+        self.spin = 0
         self.turn_steps = 0
         self.store = conversations.Store(paths.bridge_dir())
         self.pending: dict[str, str] = {}  # title and folder of a conversation until Claude names its session
@@ -488,6 +503,12 @@ class ChatPanel(QtWidgets.QDockWidget):
         self._render_active()
         self._doc_watcher = _ActiveDocWatcher(self)
         App.addDocumentObserver(self._doc_watcher)
+        self.ticker = QtCore.QTimer(self)
+        self.ticker.setInterval(500)
+        self.ticker.timeout.connect(self._tick)
+        self.ticker.start()
+        debuglog.prune()
+        QtCore.QTimer.singleShot(0, self._report_crashes)
 
     # ----- settings -----
 
@@ -513,6 +534,7 @@ class ChatPanel(QtWidgets.QDockWidget):
         menu.addAction("Open in Claude Desktop").triggered.connect(self.open_in_desktop)
         menu.addSeparator()
         menu.addAction("Settings…").triggered.connect(self._open_settings)
+        menu.addAction("Create debug report…").triggered.connect(self.create_debug_report)
         return menu
 
     def set_mode(self, mode: str) -> None:
@@ -603,10 +625,18 @@ class ChatPanel(QtWidgets.QDockWidget):
         return os.path.dirname(doc.FileName) if doc is not None and doc.FileName else os.path.expanduser("~")
 
     def refresh_conversations(self) -> None:
+        """Conversations grouped by project (FreeCAD document), the current one first. Within a project
+        the most recent activity is on top; opening one does not move it."""
         lst = self.conv_list
+        lst.blockSignals(True)
         lst.clear()
         active = self.store.active(self.current_key)
         role = QtCore.Qt.UserRole
+        doc = App.ActiveDocument
+        if doc is not None:
+            self.store.set_label(self.current_key, doc.Label)
+        for d in App.listDocuments().values():
+            self.doc_keys[d.Name] = d.FileName or f"unsaved:{d.Name}"
 
         def header(text: str) -> None:
             it = QtWidgets.QListWidgetItem(text.upper())
@@ -621,8 +651,8 @@ class ChatPanel(QtWidgets.QDockWidget):
         def entry(text: str, sub: str, data: tuple, tip: str, current: bool) -> None:
             it = QtWidgets.QListWidgetItem(text)
             flags = QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
-            if data[0] == "doc":
-                flags |= QtCore.Qt.ItemIsDragEnabled             # reorder this document's conversations
+            if data[0] == "conv":
+                flags |= QtCore.Qt.ItemIsDragEnabled             # reorder within its project
             it.setFlags(flags)
             it.setData(role, data)
             it.setData(SUBTITLE_ROLE, sub)
@@ -631,22 +661,29 @@ class ChatPanel(QtWidgets.QDockWidget):
             if current:
                 lst.setCurrentItem(it)
 
-        doc = App.ActiveDocument
-        header(doc.Label if doc is not None else "No document")
-        if active is None:
-            entry("New conversation", "not started yet", ("pending", None), "Type a message to start it", True)
-        for c in self.store.ordered(self.current_key):
-            path = conversations.session_path(c["cwd"], c["id"])
-            stamp = os.path.getmtime(path) if path and os.path.exists(path) else c.get("created", 0)
-            entry(("📌 " if c.get("pinned") else "") + c["title"], _when(stamp), ("doc", c["id"]),
-                  f"{c['title']}\nSession {c['id']}\nDrag to reorder; right-click for more",
-                  bool(active and c["id"] == active["id"]))
+        for group in self.store.groups(self.current_key):
+            key, here = group["key"], group["key"] == self.current_key
+            header(group["label"] + ("" if here else ("" if self._doc_for_key(key) else "  (closed)")))
+            if here and active is None:
+                entry("New conversation", "not started yet", ("pending", None), "Type a message to start it", True)
+            for c in group["items"]:
+                stamp = c.get("updated") or c.get("created", 0)
+                entry(("📌 " if c.get("pinned") else "") + c["title"], _when(stamp), ("conv", key, c["id"]),
+                      f"{c['title']}\nProject: {group['label']}\nSession {c['id']}\n"
+                      "Drag to reorder; right-click for more", bool(here and active and c["id"] == active["id"]))
         others = conversations.folder_sessions(self._doc_folder(), exclude=self.store.linked_ids())
         if others:
             header("In this folder")
             for info in others:
                 entry(info["title"], f"{info['source'] or 'session'} · {_when(info['updated'])}", ("ext", info),
                       f"{info['title']}\nStarted in: {info['source'] or '?'}\nClick to continue it here", False)
+        lst.blockSignals(False)
+
+    def _doc_for_key(self, key: str) -> Any:
+        for d in App.listDocuments().values():
+            if (d.FileName or f"unsaved:{d.Name}") == key:
+                return d
+        return None
 
     def _render_active(self) -> None:
         """Show the active conversation: the panel's own record, or the session file if it is newer
@@ -674,15 +711,53 @@ class ChatPanel(QtWidgets.QDockWidget):
         self._scroll()
 
     def _on_conversation_item(self, item: QtWidgets.QListWidgetItem) -> None:
-        kind, value = item.data(QtCore.Qt.UserRole) or (None, None)
-        self._choose(kind, value)
+        data = item.data(QtCore.Qt.UserRole)
+        if not data:
+            return
+        if data[0] == "conv":
+            self._open_conversation(data[1], data[2])
+        else:
+            self._choose(data[0], data[1])
+
+    def _open_conversation(self, key: str, sid: str) -> None:
+        """A conversation from the list: in this project switch to it; in another project bring that
+        document up (opening its file if needed); a closed unsaved document's conversation comes here."""
+        if key == self.current_key:
+            self._choose("doc", sid)
+            return
+        if self._working():
+            self._note("Wait until Claude is done, or press Stop, before switching conversations.")
+            self.refresh_conversations()
+            return
+        self.store.set_active(key, sid)
+        doc = self._doc_for_key(key)
+        if doc is not None:
+            App.setActiveDocument(doc.Name)
+            Gui.ActiveDocument = Gui.getDocument(doc.Name)
+            QtCore.QTimer.singleShot(0, self.switch_document)
+        elif not key.startswith(("unsaved:", "<")) and os.path.isfile(key):
+            Gui.open(key)
+            QtCore.QTimer.singleShot(0, self.switch_document)
+        else:
+            _save_history(self._hist_key(), self.view.toHtml())
+            self._close_session()
+            self.store.move(key, self.current_key, sid)
+            self._render_active()
+            self._note(f"Its document ({self.store.label(key)}) is no longer open; the conversation continues "
+                       "here.")
 
     def _conversation_menu(self, pos: QtCore.QPoint) -> None:
         item = self.conv_list.itemAt(pos)
         data = item.data(QtCore.Qt.UserRole) if item else None
         if not data or data[0] == "pending":
             return
-        self._choose(*data)
+        if data[0] == "conv":
+            if data[1] != self.current_key:
+                self._open_conversation(data[1], data[2])
+                return
+            self._choose("doc", data[2])
+        else:
+            self._choose(*data)
         item_data = self.store.active(self.current_key)
         if not item_data:
             return
@@ -713,12 +788,13 @@ class ChatPanel(QtWidgets.QDockWidget):
         self._note(f"Moved to {label}; it continues there when you switch to that document.")
 
     def _on_conversations_reordered(self, *_: Any) -> None:
-        ids = []
+        orders: dict[str, list[str]] = {}
         for i in range(self.conv_list.count()):
             data = self.conv_list.item(i).data(QtCore.Qt.UserRole)
-            if data and data[0] == "doc":
-                ids.append(data[1])
-        self.store.set_order(self.current_key, ids)
+            if data and data[0] == "conv":
+                orders.setdefault(data[1], []).append(data[2])
+        for key, ids in orders.items():
+            self.store.set_order(key, ids)
         QtCore.QTimer.singleShot(0, self.refresh_conversations)   # normalize sections after the drop
 
     def _choose(self, kind: str | None, value: Any) -> None:
@@ -790,14 +866,38 @@ class ChatPanel(QtWidgets.QDockWidget):
                             "come back to this conversation.", error=bool(error))
 
     def switch_document(self) -> None:
-        """Show the conversation of the now active document (deferred while Claude is working)."""
+        """Show the conversation of the now active document (deferred while Claude is working). A document
+        Claude created during the turn takes the running conversation along instead of an empty chat."""
         key = _doc_key()
         if key == self.current_key or self._working():
+            return
+        doc = App.ActiveDocument
+        carry = doc is not None and doc.Name in self.created_in_turn
+        self.created_in_turn.clear()
+        active = self.store.active(self.current_key)
+        if carry and active and self.store.active(key) is None:
+            debuglog.log("carry", src=self.current_key, dst=key, session=active["id"])
+            self.store.move(self.current_key, key, active["id"])
+            self.current_key = key
+            self.refresh_conversations()
             return
         _save_history(self._hist_key(), self.view.toHtml())
         self._close_session()
         self.current_key = key
         self._render_active()
+
+    def on_document_saved(self, name: str, label: str, filename: str) -> None:
+        """Saving gives a document a new key (its file, also after Save As); its conversations go with it."""
+        old = self.doc_keys.get(name, f"unsaved:{name}")
+        self.doc_keys[name] = filename
+        if old == filename:
+            return
+        debuglog.log("rekey", old=old, new=filename)
+        self.store.rekey(old, filename)
+        self.store.set_label(filename, label)
+        if self.current_key == old:
+            self.current_key = filename
+        self.refresh_conversations()
 
     def insert_view_image(self) -> None:
         gdoc = Gui.ActiveDocument
@@ -870,6 +970,15 @@ class ChatPanel(QtWidgets.QDockWidget):
                     self._answer_question(rid, int(qi), int(oi))
             else:
                 self._answer_permission(rid, decision)
+        elif url.scheme() == "report":
+            self.create_debug_report()
+        elif url.scheme() == "stop":
+            self.stop()
+        elif url.scheme() == "snapshots":
+            from ..bridge import paths as bpaths
+
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(os.path.join(bpaths.bridge_dir(),
+                                                                                  "snapshots")))
         elif url.scheme() == "think":
             self._show_thought(int(rest) if rest.isdigit() else -1)
         elif url.scheme() == "import":
@@ -958,8 +1067,15 @@ class ChatPanel(QtWidgets.QDockWidget):
             self.turn_results, self.max_result_chars, self.turn_steps = [], 0, 0
             self.turn_started = time.time()
             self.stopping = False
+            self.stall_noted = False
+            self.activity.start(time.time())
         else:
             self._note("Queued: Claude reads it after the current step.")
+        active = self.store.active(self.current_key)
+        if active:
+            self.store.touch(self.current_key, active["id"])
+        debuglog.log("send", doc=self.current_key, session=session.session_id, text=text, images=len(images),
+                     queued=queued)
         # slash commands go to Claude Code as typed; everything else gets the FreeCAD context line
         prompt = text if slash else context_line() + "\n\n" + (text or "Look at the attached picture.")
         session.send_user(prompt, images)
@@ -1009,6 +1125,7 @@ class ChatPanel(QtWidgets.QDockWidget):
 
     def stop(self) -> None:
         if self._working():
+            debuglog.log("stop", activity=self.activity.phase)
             self.stopping = True
             self.status.setText("Stopping…")
             self.session.interrupt()
@@ -1092,9 +1209,16 @@ class ChatPanel(QtWidgets.QDockWidget):
 
     def _on_event(self, ev: dict[str, Any]) -> None:
         kind = ev.get("kind")
-        if kind not in ("text_delta", "text", "thinking_delta"):
+        if kind not in ("text_delta", "thinking_delta"):
+            debuglog.log("event", **{k: v for k, v in ev.items() if k != "content"})
+        was = self.activity.phase
+        self.activity.on_event(ev, time.time())
+        self.stall_noted = False
+        if was == "thinking" and self.activity.phase != "thinking":
+            self._thought_line()
+        if kind not in ("text_delta", "text", "thinking_delta", "thinking_start"):
             self._close_text()
-        if kind != "thinking_delta":
+        if kind not in ("thinking_delta", "thinking_start"):
             self.think_open = False
         if kind == "init":
             sid = ev.get("session_id")
@@ -1117,11 +1241,9 @@ class ChatPanel(QtWidgets.QDockWidget):
                 self.md_start, self.md_buf, self.text_open = cur.position(), "", True
             self.md_buf += ev.get("text", "")
             self._insert_text(ev.get("text", ""))
-        elif kind == "thinking_delta":
+        elif kind in ("thinking_start", "thinking_delta"):
             if not self.think_open:
                 self.thoughts.append("")
-                self._append(f"<div style='color:#888'><i>💭 <a href='think:{len(self.thoughts) - 1}'>Thinking…</a>"
-                             "</i></div>")
                 self.think_open = True
             self.thoughts[-1] += ev.get("text", "")
         elif kind == "tool_use":
@@ -1153,6 +1275,8 @@ class ChatPanel(QtWidgets.QDockWidget):
         elif kind == "control_response" and not ev.get("ok"):
             self._note(f"Claude Code refused: {ev.get('error')}", error=True)
         elif kind == "result":
+            if self.activity.phase == "thinking":
+                self._thought_line()
             self._finish_turn(ev)
         elif kind == "invalid":
             App.Console.PrintLog(f"ClaudeBridge chat: {ev.get('line')}\n")
@@ -1166,7 +1290,12 @@ class ChatPanel(QtWidgets.QDockWidget):
         if self._working():          # queued messages follow
             return
         dt = time.time() - self.turn_started
+        self.activity.stop()
         self._busy(False)
+        active = self.store.active(self.current_key)
+        if active:
+            self.store.touch(self.current_key, active["id"])
+            self.refresh_conversations()
         changed = self._render_turn_summary()
         if changed and not interrupted:
             self._ask_feedback()
@@ -1185,9 +1314,12 @@ class ChatPanel(QtWidgets.QDockWidget):
 
     def _on_exited(self, code: int) -> None:
         self._close_text()
+        debuglog.log("exited", code=code, activity=self.activity.phase)
+        self.activity.stop()
         if self.session is not None and code != 0:
-            self._note(f"Claude Code ended unexpectedly (code {code}). See Report view; your next message "
-                       "resumes the conversation.", error=True)
+            self._note(f"Claude Code ended unexpectedly (code {code}); your next message resumes the "
+                       "conversation.", error=True)
+            self._append(_buttons([("Create debug report", "report:", "option")]))
         self.session = None
         self.perms.clear()
         self._update_approval_bar()
@@ -1347,6 +1479,100 @@ class ChatPanel(QtWidgets.QDockWidget):
         if decision == "deny":
             self.input.setFocus()
         self.status.setText("Claude is working…")
+
+    def _tick(self) -> None:
+        """Every half second while Claude works: what it is doing, and whether it went quiet."""
+        if not self._working():
+            return
+        now = time.time()
+        self.spin = (self.spin + 1) % 4
+        text = self.activity.describe(now)
+        if text and not self.perms:
+            self.status.setText("◐◓◑◒"[self.spin] + " " + text)
+        from ..bridge import paths as bpaths
+        from ..bridge import settings as bsettings
+
+        limit = bsettings.load(bpaths.bridge_dir())["chat.stall_seconds"]
+        ex = _executor()
+        warning = self.activity.stall(now, limit, freecad_busy=bool(ex and ex.busy))
+        if warning and not self.stall_noted:
+            self.stall_noted = True
+            debuglog.log("stall", warning=warning, activity=self.activity.phase,
+                         freecad_op=getattr(ex, "current_op", ""))
+            self._note(f"⏳ {warning}", error=True)
+            self._append(_buttons([("Stop", "stop:", "deny"), ("Create debug report", "report:", "option")]))
+
+    def _thought_line(self) -> None:
+        secs = self.activity.last_thought_seconds
+        if secs is None:
+            return
+        idx = len(self.thoughts) - 1
+        text = self.thoughts[idx] if idx >= 0 else ""
+        label = f"💭 Thought for {secs} s" if secs >= 1 else "💭 Thought briefly"
+        if text.strip():
+            label = f"<a href='think:{idx}'>{label}</a>"
+        self._append(f"<div style='color:#888'><i>{label}</i></div>")
+        self.activity.last_thought_seconds = None
+
+    def _report_crashes(self) -> None:
+        from ..addon import _state
+
+        for c in _state.pop("crashes", []):
+            first = next((ln for ln in str(c.get("detail", "")).splitlines() if ln.strip()), "")
+            debuglog.log("crash_noticed", **c)
+            self._note(f"⚠ FreeCAD crashed on {c.get('started')} while Claude ran {c.get('op')} in "
+                       f"{c.get('doc')}: {first[:120]}. FreeCAD's document recovery offers the last autosave; "
+                       "the bridge also keeps copies of unsaved work.", error=True)
+            self._append(_buttons([("Open copies", "snapshots:", "option"),
+                                   ("Create debug report", "report:", "option")]))
+
+    def create_debug_report(self) -> None:
+        """Everything needed to understand a problem, in one file (secrets redacted)."""
+        import platform
+        import sys as _sys
+
+        from .. import __version__
+        from ..bridge import audit, crashguard, diagnostics
+        from ..bridge import paths as bpaths
+        from ..bridge import settings as bsettings
+
+        bd = bpaths.bridge_dir()
+        ex = _executor()
+        s = self.session
+        sections = {
+            "Versions": "\n".join([f"ClaudeBridge {__version__}", f"FreeCAD {'.'.join(App.Version()[:3])}",
+                                   f"Python {_sys.version.split()[0]}", f"{platform.platform()}",
+                                   f"Claude Code {self.info.get('claude_code_version', '?')}",
+                                   f"Plugin root {bpaths.load_config().get('plugin_root', '?')}"]),
+            "Settings": json.dumps(bsettings.load(bd), indent=2),
+            "Chat panel": "\n".join([
+                f"document key: {self.current_key}",
+                f"conversation: {(self.store.active(self.current_key) or {}).get('id')}",
+                f"session running: {bool(s and s.running())}, pending messages: {s.pending if s else 0}",
+                f"activity: {self.activity.phase} — {self.activity.describe(time.time())}",
+                f"open approvals: {len(self.perms)}, auto: {self.auto_btn.isChecked()}",
+                f"model: {self.model_box.currentData()}, effort: {self.effort_box.currentData()}, "
+                f"mode: {self.pmode_box.currentData()}"]),
+            "FreeCAD": "\n".join([f"executor busy: {bool(ex and ex.busy)}, current op: {getattr(ex, 'current_op', '')}",
+                                  "documents: " + ", ".join(f"{d.Label} ({len(d.Objects)} objects)"
+                                                            for d in App.listDocuments().values())]),
+            "Conversation (last part)": self.view.toPlainText()[-6000:],
+        }
+        if ex is not None and getattr(ex, "console", None) is not None:
+            try:
+                lines = ex.console.since(0, "log", 400)["lines"]
+                sections["Report view (last messages)"] = "\n".join(
+                    f"{m.get('level', '')}: {m.get('text', '')}" for m in lines[-80:])
+            except Exception:
+                pass
+        logs = {"Panel log": debuglog.path_today(), "Audit log": audit.log_path(),
+                "Crashes": os.path.join(bd, crashguard.CRASH_LOG)}
+        path = diagnostics.write_report(bd, sections, logs)
+        debuglog.log("report", path=path)
+        QtWidgets.QApplication.clipboard().setText(path)
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(os.path.dirname(path)))
+        self._note(f"Debug report written (path copied): {path}. Secrets are redacted; attach it to an issue "
+                   "or send it to whoever helps you.")
 
     def _show_thought(self, idx: int) -> None:
         if not 0 <= idx < len(self.thoughts):
@@ -1596,6 +1822,12 @@ def _tool_summary(inp: dict[str, Any]) -> str:
     parts = [f"{k}={v}" for k, v in inp.items() if v not in (None, "", [], {})]
     text = ", ".join(parts)
     return (text[:70] + "…") if len(text) > 70 else text
+
+
+def _executor() -> Any:
+    from ..addon import _state
+
+    return _state.get("executor")
 
 
 def get_panel() -> ChatPanel | None:

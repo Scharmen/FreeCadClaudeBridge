@@ -43,11 +43,11 @@ class PreferencesPage:
         af.addRow(QtWidgets.QLabel("<small>Changes here apply after restarting FreeCAD.</small>"))
         layout.addWidget(addon_box)
 
-        job_box = QtWidgets.QGroupBox("Headless jobs (run_headless)")
+        job_box = QtWidgets.QGroupBox("Limits and safety")
         jf = QtWidgets.QFormLayout(job_box)
         self.spins: dict[str, Any] = {}
         for key, (default, lo, hi, unit, text) in settings.SCHEMA.items():
-            if not key.startswith("headless."):
+            if key.startswith("learning."):
                 continue
             if isinstance(default, int):
                 spin = QtWidgets.QSpinBox()

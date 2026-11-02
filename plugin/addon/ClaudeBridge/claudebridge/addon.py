@@ -41,6 +41,7 @@ def boot() -> None:
 def start() -> None:
     if "server" in _state:
         return
+    _collect_crashes()
     p = params()
     if p.GetBool("Autostart", True):
         try:
@@ -58,6 +59,42 @@ def start() -> None:
     if app and not _state.get("quit_hooked"):
         app.aboutToQuit.connect(stop)
         _state["quit_hooked"] = True
+
+
+def _collect_crashes() -> None:
+    """Calls that were running when FreeCAD died last time; the chat panel reports them once."""
+    try:
+        from .bridge import crashguard, paths
+
+        crashes = crashguard.collect_crashes(paths.bridge_dir(), alive=pid_alive)
+        _state["crashes"] = crashes
+        for c in crashes:
+            App.Console.PrintWarning(f"ClaudeBridge: FreeCAD crashed on {c.get('started')} while Claude ran "
+                                     f"{c.get('op')} in {c.get('doc')}.\n")
+    except Exception as e:
+        App.Console.PrintLog(f"ClaudeBridge: crash check failed: {e}\n")
+
+
+def pid_alive(pid: int) -> bool:
+    if pid <= 0 or pid == os.getpid():
+        return pid == os.getpid()
+    if sys.platform == "win32":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # type: ignore[attr-defined]
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))  # type: ignore[attr-defined]
+        ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+        return bool(ok) and code.value == 259
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
 
 
 def _start_server(transport: str) -> None:

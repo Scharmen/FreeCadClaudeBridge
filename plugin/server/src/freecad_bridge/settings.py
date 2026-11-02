@@ -29,6 +29,9 @@ SCHEMA: dict[str, tuple[Any, Any, Any, str, str]] = {
                                     "Stop a job for low system memory only if it uses more than this"),
     "headless.timeout_s": (600, 10, 86400, "s", "Default time limit of run_headless"),
     "learning.ask_for_feedback": (1, 0, 1, "", "Ask after each model whether it matched (1 = yes, 0 = no)"),
+    "safety.snapshot_minutes": (5, 0, 120, "min",
+                                "Copy a modified document before Claude changes it, at most this often (0 = off)"),
+    "chat.stall_seconds": (120, 30, 3600, "s", "Warn when Claude shows no sign of life for this long"),
 }
 
 

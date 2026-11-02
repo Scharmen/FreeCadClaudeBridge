@@ -227,12 +227,64 @@ class Store:
             self._save()
 
     def ordered(self, key: str) -> list[dict[str, Any]]:
-        """Pinned first, then the user's drag order, then newest first."""
+        """Pinned first, then the user's drag order, then the most recent activity. Opening a
+        conversation changes nothing; a new message (touch) moves it to the top."""
         order = self._doc(key).get("order", []) if key in self.data else []
         rank = {sid: i for i, sid in enumerate(order)}
         items = self.items(key)
         return sorted(items, key=lambda c: (not c.get("pinned", False), rank.get(c["id"], len(rank)),
-                                            -c.get("created", 0)))
+                                            -c.get("updated", c.get("created", 0))))
+
+    def touch(self, key: str, sid: str, when: float | None = None) -> None:
+        """New activity in a conversation: it moves to the top of its project."""
+        item = self.find(key, sid)
+        if not item:
+            return
+        item["updated"] = when if when is not None else time.time()
+        order = self._doc(key).get("order")
+        if order:
+            self._doc(key)["order"] = [sid] + [i for i in order if i != sid]
+        self._save()
+
+    def label(self, key: str) -> str:
+        """The project's name: saved with the conversations, else derived from the document key."""
+        saved = (self.data.get(key) or {}).get("label")
+        if saved:
+            return saved
+        if key.startswith("unsaved:"):
+            return key[len("unsaved:"):]
+        if key.startswith("<"):
+            return "No document"
+        return os.path.splitext(os.path.basename(key))[0] or key
+
+    def set_label(self, key: str, label: str) -> None:
+        if label and (self.data.get(key) or {}).get("label") != label:
+            self._doc(key)["label"] = label
+            self._save()
+
+    def rekey(self, old: str, new: str) -> None:
+        """A document got a new key (saved for the first time, or saved under another name)."""
+        if old == new or old not in self.data:
+            return
+        moved = self.data.pop(old)
+        target = self.data.setdefault(new, {"active": None, "items": []})
+        target["items"] = target.get("items", []) + [c for c in moved.get("items", [])
+                                                      if c["id"] not in {i["id"] for i in target.get("items", [])}]
+        target["active"] = moved.get("active") or target.get("active")
+        if moved.get("label") and not target.get("label"):
+            target["label"] = moved["label"]
+        self._save()
+
+    def groups(self, current: str) -> list[dict[str, Any]]:
+        """Conversations grouped by project (document): the current one first, then by recent activity."""
+        def latest(key: str) -> float:
+            return max((c.get("updated", c.get("created", 0)) for c in self.items(key)), default=0)
+
+        keys = [k for k in self.data if self.items(k)]
+        keys.sort(key=lambda k: (k != current, -latest(k)))
+        if current not in keys:
+            keys.insert(0, current)
+        return [{"key": k, "label": self.label(k), "items": self.ordered(k)} for k in keys]
 
     def set_order(self, key: str, ids: list[str]) -> None:
         self._doc(key)["order"] = [i for i in ids if self.find(key, i)]

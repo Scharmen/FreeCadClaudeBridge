@@ -13,6 +13,7 @@ from typing import Any
 from . import __version__, platforms, protocol
 
 NOT_RUNNING = "NOT_RUNNING"
+FREECAD_CRASHED = "FREECAD_CRASHED"
 INSTANCE_ENV = "FREECAD_BRIDGE_INSTANCE"  # set by the chat panel: the FreeCAD it runs in
 _ids = itertools.count(1)
 _selected: int | None = None  # chosen with select_instance, for the lifetime of this MCP server
@@ -26,6 +27,10 @@ FIXES = {
                                "freecad@freecad-claude`, then /freecad:setup, and restart FreeCAD.",
     protocol.GUI_BUSY: "FreeCAD is still working on an earlier call; wait and retry, and use run_headless for heavy "
                        "operations.",
+    FREECAD_CRASHED: "FreeCAD crashed while running this call (a crash in its C++ core, e.g. building a mesh "
+                     "from raw facets). Do not run the same code again: do risky geometry with run_headless and "
+                     "import the result. The user can restore work from FreeCAD's document recovery or the "
+                     "bridge snapshots.",
     protocol.TIMEOUT: "The call ran too long. Split the work, raise timeout_s, or move heavy geometry to "
                       "run_headless.",
 }
@@ -209,6 +214,8 @@ def call(op: str, args: dict[str, Any] | None = None, timeout_s: float = 60,
     finally:
         sock.close()
     if resp is None:
+        if not pid_alive(inst.pid):
+            raise BridgeError(FREECAD_CRASHED, f"FreeCAD (pid {inst.pid}) ended during {op}")
         raise BridgeError(protocol.INTERNAL, "FreeCAD closed the connection")
     if not resp.get("ok"):
         err = resp.get("error") or {}

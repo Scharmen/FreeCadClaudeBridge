@@ -2,7 +2,7 @@
 
 Control FreeCAD by chat with Claude, either in a **"Claude" chat panel inside FreeCAD** or from **Claude Code**. Claude works on your open document through FreeCAD's Python API: it creates and changes geometry, reads the model tree and properties, and exports files. Every Claude step is exactly one undo step, and failed code leaves nothing behind.
 
-> Status: 1.7.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
+> Status: 1.8.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
@@ -57,6 +57,7 @@ Check everything with `/freecad:status`.
 - **Several FreeCAD windows:** the chat panel always works on the FreeCAD it belongs to. In Claude Code, calls go to the most recently started FreeCAD and the result says so; ask Claude to switch ("work in the FreeCAD that has Flange open"), which uses `instances` and `select_instance`. The choice lasts for the Claude Code session.
 - **Full Claude Code in the panel:** every Claude Code tool is available; anything your Claude Code settings don't already allow asks in the chat with Allow once / Always / Deny buttons (also in a bar above the input); questions Claude asks come with one button per option. Switch on **⚡ Auto** to allow everything, answer questions with the recommended option and accept plans without being asked. Pick model, effort and permission mode above the chat, type `/` for commands (Claude Code's, your skills', and `/clear`, `/model`, `/effort`, `/mode`, `/desktop`, `/help`), keep typing while Claude works (messages queue), and Stop interrupts the current step.
 - **Drag and drop:** drop or paste pictures (sent as images), files and folders (Claude reads them), CAD files (with an "Import into FreeCAD" link) or objects from the model tree (sent as references) onto the chat; drag pictures out of it; drag conversations in the sidebar to reorder, right-click to pin or move them to another document.
+- **When something goes wrong:** the status line shows what Claude is doing right now; if it goes quiet for two minutes the chat says whether FreeCAD is still computing or Claude seems stuck. ⚙ → **Create debug report** writes one file with everything needed to find the problem (secrets redacted). If FreeCAD crashes during a Claude call, the next start says which call it was; FreeCAD's document recovery and the bridge's automatic copies keep your work.
 - **Login:** the panel uses your Claude subscription (Claude Code's login) by default. Switch to pay-as-you-go with **⚙ → Use API key**; the key is stored in the macOS Keychain, Windows Credential Manager or Linux Secret Service, never in FreeCAD's settings.
 
 ## Tools

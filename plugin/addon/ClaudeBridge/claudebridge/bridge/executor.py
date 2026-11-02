@@ -7,6 +7,7 @@ serialized: a second call waits for the first; GUI_BUSY only if it waits too lon
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import traceback
@@ -16,9 +17,10 @@ from typing import Any
 
 from PySide import QtCore
 
-from . import audit, protocol
+from . import audit, crashguard, paths, protocol
 
 BUSY_WAIT_S = 30.0
+SAFETY_OPS = {"run_python", "run_command", "import", "task_dialog"}   # copy unsaved work before these
 READ_ONLY_OPS = {"status_gui", "get_tree", "get_object", "inspect_shape", "inspect_sketch", "get_changes",
                  "get_console", "list_commands"}
 
@@ -41,6 +43,8 @@ class Executor(QtCore.QObject):
         self._slot = threading.Semaphore(1)
         self._busy = threading.Event()
         self.namespace: dict[str, Any] = {}
+        self.current_op = ""
+        self._last_snapshot: dict[str, float] = {}
         self.request.connect(self._run, QtCore.Qt.QueuedConnection)
         from . import ops
         from .console import ConsoleBuffer
@@ -78,6 +82,36 @@ class Executor(QtCore.QObject):
             return {"ok": False, "error": protocol.error(
                 protocol.TIMEOUT, f"no result after {timeout:.0f} s; a running C++ operation may still finish")}
 
+    @staticmethod
+    def _target_doc(args: dict[str, Any]) -> Any:
+        import FreeCAD as App
+
+        name = args.get("doc")
+        if name and name in App.listDocuments():
+            return App.getDocument(name)
+        return App.ActiveDocument
+
+    def _safety_snapshot(self, doc: Any) -> None:
+        """Keep a copy of unsaved work before Claude changes it: a crash in FreeCAD's core (seen with
+        raw mesh data) takes the whole program down. At most every safety.snapshot_minutes."""
+        try:
+            import FreeCADGui as Gui
+
+            from . import settings
+            from .action_ops import create_snapshot
+
+            if doc is None or not doc.Objects:
+                return
+            gdoc = Gui.getDocument(doc.Name)
+            if not getattr(gdoc, "Modified", False):
+                return
+            minutes = settings.load(paths.bridge_dir())["safety.snapshot_minutes"]
+            if crashguard.snapshot_due(self._last_snapshot.get(doc.Name), time.time(), minutes):
+                create_snapshot(doc)
+                self._last_snapshot[doc.Name] = time.time()
+        except Exception:
+            pass
+
     @QtCore.Slot(object)
     def _run(self, item: tuple) -> None:
         op, args, fut = item
@@ -85,9 +119,18 @@ class Executor(QtCore.QObject):
         self.journal.claude_active = op not in READ_ONLY_OPS
         started = time.monotonic()
         resp: dict[str, Any] = {}
+        guarded = op not in READ_ONLY_OPS
         try:
             if not fut.set_running_or_notify_cancel():
+                guarded = False
                 return
+            self.current_op = op
+            if guarded:
+                doc = self._target_doc(args)
+                if op in SAFETY_OPS:
+                    self._safety_snapshot(doc)
+                detail = args.get("code") or args.get("command") or args.get("path") or ""
+                crashguard.mark_start(paths.bridge_dir(), os.getpid(), op, doc.Name if doc else None, str(detail))
             try:
                 resp = {"ok": True, "result": self.ops.OPS[op](args, self)}
             except OpError as e:
@@ -99,6 +142,9 @@ class Executor(QtCore.QObject):
                     protocol.INTERNAL, f"{type(e).__name__}: {e}", traceback.format_exc())}
             fut.set_result(resp)
         finally:
+            if guarded:
+                crashguard.mark_done(paths.bridge_dir(), os.getpid())
+            self.current_op = ""
             if resp and op != "status_gui":
                 err = resp.get("error") or {}
                 audit.record("call", op=op, args=audit.call_args(args), ok=resp["ok"],

@@ -303,6 +303,9 @@ class ClaudeSession(QtCore.QObject):
         text = bytes(self.proc.readAllStandardError()).decode("utf-8", "replace").strip()
         if text:
             App.Console.PrintLog(f"ClaudeBridge chat stderr: {text}\n")
+            from . import debuglog
+
+            debuglog.log("stderr", text=text)
 
     def _on_finished(self, code: int, _status: Any = None) -> None:
         for ev in self.parser.flush():

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.0 – live activity, crash safety, debug reports, projects (unreleased)
+
+- Live status while Claude works, updated twice a second: thinking (with time and token estimate), running a tool (which one, for how long), writing the answer, waiting for your approval. A finished thought shows as "💭 Thought for N s" (Claude Code sends no thinking text, so it is no longer an empty link).
+- Stall watchdog: after `chat.stall_seconds` (default 120 s) without any sign of life the chat says so, distinguishing "FreeCAD is still computing run_python" from silence, with Stop and Create debug report buttons.
+- Crash safety: before a call that changes a document the addon notes what is running; if FreeCAD dies during it, the next start reports which call in which document crashed it. Modified documents are copied before Claude changes them (`safety.snapshot_minutes`, default every 5 min). The MCP server answers a call during which FreeCAD died with `FREECAD_CRASHED` and tells Claude not to retry it but to use run_headless; the skill now sends raw mesh building and other crash-prone work to run_headless. Found because building a mesh from raw facets crashed FreeCAD (SIGSEGV in MeshKernel::AddFacets).
+- Debug reports (⚙ → Create debug report…, and buttons on errors, stalls and crashes): versions, settings, panel state, FreeCAD state, the conversation's end, the Report view, the panel log (every event, kept 7 days in `logs/`), the audit log, crash markers and the newest macOS crash reports, with keys, the token and e-mail addresses redacted.
+- Conversations grouped by project (FreeCAD document) across all documents, with the project's name stored; the current project first, others marked "(closed)" when their document is not open. Clicking one in another project brings that document up (opening its file if needed). Order follows the last activity: opening a conversation no longer moves it, a new message does.
+- Conversations stay with their document when it is saved for the first time or under another name, and follow into a document Claude creates during a turn, instead of the chat going empty.
+
 ## 1.7.0 – one-step installer (unreleased)
 
 - `install.sh` (macOS/Linux, `curl … | sh`) and `install.ps1` (Windows, `irm … | iex`) start a setup wizard (`freecad-bridge wizard`), fetched straight from GitHub as a zip, so git is not needed.
