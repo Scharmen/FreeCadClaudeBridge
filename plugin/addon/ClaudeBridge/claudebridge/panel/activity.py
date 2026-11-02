@@ -9,6 +9,8 @@ from typing import Any
 
 from .stream import short_tool_name
 
+LONG_TOOLS = {"run_headless", "export", "import"}     # may legitimately run for minutes
+
 
 def _clock(seconds: float) -> str:
     s = max(0, int(seconds))
@@ -33,6 +35,10 @@ class Activity:
 
     def stop(self) -> None:
         self.phase = "idle"
+
+    def alive(self, now: float) -> None:
+        """Count as a sign of life (FreeCAD was busy computing and could not update the window)."""
+        self.last_event = max(self.last_event, now)
 
     def _set(self, phase: str, now: float) -> None:
         if self.phase == "thinking" and phase != "thinking" and self.thinking_since is not None:
@@ -83,6 +89,8 @@ class Activity:
         if self.phase in ("idle", "approval") or now - self.last_event < limit:
             return None
         quiet = _clock(now - self.last_event)
+        if self.phase == "tool" and self.tool in LONG_TOOLS:
+            return f"{self.tool} is still running ({quiet}); long jobs are normal here. Stop ends it."
         if self.phase == "tool" and freecad_busy:
             return (f"FreeCAD is still computing {self.tool} ({quiet} without news). Long geometry can take a "
                     "while; Stop interrupts Claude, the running FreeCAD operation finishes on its own.")

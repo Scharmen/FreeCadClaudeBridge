@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.1 – fixes from the live test (unreleased)
+
+- Panel events were dropped: the debug log call clashed with the events' own `kind` field, so everything except streamed text failed (stale status line, conversations not stored, no switch to a new document). Fixed, and event handling now has a safety net: an error is logged with its traceback and shown once with a debug report button instead of silently stopping the panel.
+- Unsaved documents are keyed by their Uid instead of their name: nearly every new document is called "Unnamed", so conversations of unrelated projects mixed. The Uid survives FreeCAD's document recovery.
+- Safety copies (`saveCopy`) no longer count as saving the document; they had moved the conversation to the copy's path.
+- No false "no sign of life" after FreeCAD was busy in its GUI thread (the window could not update meanwhile); the status line shows the running tool before FreeCAD starts computing; run_headless, export and import may run long without a stall warning.
+- "No document" is not marked as closed in the sidebar.
+
 ## 1.8.0 – live activity, crash safety, debug reports, projects (unreleased)
 
 - Live status while Claude works, updated twice a second: thinking (with time and token estimate), running a tool (which one, for how long), writing the answer, waiting for your approval. A finished thought shows as "💭 Thought for N s" (Claude Code sends no thinking text, so it is no longer an empty link).

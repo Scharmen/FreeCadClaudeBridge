@@ -122,3 +122,26 @@ def test_report_assembly(tmp_path):
     assert os.path.dirname(path).endswith("reports")
     assert "## Versions" in text and "addon 1.8.0" in text and "run_python" in text
     assert "sk-ant-api03" not in text
+
+
+def test_debuglog_accepts_events_with_their_own_kind(tmp_path, monkeypatch):
+    from claudebridge.panel import debuglog
+
+    monkeypatch.setattr(debuglog, "folder", lambda: str(tmp_path))
+    debuglog.log("event", kind="result", session_id="s1", content="x" * 10)
+    line = json.loads(open(debuglog.path_today(), encoding="utf-8").read().splitlines()[-1])
+    assert line["log"] == "event" and line["kind"] == "result" and line["session_id"] == "s1"
+
+
+def test_long_jobs_and_frozen_gui_are_not_stalls():
+    a = activity.Activity()
+    a.start(now=0)
+    a.on_event({"kind": "tool_use", "id": "h", "name": "mcp__plugin_freecad_freecad__run_headless", "input": {}},
+               now=1)
+    assert "long jobs are normal" in a.stall(now=500, limit=90)
+    b = activity.Activity()
+    b.start(now=0)
+    b.on_event({"kind": "tool_use", "id": "t", "name": "mcp__plugin_freecad_freecad__run_python", "input": {}},
+               now=1)
+    b.alive(now=200)                       # the window was frozen by FreeCAD work until now
+    assert b.stall(now=210, limit=90) is None

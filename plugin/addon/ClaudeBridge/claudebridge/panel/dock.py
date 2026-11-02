@@ -108,17 +108,24 @@ class _ActiveDocWatcher:
             self.panel.created_in_turn.add(doc.Name)
 
     def slotFinishSaveDocument(self, doc: Any, filename: str) -> None:  # noqa: N802
-        self.panel.on_document_saved(doc.Name, doc.Label, filename)
+        # saveCopy (the bridge's safety copies, snapshots) reports a save too, but the document keeps its file
+        if os.path.normcase(os.path.abspath(doc.FileName or "")) == os.path.normcase(os.path.abspath(filename)):
+            self.panel.on_document_saved(doc, filename)
 
     def slotRelabelDocument(self, doc: Any) -> None:  # noqa: N802
-        self.panel.store.set_label(doc.FileName or f"unsaved:{doc.Name}", doc.Label)
+        self.panel.store.set_label(doc_key(doc), doc.Label)
+
+
+def doc_key(doc: Any) -> str:
+    """Which project a document is: its file, or for an unsaved one its Uid. The internal name is no
+    good there: nearly every new document is called "Unnamed", so unrelated projects would mix."""
+    if doc is None:
+        return NO_DOC
+    return doc.FileName or f"unsaved:{getattr(doc, 'Uid', '') or doc.Name}"
 
 
 def _doc_key() -> str:
-    doc = App.ActiveDocument
-    if doc is None:
-        return NO_DOC
-    return doc.FileName or f"unsaved:{doc.Name}"
+    return doc_key(App.ActiveDocument)
 
 
 def context_line() -> str:
@@ -636,7 +643,7 @@ class ChatPanel(QtWidgets.QDockWidget):
         if doc is not None:
             self.store.set_label(self.current_key, doc.Label)
         for d in App.listDocuments().values():
-            self.doc_keys[d.Name] = d.FileName or f"unsaved:{d.Name}"
+            self.doc_keys[d.Name] = doc_key(d)
 
         def header(text: str) -> None:
             it = QtWidgets.QListWidgetItem(text.upper())
@@ -663,7 +670,8 @@ class ChatPanel(QtWidgets.QDockWidget):
 
         for group in self.store.groups(self.current_key):
             key, here = group["key"], group["key"] == self.current_key
-            header(group["label"] + ("" if here else ("" if self._doc_for_key(key) else "  (closed)")))
+            closed = not here and not key.startswith("<") and self._doc_for_key(key) is None
+            header(group["label"] + ("  (closed)" if closed else ""))
             if here and active is None:
                 entry("New conversation", "not started yet", ("pending", None), "Type a message to start it", True)
             for c in group["items"]:
@@ -681,7 +689,7 @@ class ChatPanel(QtWidgets.QDockWidget):
 
     def _doc_for_key(self, key: str) -> Any:
         for d in App.listDocuments().values():
-            if (d.FileName or f"unsaved:{d.Name}") == key:
+            if doc_key(d) == key:
                 return d
         return None
 
@@ -768,7 +776,7 @@ class ChatPanel(QtWidgets.QDockWidget):
             lambda: (self.store.pin(self.current_key, item_data["id"], not pinned), self.refresh_conversations()))
         move = menu.addMenu("Move to document")
         for d in App.listDocuments().values():
-            key = d.FileName or f"unsaved:{d.Name}"
+            key = doc_key(d)
             if key != self.current_key:
                 move.addAction(d.Label).triggered.connect(
                     lambda _=False, k=key, label=d.Label: self._move_conversation(item_data["id"], k, label))
@@ -886,9 +894,10 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.current_key = key
         self._render_active()
 
-    def on_document_saved(self, name: str, label: str, filename: str) -> None:
+    def on_document_saved(self, doc: Any, filename: str) -> None:
         """Saving gives a document a new key (its file, also after Save As); its conversations go with it."""
-        old = self.doc_keys.get(name, f"unsaved:{name}")
+        name, label = doc.Name, doc.Label
+        old = self.doc_keys.get(name, f"unsaved:{getattr(doc, 'Uid', '') or name}")
         self.doc_keys[name] = filename
         if old == filename:
             return
@@ -1208,6 +1217,22 @@ class ChatPanel(QtWidgets.QDockWidget):
     # ----- events
 
     def _on_event(self, ev: dict[str, Any]) -> None:
+        """Every event from Claude Code. A bug in handling one must not silently stop the panel:
+        it is logged with its traceback and shown once, with a debug report button."""
+        try:
+            self._handle_event(ev)
+        except Exception as e:
+            import traceback
+
+            debuglog.log("panel_error", event=ev.get("kind"), error=repr(e), traceback=traceback.format_exc())
+            App.Console.PrintError(f"ClaudeBridge chat: error handling {ev.get('kind')}: {e!r}\n")
+            if not getattr(self, "_error_noted", False):
+                self._error_noted = True
+                self._note(f"The chat panel hit an internal error ({e!r}); it keeps going, but please create a "
+                           "debug report.", error=True)
+                self._append(_buttons([("Create debug report", "report:", "option")]))
+
+    def _handle_event(self, ev: dict[str, Any]) -> None:
         kind = ev.get("kind")
         if kind not in ("text_delta", "thinking_delta"):
             debuglog.log("event", **{k: v for k, v in ev.items() if k != "content"})
@@ -1250,6 +1275,8 @@ class ChatPanel(QtWidgets.QDockWidget):
             name = short_tool_name(ev.get("name", "?"))
             self.turn_steps += 1
             self.tool_rows[ev.get("id") or name] = (name, time.time())
+            self.status.setText(f"◐ Running {name}…")
+            self.status.repaint()          # visible before FreeCAD's GUI thread may block on the call
             if name != "TodoWrite":
                 self._append(f"<div style='color:#666'>▸ <code>{html.escape(name)}</code> "
                              f"{html.escape(_tool_summary(ev.get('input') or {}))}</div>")
@@ -1482,9 +1509,13 @@ class ChatPanel(QtWidgets.QDockWidget):
 
     def _tick(self) -> None:
         """Every half second while Claude works: what it is doing, and whether it went quiet."""
+        now = time.time()
+        gap = now - getattr(self, "_last_tick", now)
+        self._last_tick = now
         if not self._working():
             return
-        now = time.time()
+        if gap > 5:          # the GUI thread was blocked: FreeCAD computed something, that is not a stall
+            self.activity.alive(now)
         self.spin = (self.spin + 1) % 4
         text = self.activity.describe(now)
         if text and not self.perms:

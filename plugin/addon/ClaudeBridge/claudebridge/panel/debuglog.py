@@ -38,13 +38,14 @@ def _clip(value: Any) -> Any:
     return value
 
 
-def log(kind: str, **fields: Any) -> None:
+def log(entry: str, /, **fields: Any) -> None:
+    """One line: `entry` says what happened; fields may use any name (events carry their own "kind")."""
     try:
         os.makedirs(folder(), mode=0o700, exist_ok=True)
         path = path_today()
         if os.path.exists(path) and os.path.getsize(path) > MAX_FILE:
             return
-        line = json.dumps({"ts": time.strftime("%H:%M:%S"), "t": round(time.time(), 2), "kind": kind,
+        line = json.dumps({"ts": time.strftime("%H:%M:%S"), "t": round(time.time(), 2), "log": entry,
                            **_clip(fields)}, ensure_ascii=False, default=str)
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
