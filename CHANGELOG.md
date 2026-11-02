@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0 – one-step installer (unreleased)
+
+- `install.sh` (macOS/Linux, `curl … | sh`) and `install.ps1` (Windows, `irm … | iex`) start a setup wizard (`freecad-bridge wizard`), fetched straight from GitHub as a zip, so git is not needed.
+- The wizard checks FreeCAD 1.0+, Claude Desktop (not required on Linux), Claude Code and the Claude sign-in (`claude auth status`). Anything missing is listed with its download page (freecad.org, claude.ai/download, claude.com/claude-code), which it offers to open, and nothing is installed until all is there. A missing Claude Code is installed with the official installer and the sign-in started with `claude auth login`, both after asking; uv is installed too if needed.
+- Then it adds the marketplace, installs or updates the `freecad` plugin, installs the panel into FreeCAD from the installed plugin (a plugin read from a local folder uses that folder) and offers to start FreeCAD. Re-running updates or repairs; `--yes` takes the defaults without questions.
+- CI runs both one-liners on fresh Linux and Windows runners without uv or FreeCAD: uv gets installed, the wizard stops with the right download links and installs nothing.
+
 ## 1.6.0 – approval buttons and Auto (unreleased)
 
 - Approvals are buttons: green Allow once, blue Always, red Deny inside the chat card, plus a bar with real buttons above the input for the oldest open request, so it never scrolls out of sight.

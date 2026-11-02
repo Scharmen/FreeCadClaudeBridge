@@ -141,6 +141,9 @@ def main(argv: list[str] | None = None) -> int:
     p_tok = sub.add_parser("token", help="manage the shared token")
     p_tok.add_argument("--rotate", action="store_true", help="create a new token")
     sub.add_parser("instances", help="list running FreeCAD instances as JSON")
+    p_wiz = sub.add_parser("wizard", help="one-step setup: check prerequisites, install plugin and FreeCAD addon")
+    p_wiz.add_argument("--yes", action="store_true", help="no questions: install what can be installed")
+    p_wiz.add_argument("--freecad", help="FreeCAD.app, install folder or AppImage to use")
     p_pref = sub.add_parser("preferences", help="what Claude learned from your feedback (show, context, forget)")
     p_pref.add_argument("action", nargs="?", choices=["show", "context", "forget"], default="show")
     p_set = sub.add_parser("settings", help="show or change user settings (memory limits of headless jobs, ...)")
@@ -168,6 +171,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(platforms.token_path() if platforms.read_token() else "no token")
         return 0
+    if args.cmd == "wizard":
+        from . import wizard
+
+        return wizard.main(args.yes, args.freecad)
     if args.cmd == "preferences":
         return preferences_cmd(args.action)
     if args.cmd == "settings":

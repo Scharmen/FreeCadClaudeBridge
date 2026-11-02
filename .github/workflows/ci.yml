@@ -115,3 +115,35 @@ jobs:
       - name: FreeCAD log
         if: always()
         run: tail -100 freecad.log || true
+
+  installer-linux:
+    # A fresh machine without uv and FreeCAD: the one-liner installs uv, the wizard must stop
+    # with the FreeCAD download link and change nothing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run install.sh like a new user (local checkout as source)
+        run: |
+          set +e
+          FREECAD_BRIDGE_SRC="$PWD/plugin/server" sh install.sh --yes > out.txt 2>&1
+          rc=$?
+          cat out.txt
+          test "$rc" -eq 1
+          grep -q "https://www.freecad.org/downloads.php" out.txt
+          grep -q "Claude Desktop is not available for Linux" out.txt
+          ! grep -q "plugin installed" out.txt
+
+  installer-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run install.ps1 like a new user (local checkout as source)
+        shell: pwsh
+        run: |
+          $env:FREECAD_BRIDGE_SRC = "$PWD\plugin\server"
+          $env:FREECAD_BRIDGE_WIZARD_ARGS = "--yes"
+          $out = & powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch "freecad.org/downloads.php") { throw "no FreeCAD download link" }
+          if ($out -notmatch "claude.ai/download") { throw "no Claude Desktop link" }
+          if ($out -match "plugin installed") { throw "installed despite missing prerequisites" }

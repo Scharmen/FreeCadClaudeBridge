@@ -68,3 +68,16 @@ def test_no_network_access_and_loopback_only():
         assert not re.search(r"^\s*(?:import|from)\s+(?:urllib|http|requests|httpx|aiohttp)\b", text, re.M), py
         for m in re.finditer(r"\.bind\((.+?)\)\n", text):
             assert "127.0.0.1" in m[1] or "path" in m[1], f"{py}: bind({m[1]})"
+
+
+def test_installers_point_at_the_wizard():
+    import shutil
+    import subprocess
+
+    sh = (ROOT / "install.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "install.ps1").read_text(encoding="utf-8")
+    for text in (sh, ps):
+        assert "freecad-bridge wizard" in text
+        assert "archive/refs/heads/main.zip#subdirectory=plugin/server" in text
+    if shutil.which("sh"):
+        assert subprocess.run(["sh", "-n", str(ROOT / "install.sh")]).returncode == 0

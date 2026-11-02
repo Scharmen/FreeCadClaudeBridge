@@ -2,11 +2,33 @@
 
 Control FreeCAD by chat with Claude, either in a **"Claude" chat panel inside FreeCAD** or from **Claude Code**. Claude works on your open document through FreeCAD's Python API: it creates and changes geometry, reads the model tree and properties, and exports files. Every Claude step is exactly one undo step, and failed code leaves nothing behind.
 
-> Status: 1.6.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
+> Status: 1.7.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
-Requirements: FreeCAD 1.1, [Claude Code](https://claude.com/claude-code) (logged in), and uv.
+You need **[FreeCAD](https://www.freecad.org/downloads.php) 1.0 or newer** and **[Claude Desktop](https://claude.ai/download)**, installed and signed in (on Linux, where there is no Claude Desktop, [Claude Code](https://claude.com/claude-code) is enough). Then run one line:
+
+**macOS / Linux** (Terminal):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Scharmen/FreeCadClaudeBridge/main/install.sh | sh
+```
+
+**Windows** (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/Scharmen/FreeCadClaudeBridge/main/install.ps1 | iex
+```
+
+The installer walks you through it:
+
+1. It checks for FreeCAD, Claude Desktop, Claude Code (the `claude` command the panel uses) and your Claude sign-in. Whatever is missing is named with its download page, which it offers to open; nothing is changed until everything is there.
+2. If only Claude Code or the sign-in is missing, it offers to fix that right away: the official Claude Code installer, and `claude auth login` in your browser (use the same account as in Claude Desktop). It also installs [uv](https://docs.astral.sh/uv/) if needed, after asking.
+3. It installs the `freecad` plugin into Claude and the Claude panel into FreeCAD, then offers to start FreeCAD; the "Claude" panel appears docked on the right.
+
+Run it again any time to update or repair. `… | sh -s -- --yes` (macOS/Linux) answers every question with the default.
+
+<details><summary>Manual install (for developers)</summary>
 
 1. **Install uv** (once): `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux), `brew install uv`, or on Windows `winget install --id=astral-sh.uv -e`.
 2. **Install the plugin in Claude Code:**
@@ -17,6 +39,8 @@ Requirements: FreeCAD 1.1, [Claude Code](https://claude.com/claude-code) (logged
 3. **Set up:** run `/freecad:setup` in Claude Code. It finds FreeCAD (macOS app, Windows install or portable folder, Linux package or AppImage; pass `--freecad <path>` if it isn't found), copies the ClaudeBridge addon into FreeCAD's `Mod` folder and records the path to Claude Code. Then (re)start FreeCAD; the "Claude" panel appears docked on the right.
 
 Check everything with `/freecad:status`.
+
+</details>
 
 **Settings:** FreeCAD → *Preferences → Claude Bridge* (or ⚙ → Settings… in the chat panel), `/freecad:settings` in Claude Code, or `freecad-bridge settings` in a terminal. There you set how much memory a headless job may use (as a share of this computer's RAM, plus what always stays free), its default time limit, and whether the bridge and chat panel start with FreeCAD.
 
