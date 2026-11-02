@@ -113,3 +113,13 @@ def test_split_vertices_survive_an_stl_round_trip(tmp_path):
     coords = np.round(v[t].reshape(-1, 3), 6)                      # what an STL reader sees
     _, merged = np.unique(coords, axis=0, return_inverse=True)
     assert closed(merged.reshape(-1, 3)), "identical points merged on reading must not pinch the surface again"
+
+
+def test_evaluation_in_slabs_gives_the_same_field(monkeypatch):
+    part = {"detail": {"amplitude": 0.3, "scale": 2},
+            "primitives": [{"type": "ellipsoid", "center": [0, 0, 0], "radii": [9, 6, 4]},
+                           {"type": "capsule", "a": [0, 0, 0], "b": [0, 0, 8], "radius": 2, "op": "subtract"}]}
+    whole, _, _ = sculpt.field(part, voxel=0.5)
+    monkeypatch.setattr(sculpt, "CHUNK", 777)             # many slabs and noise chunks of odd size
+    sliced, _, _ = sculpt.field(part, voxel=0.5)
+    assert np.allclose(whole, sliced, atol=1e-5)

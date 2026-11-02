@@ -19,8 +19,9 @@ from typing import Any
 
 import numpy as np
 
-MAX_CELLS = 200            # grid cells along the longest side (about 300 MB peak memory)
+MAX_CELLS = 200            # grid cells along the longest side
 MAX_PRIMITIVES = 3000
+CHUNK = 1 << 20             # points evaluated at once (keeps the temporaries of one primitive near 100 MB)
 PINCH_NUDGE = 0.002        # mm a split vertex moves into its own sheet
 DEFAULT_BLEND = 1.0
 
@@ -250,10 +251,8 @@ def field(part: dict[str, Any], voxel: float | None = None) -> tuple[np.ndarray,
         sub_axes = [axes[i][sl[i]] for i in range(3)]
         if min(len(a) for a in sub_axes) == 0:
             continue
-        gx, gy, gz = np.meshgrid(*sub_axes, indexing="ij")
-        pts = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)
-        d = _sdf(prim, pts).reshape(gx.shape)
-        cur = grid[sl].astype(float)
+        d = _sample(prim, sub_axes)
+        cur = grid[sl]
         op = prim.get("op", "add")
         if op == "add":
             grid[sl] = _smooth_union(cur, d, k)
@@ -268,9 +267,28 @@ def field(part: dict[str, Any], voxel: float | None = None) -> tuple[np.ndarray,
     if amp:
         near = np.abs(grid) < (abs(amp) * 3 + voxel * 3)
         idx = np.nonzero(near)
-        pts = np.stack([axes[0][idx[0]], axes[1][idx[1]], axes[2][idx[2]]], axis=1)
-        grid[idx] -= amp * _value_noise(pts, float(detail.get("scale", 3.0)), int(detail.get("seed", 1)))
+        scale, seed = float(detail.get("scale", 3.0)), int(detail.get("seed", 1))
+        for start in range(0, len(idx[0]), CHUNK):
+            part_idx = tuple(i[start:start + CHUNK] for i in idx)
+            pts = np.stack([axes[0][part_idx[0]], axes[1][part_idx[1]], axes[2][part_idx[2]]], axis=1)
+            grid[part_idx] -= amp * _value_noise(pts, scale, seed)
     return grid, lo, voxel
+
+
+def _sample(prim: dict[str, Any], sub_axes: list[np.ndarray]) -> np.ndarray:
+    """The primitive's distance on a grid, evaluated in slabs so a large primitive stays small in memory."""
+    out = np.empty(tuple(len(a) for a in sub_axes), dtype=np.float32)
+    plane = len(sub_axes[1]) * len(sub_axes[2])
+    step = max(1, CHUNK // max(plane, 1))
+    gy, gz = np.meshgrid(sub_axes[1], sub_axes[2], indexing="ij")
+    for start in range(0, len(sub_axes[0]), step):
+        xs = sub_axes[0][start:start + step]
+        pts = np.empty((len(xs), plane, 3))
+        pts[:, :, 0] = xs[:, None]
+        pts[:, :, 1] = gy.ravel()
+        pts[:, :, 2] = gz.ravel()
+        out[start:start + step] = _sdf(prim, pts.reshape(-1, 3)).reshape(len(xs), *gy.shape)
+    return out
 
 
 _CORNERS = np.array([(i, j, k) for i in (0, 1) for j in (0, 1) for k in (0, 1)])
@@ -286,7 +304,7 @@ def surface_nets(grid: np.ndarray, origin: np.ndarray, voxel: float) -> tuple[np
     all_in = np.logical_and.reduce(corner_in)
     active = any_in & ~all_in
     ci, cj, ck = np.nonzero(active)
-    cell_id = np.full(active.shape, -1, dtype=np.int64)
+    cell_id = np.full(active.shape, -1, dtype=np.int32)
     cell_id[ci, cj, ck] = np.arange(len(ci))
     pos = np.zeros((len(ci), 3))
     cnt = np.zeros(len(ci))
@@ -388,8 +406,13 @@ def split_pinches(verts: np.ndarray, tris: np.ndarray) -> tuple[np.ndarray, np.n
             if set(tris[t1]) & pinned:
                 links.setdefault(t1, set()).add(t2)
                 links.setdefault(t2, set()).add(t1)
-        new_verts = [verts]
+        extra: list[np.ndarray] = []
         next_id = len(verts)
+
+        def position(ids: np.ndarray, verts: np.ndarray = verts, extra: list = extra) -> np.ndarray:
+            all_v = np.concatenate([verts, np.array(extra).reshape(-1, 3)]) if extra else verts
+            return all_v[ids]
+
         for v in pinned:
             around = [int(t) for t in np.nonzero((tris == v).any(axis=1))[0]]
             seen: set[int] = set()
@@ -410,14 +433,15 @@ def split_pinches(verts: np.ndarray, tris: np.ndarray) -> tuple[np.ndarray, np.n
             for group in groups[1:]:
                 # nudge the copy towards its own sheet: STL keeps only coordinates, and readers (FreeCAD
                 # included) merge identical points, which would bring the pinch back
-                centre = verts[tris[group]].reshape(-1, 3).mean(axis=0)
+                centre = position(tris[group].ravel()).mean(axis=0)
                 step = centre - verts[v]
                 step *= PINCH_NUDGE / max(float(np.linalg.norm(step)), 1e-12)
-                new_verts.append((verts[v] + step)[None, :])
+                extra.append(verts[v] + step)
                 for t in group:
                     tris[t][tris[t] == v] = next_id
                 next_id += 1
-        verts = np.concatenate(new_verts)
+        if extra:
+            verts = np.concatenate([verts, np.array(extra)])
     return verts, tris
 
 
@@ -439,9 +463,33 @@ def taubin(verts: np.ndarray, tris: np.ndarray, iterations: int, lam: float = 0.
 
 
 def mesh_part(part: dict[str, Any], voxel: float | None = None, smooth: int = 4) -> tuple[np.ndarray, np.ndarray]:
-    grid, origin, voxel = field(part, voxel)
-    verts, tris = split_pinches(*surface_nets(grid, origin, voxel))
+    best = None
+    for attempt in range(3):
+        # a pinch that survives the split depends on how the grid happens to lie over the shape:
+        # a slightly finer grid moves the samples and usually removes it
+        grid, origin, used = field(part, None if voxel is None and attempt == 0 else
+                                   (voxel or choose_voxel(*_part_bounds(part))) * (1 - 0.07 * attempt))
+        verts, tris = split_pinches(*surface_nets(grid, origin, used))
+        bad = non_manifold_edges(tris)
+        if best is None or bad < best[0]:
+            best = (bad, verts, tris)
+        if bad == 0:
+            break
+    _, verts, tris = best
     return taubin(verts, tris, int(part.get("smooth", smooth))), tris
+
+
+def non_manifold_edges(tris: np.ndarray) -> int:
+    e = np.sort(np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]]), axis=1)
+    _, counts = np.unique(e, axis=0, return_counts=True)
+    return int((counts != 2).sum())
+
+
+def _part_bounds(part: dict[str, Any]) -> tuple[list[tuple[float, float, float]], None]:
+    boxes = [_bounds(p) for p in part.get("primitives") or []]
+    lo = np.min([b[0] for b in boxes], axis=0)
+    hi = np.max([b[1] for b in boxes], axis=0)
+    return [tuple(lo), tuple(hi)], None
 
 
 def pieces(n_verts: int, tris: np.ndarray) -> int:
@@ -491,6 +539,7 @@ def sculpt_scene(scene: dict[str, Any], out_dir: str, voxel: float | None = None
         size = (verts.max(0) - verts.min(0)) if len(verts) else np.zeros(3)
         n_pieces = pieces(len(verts), tris)
         entry = {"name": name, "path": path, "triangles": int(len(tris)), "color": part.get("color"),
+                 "shininess": float(part.get("shininess", 0.0)),
                  "size_mm": [round(float(x), 2) for x in size], "pieces": n_pieces}
         if n_pieces > 1:
             entry["warning"] = (f"{n_pieces} separate pieces: something does not touch the rest (a floating "

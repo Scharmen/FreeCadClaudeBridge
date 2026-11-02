@@ -42,7 +42,7 @@ assert abs(cyl.ViewObject.ShapeAppearance[0].Shininess - 0.55) < 1e-3
 assert cyl.ViewObject.Deviation < 0.1
 ```
 
-Colors that read as real are rarely pure: skin around (0.85, 0.65, 0.52), wood (0.55, 0.36, 0.2), bronze (0.62, 0.45, 0.22), stone (0.55, 0.53, 0.5), steel (0.7, 0.72, 0.75) with high shininess. Give separate parts separate colors (hair, skin, clothes, base).
+Use gloss only for metal, glass, glazed or wet surfaces; skin, hair, cloth, wood and stone look real when matte (Shininess 0, SpecularColor black), and glossy they read as plastic. Colors that read as real are rarely pure: skin around (0.85, 0.65, 0.52), wood (0.55, 0.36, 0.2), bronze (0.62, 0.45, 0.22), stone (0.55, 0.53, 0.5), steel (0.7, 0.72, 0.75) with high shininess. Give separate parts separate colors (hair, skin, clothes, base).
 
 ## Printable by design
 

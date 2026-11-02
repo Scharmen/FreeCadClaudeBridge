@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.0 – better models from the start, organic shapes (unreleased)
+
+- New `sculpt` tool for organic forms (figures, faces, hair, beards, animals, plants, rocks): parts described as primitives (sphere, ellipsoid, tapered capsule, strand, rounded box, torus, cylinder) that melt into each other with a blend radius, subtracted or intersected, with optional surface detail noise. It is computed outside FreeCAD (signed distance field, surface nets, Taubin smoothing) and imported as one closed mesh per part in a group, in one undo step, so it cannot crash FreeCAD. Pinched edges are split and the grid refined until every part is watertight; parts that fall apart into separate pieces are reported. Parts are matte unless they set `shininess`; peak memory stays around 0.6 GB on a 5 cm bust at 0.22 mm.
+- Skill: `quality.md` (brief, reference, block-out, refine and check workflow; robust parametric sketches; finer tessellation, materials and colors for a realistic look; printability) and `organic.md` (technique per subject, sculpt rules for proportions, hair, faces and cloth, a checklist of what went wrong in first attempts, tested lofts through B-spline sections, tapered sweeps, B-spline surfaces and safe mesh building).
 ## 1.8.1 – fixes from the live test (unreleased)
 
 - Panel events were dropped: the debug log call clashed with the events' own `kind` field, so everything except streamed text failed (stale status line, conversations not stored, no switch to a new document). Fixed, and event handling now has a safety net: an error is logged with its traceback and shown once with a debug report button instead of silently stopping the panel.

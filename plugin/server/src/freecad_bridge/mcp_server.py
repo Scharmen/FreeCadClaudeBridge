@@ -520,8 +520,16 @@ for _p in _parts:
     if _vo is not None:
         if hasattr(_vo, "CreaseAngle"):
             _vo.CreaseAngle = 70           # smooth shading: organic surfaces look round, not faceted
-        if _p.get("color") and hasattr(_vo, "ShapeColor"):
-            _vo.ShapeColor = tuple(float(c) for c in _p["color"][:3])
+        _rgb = tuple(float(c) for c in (_p.get("color") or (0.8, 0.8, 0.8))[:3])
+        if hasattr(_vo, "ShapeAppearance"):
+            _mat = App.Material()          # matte by default: gloss makes organic forms read as plastic
+            _mat.DiffuseColor = _rgb
+            _shine = float(_p.get("shininess", 0.0))
+            _mat.SpecularColor = (0.6 * _shine,) * 3
+            _mat.Shininess = _shine
+            _vo.ShapeAppearance = [_mat]
+        elif hasattr(_vo, "ShapeColor"):
+            _vo.ShapeColor = _rgb
     _bb = _m.BoundBox
     _made.append({{"object": _o.Name, "triangles": _m.CountFacets, "watertight": _m.isSolid(),
                   "size_mm": [round(_bb.XLength, 2), round(_bb.YLength, 2), round(_bb.ZLength, 2)]}})
@@ -535,7 +543,8 @@ async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | 
     """Sculpt organic shapes (figures, animals, faces, hair, plants, rocks, terrain) from smoothly
     blended primitives, like clay: they melt into each other instead of meeting at hard seams.
     scene = {"blend": 1.5, "detail": {...}, "parts": [{"name", "color": [r,g,b] 0..1, "blend",
-    "detail", "primitives": [...]}, ...]} (or a single part's keys at the top level).
+    "detail", "shininess": 0..1 (default 0, matte), "primitives": [...]}, ...]} (or a single
+    part's keys at the top level).
     Primitives (mm): sphere {center, radius}; ellipsoid {center, radii, rotate:[rx,ry,rz] deg};
     capsule {a, b, radius, radius_b} (tapered limb/finger); strand {points:[[x,y,z]...], radius,
     radius_end} (hair lock, tail, beard, vine); box {center, size, round, rotate}; torus {center,

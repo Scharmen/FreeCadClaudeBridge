@@ -40,6 +40,17 @@ Rules that make it look real instead of plastic:
 - **Surface detail scales with the object:** `detail.amplitude` 0.1–0.3 % of the size for skin, 1–3 % for stone or bark; `scale` is the feature size. Give each material its own part, color and detail.
 - **Resolution:** default about 1/200 of the size; set `voxel_mm` to roughly a third of the finest feature (0.15–0.3 mm for a 5 cm figure). Very fine settings take longer; split large scenes into parts.
 - **Iterate:** block out with a few primitives, look at it from front and side, then add.
+- **Matte by default.** Sculpted parts get no gloss; gloss makes skin, hair and cloth look like plastic. Give only metal or wet parts `"shininess"` (0.3–0.6).
+
+Check after every sculpt, before showing it (each of these broke a first attempt):
+
+- **No `part_warnings`.** "separate pieces" means a strand or fold floats in the air: move it into the body.
+- **Parts overlap what they sit on.** Clothes reach into the neck and the base, the helmet into the head, hair roots start inside the scalp. A gap of one voxel shows as a crack.
+- **Added details stay inside the body's silhouette.** A fold or muscle that sticks out reads as a growth; ridges are thin and lie on the surface.
+- **Details follow the surface.** Put strand points on the surface they run along (crests, hems, hair over the skull), not a straight capsule between two far points.
+- **Depth matches width.** A torso is about half as deep as it is wide, a head about as deep as high; an egg-shaped chest is the typical mistake.
+- **Grooves are at least 2–3 voxels deep and wide,** or the smoothing erases them.
+- **Look from the front and from the side** (`view` with a screenshot), not only from the angle you modelled in.
 
 ## Smooth CAD forms in FreeCAD
 
