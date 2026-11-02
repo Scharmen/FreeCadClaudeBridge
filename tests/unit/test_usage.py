@@ -1,0 +1,110 @@
+"""Real token usage, plan limits and model names in the chat panel, from Claude Code's stream."""
+
+import json
+
+from claudebridge.panel import activity, stream, usage
+
+MODELS = [
+    {"value": "default", "resolvedModel": "claude-opus-5-5", "displayName": "Default (recommended)",
+     "description": "Opus 5.5 · Best for everyday, complex tasks"},
+    {"value": "opus", "resolvedModel": "claude-opus-5-5", "displayName": "Opus 5.5",
+     "description": "For complex work and everyday tasks"},
+    {"value": "sonnet", "resolvedModel": "claude-sonnet-5-5", "displayName": "Sonnet 5.5",
+     "description": "Most efficient for simpler tasks"},
+]
+
+
+def feed(*events):
+    p = stream.StreamParser()
+    return p.feed(("\n".join(json.dumps(e) for e in events) + "\n").encode())
+
+
+def start(msg_id, context, model="claude-opus-5-5"):
+    return {"type": "stream_event", "event": {"type": "message_start", "message": {
+        "id": msg_id, "model": model, "usage": {"input_tokens": 2, "cache_creation_input_tokens": 1000,
+                                                "cache_read_input_tokens": context - 1002, "output_tokens": 4}}}}
+
+
+def delta(output, thinking=0):
+    return {"type": "stream_event", "event": {"type": "message_delta", "delta": {"stop_reason": "tool_use"},
+                                              "usage": {"output_tokens": output,
+                                                        "output_tokens_details": {"thinking_tokens": thinking}}}}
+
+
+RATE = {"type": "rate_limit_event", "rate_limit_info": {
+    "status": "allowed", "rateLimitType": "five_hour", "unifiedWindows": {
+        "five_hour": {"utilization": 0.85, "resetsAt": 2000, "status": "allowed"},
+        "seven_day": {"utilization": 0.44, "resetsAt": 9000, "status": "allowed"}}}}
+RESULT = {"type": "result", "subtype": "success", "total_cost_usd": 0.12, "usage": {"output_tokens": 45},
+          "modelUsage": {"claude-opus-5-5": {"contextWindow": 1000000, "outputTokens": 45, "costUSD": 0.12}}}
+
+
+def test_the_parser_reports_real_usage_and_plan_limits():
+    evs = feed(start("m1", 46000), delta(12248, 5917), RATE, RESULT)
+    use = [e for e in evs if e["kind"] == "usage"]
+    assert use[0] == {"kind": "usage", "message": "m1", "model": "claude-opus-5-5", "context": 46000, "output": 4,
+                      "thinking": 0}
+    assert use[1]["output"] == 12248 and use[1]["thinking"] == 5917 and use[1]["message"] == "m1"
+    limits = next(e for e in evs if e["kind"] == "rate_limit")
+    assert limits["windows"]["five_hour"] == {"utilization": 0.85, "resets_at": 2000, "status": "allowed"}
+    result = next(e for e in evs if e["kind"] == "result")
+    assert result["model_usage"]["claude-opus-5-5"]["contextWindow"] == 1000000
+
+
+def test_a_turn_adds_up_every_api_call_not_only_the_last_estimate():
+    u = usage.Usage()
+    u.start_turn()
+    for ev in feed(start("m1", 40000), delta(800, 600), start("m2", 46000), delta(1500, 200), RESULT):
+        u.on_event(ev)
+    assert u.turn_output == 2300 and u.turn_thinking == 800
+    assert u.context == 46000 and u.context_window() == 1000000
+    assert u.turn_text() == "2.3k tokens (800 thinking) · context 46k of 1M (5 %)"
+    u.start_turn()                                     # the next turn starts at zero, the context stays
+    assert u.turn_output == 0 and u.context == 46000
+
+
+def test_context_without_a_known_window_and_number_format():
+    u = usage.Usage()
+    for ev in feed(start("m1", 46000, model="claude-new"), delta(150)):
+        u.on_event(ev)
+    assert u.turn_text() == "150 tokens · context 46k"
+    assert [usage.short(n) for n in (950, 1000, 12345, 1_000_000, 1_250_000)] == ["950", "1k", "12.3k", "1M", "1.25M"]
+
+
+def test_plan_limits_are_shown_until_they_reset_and_survive_a_restart():
+    u = usage.Usage()
+    for ev in feed(RATE):
+        u.on_event(ev, now=1000)
+    assert u.limits_text(now=1500) == "5 h 85 % · week 44 %"
+    assert "resets" in u.limits_tooltip(now=1500) and "5-hour" in u.limits_tooltip(now=1500)
+    assert u.level(now=1500) == "warn"                 # 80 % and more
+    assert u.limits_text(now=2500) == "week 44 %"      # the 5-hour window has reset
+    again = usage.Usage(u.save())
+    assert again.limits_text(now=1500) == "5 h 85 % · week 44 %"
+
+
+def test_the_default_model_says_which_model_it_is():
+    items = usage.model_items(MODELS)
+    assert items[0][0] == "Default (recommended) · Opus 5.5" and items[0][1] == "default"
+    assert "claude-opus-5-5" in items[0][2]
+    assert items[2][0] == "Sonnet 5.5"
+    odd = usage.model_items([{"value": "default", "resolvedModel": "claude-x-9", "displayName": "Default",
+                              "description": "Recommended"}])
+    assert odd[0][0] == "Default · claude-x-9"
+    assert usage.model_name("claude-opus-5-5", MODELS) == "Opus 5.5"
+
+
+def test_thinking_shows_the_turns_real_tokens_plus_the_running_estimate():
+    a = activity.Activity()
+    a.start(now=100)
+    for ev in feed(start("m1", 40000), delta(3000, 2000)):
+        a.on_event(ev, now=101)
+    a.on_event({"kind": "thinking_start"}, now=102)
+    a.on_event({"kind": "thinking_delta", "text": "", "tokens": 1500}, now=110)
+    assert a.describe(now=112) == "Thinking · 0:10 · ~4.5k tokens"
+
+
+def test_a_picture_line_asks_for_a_check_against_the_pictures():
+    line = usage.picture_line(["/tmp/a.png", "/tmp/b b.jpg"])
+    assert "/tmp/a.png" in line and "/tmp/b b.jpg" in line and "compare_to_picture" in line
+    assert usage.picture_line([]) == ""

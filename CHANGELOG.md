@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.10.0 – details first, picture check, real usage (unreleased)
+
+- New `compare_to_picture` tool: the user's picture next to a screenshot of the model from the matching view (the current camera or front/left/top…), with a checklist to go through part by part; the camera is put back afterwards. Pictures attached in the panel come with their file path and the request to check the finished model against them and fix every difference.
+- Details first: the skill, the panel's instructions and a learned preference ask Claude to list every feature before building, model small details at the right scale, look at the model from several sides and add what is missing; "no screenshots" is gone from the skill.
+- Real usage in the panel instead of a thinking estimate: tokens per turn from every API call (thinking included), context fill against the model's context window, and the plan's 5-hour and weekly usage with reset times, as Claude Code reports them (`rate_limit_event`). Kept across restarts; `/usage` shows it in the chat.
+- The model menu says which model "Default" is (e.g. "Default (recommended) · Opus 5.5"); tooltips show the model ID.
+- Named views jump instead of animating, so screenshots right after a view change show the new view; `view` can return and restore the camera.
 ## 1.9.0 – better models from the start, organic shapes (unreleased)
 
 - New `sculpt` tool for organic forms (figures, faces, hair, beards, animals, plants, rocks): parts described as primitives (sphere, ellipsoid, tapered capsule, strand, rounded box, torus, cylinder) that melt into each other with a blend radius, subtracted or intersected, with optional surface detail noise. It is computed outside FreeCAD (signed distance field, surface nets, Taubin smoothing) and imported as one closed mesh per part in a group, in one undo step, so it cannot crash FreeCAD. Pinched edges are split and the grid refined until every part is watertight; parts that fall apart into separate pieces are reported. Parts are matte unless they set `shininess`; peak memory stays around 0.6 GB on a 5 cm bust at 0.22 mm.

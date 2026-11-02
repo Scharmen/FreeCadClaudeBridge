@@ -474,6 +474,53 @@ async def image_to_3d(path: str, mode: Literal["show", "outline", "relief", "ref
     return out
 
 
+COMPARE_NOTE = ("Go through the picture part by part and compare: overall silhouette and proportions; every "
+                "feature, including small ones (edges, chamfers, holes, seams, buttons, text, ornaments, hair "
+                "strands, folds); counts of repeated elements; positions; colors and surface texture. List every "
+                "difference, fix it, then call compare_to_picture again. Done only when nothing is missing.")
+
+
+@mcp.tool(annotations=WRITE, structured_output=False)
+async def compare_to_picture(path: str, views: list[Literal["current", "iso", "front", "rear", "top", "bottom",
+                                                            "left", "right"]] | None = None,
+                             instance: int | None = None) -> list[Any]:
+    """After modelling from a picture: show the user's picture next to the model, so you can find
+    what is missing or wrong. One side-by-side image per view; "current" keeps the camera as it
+    is (turn it to the picture's angle first), other views fit the model; the camera is put
+    back afterwards. Works on the active document. Compare everything, fix the differences,
+    and call it again until the model matches."""
+    from PIL import Image as PILImage
+
+    try:
+        with PILImage.open(os.path.expanduser(path)) as im:
+            w_px, h_px = im.size
+    except (OSError, ValueError) as e:
+        raise ToolError(f"INVALID_ARGS: cannot read the picture {path}: {e}") from e
+    height = 600
+    width = max(200, min(1600, round(height * w_px / h_px)))
+    out: list[Any] = []
+    shown = []
+    camera = None
+    for v in views or ["current"]:
+        args: dict[str, Any] = {"action": "set_view", "screenshot": True, "width": width, "height": height,
+                                "return_camera": camera is None}
+        if v != "current":
+            args.update(action="fit", view=v)
+        res = await _raw("view", args, instance=instance)
+        if isinstance(res, dict) and res.get("camera") and camera is None:
+            camera = res.pop("camera")
+        image = res.pop("image_png_base64", None) if isinstance(res, dict) else None
+        if not image:
+            raise ToolError(f"NO_SCREENSHOT: FreeCAD returned no picture of the view ({_dump(res)[:300]})")
+        png = await anyio.to_thread.run_sync(
+            lambda image=image, v=v: imaging.side_by_side(path, base64.b64decode(image), f"Model ({v})"))
+        out.append(Image(data=png, format="png"))
+        shown.append(v)
+    if camera and shown != ["current"]:
+        await _raw("view", {"action": "set_view", "camera": camera}, instance=instance)   # the user's camera back
+    return [_dump({"picture": path, "views": shown, "check": COMPARE_NOTE}), *out]
+
+
 @mcp.tool(annotations=READ, structured_output=False)
 async def get_preferences() -> str:
     """What this user prefers, learned from their feedback on earlier models, plus whether

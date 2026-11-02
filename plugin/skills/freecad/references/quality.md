@@ -7,8 +7,8 @@ Tested by `tests/gui/test_references.py`. Read this before a model the user will
 1. **Pin down the brief.** Purpose (print, render, assembly), overall size and which dimension it means ("5 cm high" = the whole thing including the base), material and printer if it is printed, level of detail. Ask once if it is unclear; do not guess the size.
 2. **Get a reference.** If the user has a picture, look at it (`image_to_3d` mode `show`) and place it as an image plane (mode `reference`) to model against. Otherwise describe the proportions you are going for in one line before building.
 3. **Block out first.** Build the big masses with few, simple shapes and check the proportions from the front, the side and the top (`view` with a screenshot) before adding any detail. Wrong proportions cannot be fixed with detail.
-4. **Refine, then detail.** Secondary forms (muscles, folds, chamfers), then tertiary detail (texture, small features). Keep the detail size proportional: on a 5 cm figure 0.2–0.5 mm surface detail reads well; a printed detail below the nozzle width (0.4 mm FDM) disappears.
-5. **Check after every step.** `changes` and `errors` in each result; `get_object` for real sizes; one undo step per call, so bundle a stage into one call.
+4. **Refine, then detail; detail is what makes it real.** List every feature first (see "Details make the model" in the skill) and work down the list. Secondary forms (muscles, folds, chamfers), then tertiary detail (texture, small features). Keep the detail size proportional: on a 5 cm figure 0.2–0.5 mm surface detail reads well; a printed detail below the nozzle width (0.4 mm FDM) disappears.
+5. **Check after every step,** and against the user's picture when there is one (`compare_to_picture`, see the skill). `changes` and `errors` in each result; `get_object` for real sizes; one undo step per call, so bundle a stage into one call.
 6. **Show and ask.** A screenshot from a good angle, then ask whether it matches (the panel asks with 👍/👎).
 
 ## Robust parametric models

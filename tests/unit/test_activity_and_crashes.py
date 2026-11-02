@@ -33,7 +33,7 @@ def test_activity_describes_the_current_step():
     assert a.describe(now=101).startswith("Starting")
     a.on_event({"kind": "thinking_start"}, now=102)
     a.on_event({"kind": "thinking_delta", "text": "", "tokens": 1500}, now=110)
-    assert a.describe(now=112) == "Thinking · 0:10 · ~1,500 tokens"   # since thinking began
+    assert a.describe(now=112) == "Thinking · 0:10 · ~1.5k tokens"   # since thinking began
     a.on_event({"kind": "tool_use", "id": "t1", "name": "mcp__plugin_freecad_freecad__run_python",
                 "input": {}}, now=120)
     assert a.describe(now=135) == "Running run_python (15 s) · 0:35"

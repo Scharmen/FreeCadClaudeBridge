@@ -181,6 +181,22 @@ def test_view_and_screenshot():
     assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 1000
 
 
+def pose(camera):
+    """Where the camera is and where it looks (the clipping distances are recomputed on every redraw)."""
+    return [ln.strip() for ln in camera.splitlines() if ln.strip().startswith(("position", "orientation"))]
+
+
+def test_view_returns_and_restores_the_camera():
+    py("doc.addObject('Part::Box','A')")
+    call("document", action="activate", name=DOC)
+    call("view", action="set_view", view="top")
+    before = call("view", action="set_view", view="front", return_camera=True)["camera"]
+    assert "orientation" in before
+    after = call("view", action="set_view", camera=before, return_camera=True)
+    assert pose(after["camera"]) != pose(before)              # it was front when this call started
+    assert pose(call("view", action="set_view", return_camera=True)["camera"]) == pose(before)
+
+
 def test_snapshots_and_close_without_saving():
     py("doc.addObject('Part::Box','Box')")
     c = call("snapshot", action="create", doc=DOC)

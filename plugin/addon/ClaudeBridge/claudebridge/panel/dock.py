@@ -14,7 +14,7 @@ import FreeCADGui as Gui
 from PySide import QtCore, QtGui, QtWidgets
 
 from ..bridge import paths
-from . import activity, conversations, debuglog, dropping, secrets
+from . import activity, conversations, debuglog, dropping, secrets, usage
 from .claude_process import ClaudeSession
 from .stream import (
     PERMISSION_MODES,
@@ -38,7 +38,8 @@ FALLBACK_MODELS = [{"value": "default", "displayName": "Default"}, {"value": "op
 LOCAL_COMMANDS = [("clear", "Start a new conversation"), ("new", "Start a new conversation"),
                   ("model", "Switch the model, e.g. /model opus"), ("effort", "Set the effort, e.g. /effort high"),
                   ("mode", "Permission mode: default, acceptEdits, plan, auto"),
-                  ("desktop", "Open this conversation in the Claude Desktop app"), ("help", "List the commands")]
+                  ("desktop", "Open this conversation in the Claude Desktop app"),
+                  ("usage", "Tokens of the last answer, context and plan limits"), ("help", "List the commands")]
 
 
 def _params() -> Any:
@@ -68,6 +69,18 @@ def _load_info() -> dict[str, Any]:
             return json.load(f)
     except (OSError, ValueError):
         return {}
+
+
+def _usage_path() -> str:
+    return os.path.join(paths.bridge_dir(), "usage.json")
+
+
+def _load_usage() -> usage.Usage:
+    try:
+        with open(_usage_path(), encoding="utf-8") as f:
+            return usage.Usage(json.load(f))
+    except (OSError, ValueError, TypeError):
+        return usage.Usage()
 
 
 def _history_path(key: str) -> str:
@@ -358,6 +371,7 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.stopping = False
         self.restart_after_turn = False
         self.activity = activity.Activity()
+        self.usage = _load_usage()
         self.stall_noted = False
         self.created_in_turn: set[str] = set()     # documents Claude created during the running turn
         self.doc_keys: dict[str, str] = {}         # document name -> its key before the next save
@@ -558,7 +572,14 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.act_key.setChecked(mode == "api_key")
         account = (self.info.get("account") or {}).get("subscriptionType")
         text = (account or "Claude subscription") if mode == "subscription" else "API key (pay as you go)"
-        self.mode_label.setText(f"<b>{html.escape(text)}</b>")
+        label = f"<b>{html.escape(text)}</b>"
+        limits = self.usage.limits_text() if mode == "subscription" else ""
+        if limits:
+            color = {"critical": "#c00", "warn": "#c77700"}.get(self.usage.level(), "gray")
+            label += f" <span style='color:{color}'>· {html.escape(limits)}</span>"
+        self.mode_label.setText(label)
+        self.mode_label.setToolTip(self.usage.limits_tooltip() if limits else "Plan usage shows here after "
+                                   "Claude's first answer (Claude Code reports it with every answer).")
 
     def ask_api_key(self) -> None:
         key, ok = QtWidgets.QInputDialog.getText(self, "Claude API key", "Anthropic API key (stored in the Keychain):",
@@ -1053,6 +1074,7 @@ class ChatPanel(QtWidgets.QDockWidget):
                     f"with rating \"{fb['rating']}\", my words, the request and one general lesson worth remembering "
                     "for future models; then fix the model accordingly.")
         images = [(a["media_type"], a["data"]) for a in self.attachments]
+        pictures = [a["path"] for a in self.attachments if a.get("path")]
         if echo:
             self.input.clear()
             pics = "".join(f"<img src='{QtCore.QUrl.fromLocalFile(a['path']).toString()}' width='120'> "
@@ -1075,6 +1097,7 @@ class ChatPanel(QtWidgets.QDockWidget):
         if not queued:
             self.turn_results, self.max_result_chars, self.turn_steps = [], 0, 0
             self.turn_started = time.time()
+            self.usage.start_turn()
             self.stopping = False
             self.stall_noted = False
             self.activity.start(time.time())
@@ -1087,6 +1110,8 @@ class ChatPanel(QtWidgets.QDockWidget):
                      queued=queued)
         # slash commands go to Claude Code as typed; everything else gets the FreeCAD context line
         prompt = text if slash else context_line() + "\n\n" + (text or "Look at the attached picture.")
+        if pictures and not slash:
+            prompt += "\n\n" + usage.picture_line(pictures)
         session.send_user(prompt, images)
         self._busy(True)
 
@@ -1117,6 +1142,8 @@ class ChatPanel(QtWidgets.QDockWidget):
             self._select(self.pmode_box, arg) if arg else self.pmode_box.showPopup()
         elif name == "desktop":
             self.open_in_desktop()
+        elif name == "usage":
+            self._show_usage()
         elif name == "help":
             names = [f"/{n} — {d}" for n, d in LOCAL_COMMANDS]
             names += [f"/{c.get('name')} — {c.get('description', '')}" for c in self.info.get("commands", [])]
@@ -1124,6 +1151,22 @@ class ChatPanel(QtWidgets.QDockWidget):
         else:
             return False
         return True
+
+    def _save_usage(self) -> None:
+        try:
+            with open(_usage_path(), "w", encoding="utf-8") as f:
+                json.dump(self.usage.save(), f)
+        except OSError:
+            pass
+
+    def _show_usage(self) -> None:
+        lines = []
+        if self.usage.model:
+            lines.append(f"Model: {usage.model_name(self.usage.model, self.info.get('models') or [])}")
+        lines.append(f"Last answer: {self.usage.turn_text() or 'no answer yet'}")
+        limits = self.usage.limits_tooltip()
+        lines.append(limits if limits else "Plan limits: not reported yet; Claude Code sends them with every answer.")
+        self._append("<div style='color:#666'>" + "<br>".join(html.escape(x) for x in lines) + "</div>")
 
     def _select(self, box: QtWidgets.QComboBox, value: str) -> None:
         for i in range(box.count()):
@@ -1163,9 +1206,9 @@ class ChatPanel(QtWidgets.QDockWidget):
         for box in (self.model_box, self.effort_box, self.pmode_box):
             box.blockSignals(True)
         self.model_box.clear()
-        for m in info.get("models") or FALLBACK_MODELS:
-            self.model_box.addItem(m.get("displayName") or m.get("value"), m.get("value"))
-            self.model_box.setItemData(self.model_box.count() - 1, m.get("description", ""), QtCore.Qt.ToolTipRole)
+        for label, value, tip in usage.model_items(info.get("models") or FALLBACK_MODELS):
+            self.model_box.addItem(label, value)
+            self.model_box.setItemData(self.model_box.count() - 1, tip, QtCore.Qt.ToolTipRole)
         self._select_quiet(self.model_box, _params().GetString("Model", "default"))
         self._fill_effort()
         self._select_quiet(self.pmode_box, _params().GetString("PermissionMode", "default"))
@@ -1238,6 +1281,10 @@ class ChatPanel(QtWidgets.QDockWidget):
             debuglog.log("event", **{k: v for k, v in ev.items() if k != "content"})
         was = self.activity.phase
         self.activity.on_event(ev, time.time())
+        self.usage.on_event(ev)
+        if kind in ("rate_limit", "result"):
+            self._save_usage()
+            self._update_mode_label()
         self.stall_noted = False
         if was == "thinking" and self.activity.phase != "thinking":
             self._thought_line()
@@ -1329,9 +1376,13 @@ class ChatPanel(QtWidgets.QDockWidget):
         parts = [f"Done in {dt:.0f} s"]
         if self.turn_steps:
             parts.append(f"{self.turn_steps} step{'s' if self.turn_steps != 1 else ''}")
+        if self.usage.turn_text():
+            parts.append(self.usage.turn_text())
         if self.mode() == "api_key" and ev.get("cost_usd"):
             parts.append(f"${ev['cost_usd']:.2f}")
         self.status.setText("Stopped" if interrupted else " · ".join(parts))
+        self.status.setToolTip("Tokens Claude wrote in this turn (thinking included, as reported by Claude Code) "
+                               "and how much of the model's context window the conversation fills.")
         self.stopping = False
         _save_history(self._hist_key(), self.view.toHtml())
         if self.restart_after_turn:

@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from .stream import short_tool_name
+from .usage import short
 
 LONG_TOOLS = {"run_headless", "export", "import"}     # may legitimately run for minutes
 
@@ -25,13 +26,15 @@ class Activity:
         self.since = 0.0
         self.tool = ""
         self.tool_id: str | None = None
-        self.tokens = 0
+        self.tokens = 0                # estimate for the thinking block in progress
+        self.done_tokens: dict[str, int] = {}   # real output tokens per API call of this turn
         self.thinking_since: float | None = None
         self.last_thought_seconds: int | None = None
 
     def start(self, now: float) -> None:
         self.started = self.last_event = self.since = now
         self.phase, self.tool, self.tool_id, self.tokens = "starting", "", None, 0
+        self.done_tokens = {}
 
     def stop(self) -> None:
         self.phase = "idle"
@@ -55,6 +58,12 @@ class Activity:
                 self.thinking_since, self.tokens = now, 0
             self._set("thinking", now)
             self.tokens = max(self.tokens, int(ev.get("tokens") or 0))
+        elif kind == "usage":
+            msg = ev.get("message") or "?"
+            out = int(ev.get("output") or 0)
+            if out > self.done_tokens.get(msg, 0):
+                self.done_tokens[msg] = out
+                self.tokens = 0            # the estimate is now part of the real count
         elif kind in ("text_delta", "text"):
             self._set("writing", now)
         elif kind == "tool_use":
@@ -73,7 +82,8 @@ class Activity:
         total = _clock(now - self.started)
         if self.phase == "thinking":
             text = f"Thinking · {_clock(now - self.since)}"
-            return text + (f" · ~{self.tokens:,} tokens" if self.tokens else "")
+            total = sum(self.done_tokens.values()) + self.tokens
+            return text + (f" · ~{short(total)} tokens" if total else "")
         if self.phase == "tool":
             return f"Running {self.tool} ({int(now - self.since)} s) · {total}"
         if self.phase == "writing":

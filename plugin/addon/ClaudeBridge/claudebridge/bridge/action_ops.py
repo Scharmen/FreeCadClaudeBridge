@@ -176,6 +176,9 @@ def view(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     if gdoc is None:
         raise OpError(protocol.NO_DOCUMENT, "no active document")
     v = gdoc.ActiveView
+    camera = v.getCamera()
+    if args.get("camera"):                 # put a camera back that an earlier call returned
+        v.setCamera(str(args["camera"]))
     action = args.get("action", "fit")
     doc = App.ActiveDocument
     objs = [_obj(doc, n) for n in args.get("objects") or []]
@@ -183,7 +186,14 @@ def view(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         method = VIEWS.get(str(args["view"]).lower())
         if not method:
             raise OpError(protocol.INVALID_ARGS, f"view must be one of {', '.join(sorted(set(VIEWS)))}")
-        getattr(v, method)()
+        animated = v.isAnimationEnabled() if hasattr(v, "isAnimationEnabled") else False
+        if animated:                       # jump: an animated turn is still moving when the screenshot is taken
+            v.setAnimationEnabled(False)
+        try:
+            getattr(v, method)()
+        finally:
+            if animated:
+                v.setAnimationEnabled(True)
     if action == "show":
         for o in objs:
             o.Visibility = True
@@ -205,6 +215,8 @@ def view(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     if action in ("fit", "isolate") or args.get("fit"):
         v.fitAll()
     out: dict[str, Any] = {"action": action, "visible": [o.Name for o in doc.Objects if _visible(o)][:200]}
+    if args.get("return_camera"):
+        out["camera"] = camera             # as it was before this call
     if args.get("screenshot"):
         Gui.updateGui()
         w, h = int(args.get("width", 800)), int(args.get("height", 600))

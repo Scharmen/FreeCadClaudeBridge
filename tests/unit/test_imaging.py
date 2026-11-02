@@ -90,3 +90,16 @@ def test_preview_png_is_small(tmp_path):
 def test_missing_file_is_a_clear_error(tmp_path):
     with pytest.raises(imaging.ImageError):
         imaging.outline_profile(tmp_path / "nope.png", size_mm=10)
+
+
+def test_side_by_side_puts_picture_and_model_at_the_same_height(tmp_path):
+    import io
+
+    pic = tmp_path / "pic.png"
+    Image.new("RGB", (400, 800), "red").save(pic)
+    shot = io.BytesIO()
+    Image.new("RGB", (300, 300), "blue").save(shot, format="PNG")
+    out = Image.open(io.BytesIO(imaging.side_by_side(str(pic), shot.getvalue(), "Model (front)", height=500)))
+    assert out.height > 500 and out.width > 250 + 500          # labels on top; picture 250 wide, model 500
+    left, right = out.getpixel((100, out.height - 50)), out.getpixel((out.width - 100, out.height - 50))
+    assert left[0] > 200 and left[2] < 50 and right[2] > 200 and right[0] < 50

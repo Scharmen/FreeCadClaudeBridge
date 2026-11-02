@@ -17,7 +17,7 @@ def parse_all(data: bytes, chunk: int | None = None):
 
 
 def test_parses_recorded_turn():
-    events = parse_all(FIXTURE.read_bytes())
+    events = [e for e in parse_all(FIXTURE.read_bytes()) if e["kind"] not in ("usage", "rate_limit")]  # test_usage.py
     kinds = [e["kind"] for e in events]
     assert kinds == ["init", "text_delta", "text_delta", "tool_use", "tool_result",
                      "permission_denied", "text", "result"]

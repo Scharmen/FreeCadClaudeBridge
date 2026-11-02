@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageOps, UnidentifiedImageError
 
 MAX_SIDE_OUTLINE = 700
 MAX_SIDE_RELIEF = 400
@@ -211,4 +211,22 @@ def preview_png(path: str | Path, max_side: int = 1024) -> bytes:
     img = _fit(_open(path), max_side).convert("RGB")
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def side_by_side(picture: str | Path, shot_png: bytes, label: str, height: int = 600) -> bytes:
+    """The user's picture next to a screenshot of the model, both `height` pixels high, labelled."""
+    left = _open(picture).convert("RGB")
+    right = Image.open(io.BytesIO(shot_png)).convert("RGB")
+    left = left.resize((max(1, round(left.width * height / left.height)), height))
+    right = right.resize((max(1, round(right.width * height / right.height)), height))
+    bar, gap = 28, 12
+    out = Image.new("RGB", (left.width + gap + right.width, height + bar), "white")
+    out.paste(left, (0, bar))
+    out.paste(right, (left.width + gap, bar))
+    draw = ImageDraw.Draw(out)
+    draw.text((6, 8), "Picture", fill="black")
+    draw.text((left.width + gap + 6, 8), label, fill="black")
+    buf = io.BytesIO()
+    out.save(buf, format="PNG", optimize=True)
     return buf.getvalue()

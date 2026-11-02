@@ -90,3 +90,25 @@ def test_settings_window_is_not_modal():
     code = ("import claudebridge.panel.prefs as P\nP.show()\n"
             "_result = [P._window.isVisible(), P._window.isModal()]\nP._window.reject()")
     assert call("run_python", code=code)["result"] == [True, False]
+
+
+def pose(camera):
+    """Where the camera is and where it looks (the clipping distances are recomputed on every redraw)."""
+    return [ln.strip() for ln in camera.splitlines() if ln.strip().startswith(("position", "orientation"))]
+
+
+def test_compare_to_picture_shows_picture_and_model_and_keeps_the_camera(tmp_path):
+    import io
+
+    call("run_python", doc=DOC, code="doc.addObject('Part::Cylinder', 'Vase'); doc.recompute()")
+    call("document", action="activate", name=DOC)
+    call("view", action="set_view", view="top")
+    camera = call("view", action="set_view", return_camera=True)["camera"]
+    out = anyio.run(lambda: mcp_server.compare_to_picture(vase(tmp_path), ["current", "front"]))
+    meta = json.loads(out[0])
+    assert meta["views"] == ["current", "front"] and "missing" in meta["check"]
+    assert len(out) == 3
+    for img in out[1:]:
+        pic = Image.open(io.BytesIO(img.data))
+        assert pic.height == 628 and pic.width > 600              # 600 px high plus the label bar
+    assert pose(call("view", action="set_view", return_camera=True)["camera"]) == pose(camera)

@@ -10,7 +10,9 @@ Events (dicts with a "kind" key):
   tool_use       id, name, input
   tool_result    id, is_error, summary
   permission_denied  tool, message
-  result         is_error, text, session_id, cost_usd, denials, duration_ms, num_turns, usage
+  result         is_error, text, session_id, cost_usd, denials, duration_ms, num_turns, usage, model_usage
+  usage          message, model, context (tokens sent), output, thinking (per API call; see usage.py)
+  rate_limit     status, type, windows {name: {utilization 0..1, resets_at, status}} (subscription)
   invalid        line (non-JSON output)
 Full chat (persistent session, --input-format stream-json):
   permission_request  request_id, tool, input, suggestions, summary, reason, tool_use_id
@@ -39,6 +41,8 @@ class StreamParser:
     def __init__(self) -> None:
         self._buf = b""
         self._deltas_in_message = False
+        self._message: str | None = None
+        self._model: str | None = None
 
     def feed(self, data: bytes) -> list[dict[str, Any]]:
         self._buf += data
@@ -83,8 +87,10 @@ class StreamParser:
                      "text": ev.get("result") or "", "session_id": ev.get("session_id"),
                      "cost_usd": ev.get("total_cost_usd"), "subtype": sub,
                      "duration_ms": ev.get("duration_ms"), "num_turns": ev.get("num_turns"),
-                     "usage": ev.get("usage") or {},
+                     "usage": ev.get("usage") or {}, "model_usage": ev.get("modelUsage") or {},
                      "denials": [d.get("tool_name", "?") if isinstance(d, dict) else str(d) for d in denials]}]
+        if t == "rate_limit_event":
+            return [_rate_limit(ev.get("rate_limit_info") or {})]
         if t == "control_request":
             return [_control_request(ev)]
         if t == "control_response":
@@ -96,6 +102,11 @@ class StreamParser:
     def _stream_event(self, e: dict[str, Any]) -> list[dict[str, Any]]:
         if e.get("type") == "message_start":
             self._deltas_in_message = False
+            msg = e.get("message") or {}
+            self._message, self._model = msg.get("id"), msg.get("model")
+            return [_usage(msg.get("usage"), self._message, self._model)]
+        if e.get("type") == "message_delta" and e.get("usage"):
+            return [_usage(e["usage"], self._message, self._model)]
         if e.get("type") == "content_block_start" and (e.get("content_block") or {}).get("type") == "thinking":
             return [{"kind": "thinking_start"}]
         delta = e.get("delta") or {}
@@ -123,6 +134,21 @@ class StreamParser:
                     out.append({"kind": "todos", "items": [t for t in items if isinstance(t, dict)]})
         self._deltas_in_message = False  # the next message streams its own deltas (or none)
         return out
+
+
+def _usage(u: Any, message: str | None, model: str | None) -> dict[str, Any]:
+    u = u if isinstance(u, dict) else {}
+    context = sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                "cache_read_input_tokens"))
+    return {"kind": "usage", "message": message, "model": model, "context": context,
+            "output": int(u.get("output_tokens") or 0),
+            "thinking": int((u.get("output_tokens_details") or {}).get("thinking_tokens") or 0)}
+
+
+def _rate_limit(info: dict[str, Any]) -> dict[str, Any]:
+    windows = {name: {"utilization": w.get("utilization"), "resets_at": w.get("resetsAt"), "status": w.get("status")}
+               for name, w in (info.get("unifiedWindows") or {}).items() if isinstance(w, dict)}
+    return {"kind": "rate_limit", "status": info.get("status"), "type": info.get("rateLimitType"), "windows": windows}
 
 
 def _control_request(ev: dict[str, Any]) -> dict[str, Any]:
