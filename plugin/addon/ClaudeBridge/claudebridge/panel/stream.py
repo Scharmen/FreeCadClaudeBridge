@@ -10,13 +10,25 @@ Events (dicts with a "kind" key):
   tool_use       id, name, input
   tool_result    id, is_error, summary
   permission_denied  tool, message
-  result         is_error, text, session_id, cost_usd, denials
+  result         is_error, text, session_id, cost_usd, denials, duration_ms, num_turns, usage
   invalid        line (non-JSON output)
+Full chat (persistent session, --input-format stream-json):
+  permission_request  request_id, tool, input, suggestions, summary, reason, tool_use_id
+  control_request     request_id, subtype, request (other requests from Claude Code)
+  control_response    request_id, ok, response, error
+  thinking_delta      text
+  todos               items (from TodoWrite)
+
+Builders for the session's stdin: user_message, control_request, permission_response;
+session_args for the command line.
 """
 
 from __future__ import annotations
 
+import base64
+import itertools
 import json
+import re
 from typing import Any
 
 FREECAD_TOOL_PREFIX = "mcp__plugin_freecad_freecad__"
@@ -68,7 +80,15 @@ class StreamParser:
             return [{"kind": "result", "is_error": bool(ev.get("is_error")),
                      "text": ev.get("result") or "", "session_id": ev.get("session_id"),
                      "cost_usd": ev.get("total_cost_usd"), "subtype": sub,
+                     "duration_ms": ev.get("duration_ms"), "num_turns": ev.get("num_turns"),
+                     "usage": ev.get("usage") or {},
                      "denials": [d.get("tool_name", "?") if isinstance(d, dict) else str(d) for d in denials]}]
+        if t == "control_request":
+            return [_control_request(ev)]
+        if t == "control_response":
+            r = ev.get("response") or {}
+            return [{"kind": "control_response", "request_id": r.get("request_id"), "ok": r.get("subtype") == "success",
+                     "response": r.get("response"), "error": r.get("error")}]
         return []
 
     def _stream_event(self, e: dict[str, Any]) -> list[dict[str, Any]]:
@@ -78,6 +98,8 @@ class StreamParser:
         if e.get("type") == "content_block_delta" and delta.get("type") == "text_delta":
             self._deltas_in_message = True
             return [{"kind": "text_delta", "text": delta.get("text", "")}]
+        if e.get("type") == "content_block_delta" and delta.get("type") == "thinking_delta":
+            return [{"kind": "thinking_delta", "text": delta.get("thinking", "")}]
         return []
 
     def _assistant(self, ev: dict[str, Any]) -> list[dict[str, Any]]:
@@ -89,8 +111,30 @@ class StreamParser:
             elif bt == "tool_use":
                 out.append({"kind": "tool_use", "id": block.get("id"), "name": block.get("name", "?"),
                             "input": block.get("input") or {}})
+                if block.get("name") == "TodoWrite":
+                    items = (block.get("input") or {}).get("todos") or []
+                    out.append({"kind": "todos", "items": [t for t in items if isinstance(t, dict)]})
         self._deltas_in_message = False  # the next message streams its own deltas (or none)
         return out
+
+
+def _control_request(ev: dict[str, Any]) -> dict[str, Any]:
+    req = ev.get("request") or {}
+    if req.get("subtype") == "can_use_tool":
+        tool, inp = req.get("tool_name", "?"), req.get("input") or {}
+        return {"kind": "permission_request", "request_id": ev.get("request_id"), "tool": tool, "input": inp,
+                "suggestions": req.get("permission_suggestions") or [], "tool_use_id": req.get("tool_use_id"),
+                "reason": req.get("decision_reason") or "", "summary": permission_summary(tool, inp)}
+    return {"kind": "control_request", "request_id": ev.get("request_id"), "subtype": req.get("subtype"),
+            "request": req}
+
+
+def permission_summary(tool: str, inp: dict[str, Any]) -> str:
+    """One line saying what a tool call would do, for the approval card."""
+    for key in ("command", "file_path", "notebook_path", "url", "query", "pattern", "path", "prompt"):
+        if inp.get(key):
+            return f"{short_tool_name(tool)}: {str(inp[key])[:400]}"
+    return f"{short_tool_name(tool)}: {json.dumps(inp, ensure_ascii=False)[:400]}"
 
 
 def _init(ev: dict[str, Any]) -> dict[str, Any]:
@@ -203,3 +247,68 @@ def build_args(prompt: str, session_id: str | None = None, plugin_dir: str | Non
 
 def short_tool_name(name: str) -> str:
     return name[len(FREECAD_TOOL_PREFIX):] if name.startswith(FREECAD_TOOL_PREFIX) else name
+
+
+# ---------- full chat: the persistent session's command line and stdin messages
+
+_request_ids = itertools.count(1)
+PERMISSION_MODES = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
+
+
+def session_args(session_id: str | None = None, plugin_dir: str | None = None, model: str | None = None,
+                 effort: str | None = None, permission_mode: str | None = None, system_prompt: str | None = None,
+                 allowed_tools: list[str] | None = None) -> list[str]:
+    """Arguments for a persistent `claude` session that reads messages and permission answers on stdin.
+
+    All tools are available; anything the user's Claude Code settings don't allow comes back as a
+    permission_request (--permission-prompt-tool stdio). The FreeCAD tools are allowed up front.
+    Never `--bare`: it drops the subscription login and installed plugins.
+    """
+    args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+            "--include-partial-messages", "--permission-prompt-tool", "stdio"]
+    for flag, value in (("--resume", session_id), ("--plugin-dir", plugin_dir), ("--model", model),
+                        ("--effort", effort), ("--permission-mode", permission_mode),
+                        ("--append-system-prompt", system_prompt)):
+        if value:
+            args += [flag, value]
+    tools = allowed_tools if allowed_tools is not None else [FREECAD_TOOL_PREFIX + "*"]
+    if tools:
+        args += ["--allowedTools", ",".join(tools)]
+    return args
+
+
+def user_message(text: str, images: list[tuple[str, bytes]] | None = None) -> dict[str, Any]:
+    """A user turn; images go as real image content (media type, bytes)."""
+    if not images:
+        return {"type": "user", "message": {"role": "user", "content": text}}
+    content: list[dict[str, Any]] = [
+        {"type": "image", "source": {"type": "base64", "media_type": mt, "data": base64.b64encode(data).decode()}}
+        for mt, data in images]
+    content.append({"type": "text", "text": text})
+    return {"type": "user", "message": {"role": "user", "content": content}}
+
+
+def control_request(subtype: str, **fields: Any) -> dict[str, Any]:
+    return {"type": "control_request", "request_id": f"fcb-{next(_request_ids)}",
+            "request": {"subtype": subtype, **fields}}
+
+
+def permission_response(request_id: str, decision: str, tool_input: dict[str, Any],
+                        suggestions: list[dict[str, Any]] | None = None, message: str = "") -> dict[str, Any]:
+    """decision: allow (once), always (allow and apply Claude Code's suggested rules), deny."""
+    if decision == "deny":
+        answer: dict[str, Any] = {"behavior": "deny", "message": message or "The user declined this action."}
+    else:
+        answer = {"behavior": "allow", "updatedInput": tool_input}
+        if decision == "always" and suggestions:
+            answer["updatedPermissions"] = suggestions
+    return {"type": "control_response", "response": {"subtype": "success", "request_id": request_id,
+                                                     "response": answer}}
+
+
+_SLASH = re.compile(r"^/([A-Za-z][\w:.-]*)(?:\s+(.*))?$", re.S)
+
+
+def parse_slash(text: str) -> tuple[str, str] | None:
+    m = _SLASH.match(text.strip())
+    return (m.group(1), (m.group(2) or "").strip()) if m else None

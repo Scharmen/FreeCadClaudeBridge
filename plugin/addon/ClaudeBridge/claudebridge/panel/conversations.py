@@ -226,9 +226,39 @@ class Store:
             item["title"] = title.strip()[:80]
             self._save()
 
+    def ordered(self, key: str) -> list[dict[str, Any]]:
+        """Pinned first, then the user's drag order, then newest first."""
+        order = self._doc(key).get("order", []) if key in self.data else []
+        rank = {sid: i for i, sid in enumerate(order)}
+        items = self.items(key)
+        return sorted(items, key=lambda c: (not c.get("pinned", False), rank.get(c["id"], len(rank)),
+                                            -c.get("created", 0)))
+
+    def set_order(self, key: str, ids: list[str]) -> None:
+        self._doc(key)["order"] = [i for i in ids if self.find(key, i)]
+        self._save()
+
+    def pin(self, key: str, sid: str, pinned: bool) -> None:
+        item = self.find(key, sid)
+        if item:
+            item["pinned"] = bool(pinned)
+            self._save()
+
+    def move(self, src: str, dst: str, sid: str) -> None:
+        """Hand a conversation over to another document (it becomes that document's active one)."""
+        item = self.find(src, sid)
+        if not item or src == dst:
+            return
+        self.remove(src, sid)
+        doc = self._doc(dst)
+        doc["items"].append(item)
+        doc["active"] = sid
+        self._save()
+
     def remove(self, key: str, sid: str) -> None:
         doc = self._doc(key)
         doc["items"] = [c for c in doc["items"] if c["id"] != sid]
+        doc["order"] = [i for i in doc.get("order", []) if i != sid]
         if doc.get("active") == sid:
             doc["active"] = doc["items"][-1]["id"] if doc["items"] else None
         self._save()

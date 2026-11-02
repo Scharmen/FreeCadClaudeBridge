@@ -6,6 +6,7 @@ so the bridge can execute the tool calls Claude sends back meanwhile.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import time
@@ -26,6 +27,18 @@ SYSTEM_PROMPT = (
     "the panel is narrow. Each message starts with a [FreeCAD] line giving the active document and selection. "
     "A [Reference image: <path>] line is a picture the user attached: look at it with "
     "image_to_3d(path, mode='show') and use mode outline, relief or reference where it fits. "
+    "The panel asks the user for feedback itself, so do not ask whether the result matches."
+)
+
+
+FULL_CHAT_PROMPT = (
+    "You are running inside the 'Claude' chat panel of the user's FreeCAD, with the full Claude Code toolset. "
+    "Use the freecad MCP tools for the open model (get_changes shows what the user did in the GUI meanwhile); "
+    "bundle related changes into one run_python call, each call is one undo step. Other tools (files, shell, "
+    "web) work as in Claude Code; the user approves them in the panel. Format replies in Markdown; the panel "
+    "is narrow, so keep them compact. Each message starts with a [FreeCAD] line giving the active document "
+    "and selection. [Reference image: <path>] lines and attached pictures come from the user; use "
+    "image_to_3d where it fits. [Object: ...] lines are FreeCAD objects the user dragged into the chat. "
     "The panel asks the user for feedback itself, so do not ask whether the result matches."
 )
 
@@ -161,6 +174,141 @@ class ClaudeRun(QtCore.QObject):
         for ev in self.parser.flush():
             self.event.emit(ev)
         self.finished.emit(int(code))
+
+    def _on_error(self, err: Any) -> None:
+        if err == QtCore.QProcess.FailedToStart:
+            self.failed.emit(f"Could not start Claude Code: {self.proc.errorString()}")
+
+
+class ClaudeSession(QtCore.QObject):
+    """A persistent Claude Code session for one conversation (the full chat).
+
+    Messages, permission answers and control requests (interrupt, model, permission mode) go
+    to stdin as stream-json; events come back through StreamParser. `ready` carries Claude
+    Code's initialize answer: slash commands, models with effort levels, account, agents.
+    """
+
+    event = QtCore.Signal(object)
+    ready = QtCore.Signal(object)
+    exited = QtCore.Signal(int)
+    failed = QtCore.Signal(str)
+
+    def __init__(self, session_id: str | None, mode: str, cwd: str, model: str | None = None,
+                 effort: str | None = None, permission_mode: str | None = None, load_plugin_dir: bool = True,
+                 parent: Any = None) -> None:
+        super().__init__(parent)
+        self.session_id, self.mode, self.cwd = session_id, mode, cwd
+        self.model, self.effort, self.permission_mode = model, effort, permission_mode
+        self.load_plugin_dir = load_plugin_dir
+        self.parser = StreamParser()
+        self.proc: QtCore.QProcess | None = None
+        self.info: dict[str, Any] = {}
+        self.pending = 0            # user messages sent but not answered with a result yet
+        self._init_id: str | None = None
+
+    def start(self) -> bool:
+        claude = find_claude()
+        if not claude:
+            self.failed.emit("Claude Code not found. Run /freecad:setup in Claude Code, which records its path.")
+            return False
+        env = child_env()
+        env.pop("ANTHROPIC_API_KEY", None)
+        env["FREECAD_BRIDGE_INSTANCE"] = str(os.getpid())
+        if self.mode == "api_key":
+            key = secrets.get_api_key()
+            if not key:
+                self.failed.emit("API key mode is selected but no key is stored. Use ⚙ → Set API key.")
+                return False
+            env["ANTHROPIC_API_KEY"] = key
+        from ..bridge import learning
+        from .stream import session_args
+
+        learned = learning.context_text(paths.bridge_dir())
+        plugin_dir = paths.load_config().get("plugin_root") if self.load_plugin_dir else None
+        args = session_args(self.session_id, plugin_dir, self.model, self.effort, self.permission_mode,
+                            FULL_CHAT_PROMPT + ("\n\n" + learned if learned else ""))
+        qenv = QtCore.QProcessEnvironment()
+        for k, v in env.items():
+            qenv.insert(k, v)
+        proc = QtCore.QProcess(self)
+        proc.setProgram(claude)
+        proc.setArguments(args)
+        proc.setWorkingDirectory(self.cwd if os.path.isdir(self.cwd) else os.path.expanduser("~"))
+        proc.setProcessEnvironment(qenv)
+        proc.readyReadStandardOutput.connect(self._on_stdout)
+        proc.readyReadStandardError.connect(self._on_stderr)
+        proc.finished.connect(self._on_finished)
+        proc.errorOccurred.connect(self._on_error)
+        self.proc = proc
+        proc.start()
+        from .stream import control_request
+
+        init = control_request("initialize")
+        self._init_id = init["request_id"]
+        self._send(init)
+        return True
+
+    def running(self) -> bool:
+        return bool(self.proc and self.proc.state() != QtCore.QProcess.NotRunning)
+
+    @property
+    def busy(self) -> bool:
+        return self.pending > 0
+
+    def _send(self, obj: dict[str, Any]) -> None:
+        if self.proc is not None:
+            self.proc.write((json.dumps(obj) + "\n").encode("utf-8"))
+
+    def send_user(self, text: str, images: list[tuple[str, bytes]] | None = None) -> None:
+        from .stream import user_message
+
+        self.pending += 1
+        self._send(user_message(text, images))
+
+    def answer_permission(self, request_id: str, decision: str, tool_input: dict[str, Any],
+                          suggestions: list[dict[str, Any]] | None = None, message: str = "") -> None:
+        from .stream import permission_response
+
+        self._send(permission_response(request_id, decision, tool_input, suggestions, message))
+
+    def control(self, subtype: str, **fields: Any) -> None:
+        from .stream import control_request
+
+        self._send(control_request(subtype, **fields))
+
+    def interrupt(self) -> None:
+        self.control("interrupt")
+
+    def close(self) -> None:
+        """End the session: closing stdin lets Claude Code finish and exit; force it if it lingers."""
+        if not self.running():
+            return
+        self.proc.closeWriteChannel()
+        proc = self.proc
+        QtCore.QTimer.singleShot(5000, lambda: proc.state() != QtCore.QProcess.NotRunning and proc.terminate())
+
+    def _on_stdout(self) -> None:
+        for ev in self.parser.feed(bytes(self.proc.readAllStandardOutput())):
+            if ev["kind"] == "control_response" and ev.get("request_id") == self._init_id:
+                self.info = ev.get("response") or {}
+                self.ready.emit(self.info)
+                continue
+            if ev["kind"] == "result":
+                self.pending = max(0, self.pending - 1)
+            if ev["kind"] == "init" and ev.get("session_id"):
+                self.session_id = ev["session_id"]
+            self.event.emit(ev)
+
+    def _on_stderr(self) -> None:
+        text = bytes(self.proc.readAllStandardError()).decode("utf-8", "replace").strip()
+        if text:
+            App.Console.PrintLog(f"ClaudeBridge chat stderr: {text}\n")
+
+    def _on_finished(self, code: int, _status: Any = None) -> None:
+        for ev in self.parser.flush():
+            self.event.emit(ev)
+        self.pending = 0
+        self.exited.emit(int(code))
 
     def _on_error(self, err: Any) -> None:
         if err == QtCore.QProcess.FailedToStart:

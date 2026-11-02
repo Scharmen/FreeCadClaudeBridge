@@ -94,3 +94,18 @@ def test_delete_session_removes_file(tmp_path, monkeypatch):
     assert conv.delete_session_file("/w", sid)
     assert not path.exists()
     assert not conv.delete_session_file("/w", "../../etc"), "ids are never paths"
+
+
+def test_pin_order_and_move(tmp_path):
+    store = conv.Store(tmp_path)
+    for sid, title in (("s1", "A"), ("s2", "B"), ("s3", "C")):
+        store.add("d1", sid, title, "/w")
+    store.set_order("d1", ["s3", "s1", "s2"])
+    assert [c["id"] for c in store.ordered("d1")] == ["s3", "s1", "s2"]
+    store.pin("d1", "s2", True)
+    assert [c["id"] for c in store.ordered("d1")][0] == "s2" and store.find("d1", "s2")["pinned"]
+    store.move("d1", "d2", "s1")
+    assert store.find("d1", "s1") is None and store.find("d2", "s1")["title"] == "A"
+    assert store.active("d2")["id"] == "s1"
+    again = conv.Store(tmp_path)
+    assert [c["id"] for c in again.ordered("d1")] == ["s2", "s3"]
