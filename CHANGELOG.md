@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0 – the chat panel as a full Claude Code chat, drag and drop (unreleased)
+
+- One persistent Claude Code session per conversation (`--input-format stream-json`), instead of one process per message. Messages typed while Claude works are queued; Stop interrupts only the current step.
+- All Claude Code tools (files, shell, web, every MCP server), not only the FreeCAD tools. Whatever your Claude Code settings don't allow asks in the chat: an approval card shows the command, the edit or the file, with Allow once / Always (Claude Code's suggested rules) / Deny. The FreeCAD tools stay pre-approved.
+- Model, effort and permission mode (ask, accept edits, plan, auto, bypass) as in Claude Code; the lists come from Claude Code itself (your plan's models with their effort levels). Slash commands with completion: Claude Code's own commands, skills and plugin commands, plus /clear, /model, /effort, /mode, /desktop, /help handled by the panel.
+- Answers render as Markdown; thinking shows as a collapsed line to open; TodoWrite task lists show as a checklist; the status line shows time, steps and, with an API key, cost. The header shows your plan.
+- Drag and drop: pictures (dropped or pasted) are sent as real images with thumbnails above the input; other files and folders become references Claude can read; CAD files (STEP, IGES, STL, OBJ, 3MF, DXF, SVG, FCStd …) get an "Import into FreeCAD" link (one undo step); objects dragged from the model tree become `[Object: Label (Name), type, size]` references. Pictures in the chat can be dragged out; selected text can be dragged into other apps or the Python console.
+- Sidebar: drag to reorder a document's conversations, pin to the top, move a conversation to another open document.
+- Denials and feedback are answered in the input line instead of modal dialogs (a dialog opened from a Python slot holds the GIL and stalls the bridge).
+
 ## 1.4.0 – several conversations, shared with Claude Code and the Desktop app (unreleased)
 
 - The chat panel keeps several conversations per document in a sidebar on the left, like the Claude Desktop app: two-line rows (title, source and time), ＋ for a new one, right-click to rename, delete or open in the Desktop app, ☰ to hide the list. Width and visibility are remembered; the panel is widened once to make room.
