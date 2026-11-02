@@ -101,3 +101,31 @@ def test_slash_command_parsing():
     assert stream.parse_slash("/clear") == ("clear", "")
     assert stream.parse_slash("make a cube") is None
     assert stream.parse_slash("/ notacommand") is None
+
+
+ASK = {"questions": [
+    {"question": "Which material?", "header": "Material", "multiSelect": False,
+     "options": [{"label": "PLA (Recommended)", "description": "easy"}, {"label": "PETG", "description": "tough"}]},
+    {"question": "Which features?", "header": "Features", "multiSelect": True,
+     "options": [{"label": "Fillets"}, {"label": "Holes"}]}]}
+
+
+def test_auto_answers_pick_the_first_option():
+    out = stream.auto_answers("AskUserQuestion", ASK)
+    assert out["answers"] == {"Which material?": "PLA (Recommended)", "Which features?": "Fillets"}
+    assert out["questions"] == ASK["questions"]
+    assert stream.auto_answers("Bash", {"command": "ls"}) == {"command": "ls"}
+
+
+def test_questions_from_a_permission_request():
+    qs = stream.questions("AskUserQuestion", ASK)
+    assert [q["question"] for q in qs] == ["Which material?", "Which features?"]
+    assert qs[0]["options"] == ["PLA (Recommended)", "PETG"]
+    assert stream.questions("Bash", {"command": "ls"}) == []
+    answered = stream.answered_input(ASK, {"Which material?": "PETG", "Which features?": "Holes"})
+    assert answered["answers"]["Which material?"] == "PETG"
+
+
+def test_summaries_for_questions_and_plans():
+    assert stream.permission_summary("AskUserQuestion", ASK) == "Question: Which material? / Which features?"
+    assert stream.permission_summary("ExitPlanMode", {"plan": "1. Sketch\n2. Pad"}).startswith("Plan: 1. Sketch")

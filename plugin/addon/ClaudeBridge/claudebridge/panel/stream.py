@@ -131,6 +131,11 @@ def _control_request(ev: dict[str, Any]) -> dict[str, Any]:
 
 def permission_summary(tool: str, inp: dict[str, Any]) -> str:
     """One line saying what a tool call would do, for the approval card."""
+    if tool == "AskUserQuestion":
+        asked = [q.get("question", "") for q in inp.get("questions") or [] if isinstance(q, dict)]
+        return "Question: " + " / ".join(asked)[:400]
+    if tool == "ExitPlanMode":
+        return "Plan: " + str(inp.get("plan", ""))[:200].replace("\n", " ")
     for key in ("command", "file_path", "notebook_path", "url", "query", "pattern", "path", "prompt"):
         if inp.get(key):
             return f"{short_tool_name(tool)}: {str(inp[key])[:400]}"
@@ -312,3 +317,32 @@ _SLASH = re.compile(r"^/([A-Za-z][\w:.-]*)(?:\s+(.*))?$", re.S)
 def parse_slash(text: str) -> tuple[str, str] | None:
     m = _SLASH.match(text.strip())
     return (m.group(1), (m.group(2) or "").strip()) if m else None
+
+
+# ---------- questions Claude asks (AskUserQuestion) and the panel's auto mode
+
+QUESTION_TOOL = "AskUserQuestion"
+
+
+def questions(tool: str, tool_input: dict[str, Any]) -> list[dict[str, Any]]:
+    """The questions of an AskUserQuestion request as {question, header, multi, options: [labels]}."""
+    if tool != QUESTION_TOOL:
+        return []
+    out = []
+    for q in tool_input.get("questions") or []:
+        if isinstance(q, dict) and q.get("question"):
+            out.append({"question": q["question"], "header": q.get("header", ""), "multi": bool(q.get("multiSelect")),
+                        "options": [o.get("label", "") for o in q.get("options") or [] if isinstance(o, dict)]})
+    return out
+
+
+def answered_input(tool_input: dict[str, Any], answers: dict[str, str]) -> dict[str, Any]:
+    return {**tool_input, "answers": dict(answers)}
+
+
+def auto_answers(tool: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+    """Input for auto mode: questions get their first (recommended) option, other tools stay unchanged."""
+    qs = questions(tool, tool_input)
+    if not qs:
+        return tool_input
+    return answered_input(tool_input, {q["question"]: q["options"][0] for q in qs if q["options"]})

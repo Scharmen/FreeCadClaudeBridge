@@ -16,7 +16,16 @@ from PySide import QtCore, QtGui, QtWidgets
 from ..bridge import paths
 from . import conversations, dropping, secrets
 from .claude_process import ClaudeSession
-from .stream import PERMISSION_MODES, check_init, parse_slash, short_tool_name, turn_summary
+from .stream import (
+    PERMISSION_MODES,
+    answered_input,
+    auto_answers,
+    check_init,
+    parse_slash,
+    questions,
+    short_tool_name,
+    turn_summary,
+)
 
 PARAMS = "User parameter:BaseApp/Preferences/Mod/ClaudeBridge"
 OBJECT_NAME = "ClaudeChatPanel"
@@ -397,6 +406,15 @@ class ChatPanel(QtWidgets.QDockWidget):
         for box in (self.model_box, self.effort_box, self.pmode_box):
             box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
             ctl.addWidget(box, 1)
+        self.auto_btn = QtWidgets.QToolButton()
+        self.auto_btn.setText("⚡ Auto")
+        self.auto_btn.setCheckable(True)
+        self.auto_btn.setToolTip("Auto: allow every action Claude asks for, answer its questions with the "
+                                 "recommended option and accept its plans, without asking you. Deny rules in your "
+                                 "Claude Code settings still apply.")
+        self.auto_btn.setStyleSheet("QToolButton:checked { background-color: #c77700; color: white; "
+                                    "border-radius: 4px; font-weight: bold; }")
+        ctl.addWidget(self.auto_btn)
         lay.addLayout(ctl)
 
         self.view = _ChatView()
@@ -404,6 +422,26 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.view.anchorClicked.connect(self._on_link)
         self.view.dropped.connect(self.handle_drop)
         lay.addWidget(self.view, 1)
+
+        self.approve_bar = QtWidgets.QFrame()
+        self.approve_bar.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        bar = QtWidgets.QHBoxLayout(self.approve_bar)
+        bar.setContentsMargins(6, 4, 6, 4)
+        self.approve_label = QtWidgets.QLabel()
+        self.approve_label.setMinimumWidth(60)
+        bar.addWidget(self.approve_label, 1)
+        self.option_lay = QtWidgets.QHBoxLayout()          # answer buttons when Claude asks a question
+        bar.addLayout(self.option_lay)
+        self.approve_btns: dict[str, QtWidgets.QPushButton] = {}
+        for key, label in (("allow", "Allow once"), ("always", "Always"), ("deny", "Deny")):
+            btn = QtWidgets.QPushButton(label)
+            btn.setStyleSheet(f"QPushButton {{ background-color: {BUTTON_COLORS[key]}; color: white; "
+                              "border-radius: 4px; padding: 3px 8px; font-weight: bold; }")
+            btn.clicked.connect(lambda _=False, k=key: self._bar_answer(k))
+            bar.addWidget(btn)
+            self.approve_btns[key] = btn
+        self.approve_bar.setVisible(False)
+        lay.addWidget(self.approve_bar)
 
         self.attach_row = QtWidgets.QWidget()
         self.attach_lay = QtWidgets.QHBoxLayout(self.attach_row)
@@ -439,6 +477,8 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.model_box.currentIndexChanged.connect(self._on_model_changed)
         self.effort_box.currentIndexChanged.connect(self._on_effort_changed)
         self.pmode_box.currentIndexChanged.connect(self._on_pmode_changed)
+        self.auto_btn.setChecked(_params().GetBool("AutoApprove", False))
+        self.auto_btn.toggled.connect(self._on_auto_toggled)
         self._update_mode_label()
         visible = _params().GetBool("SidebarVisible", True)
         self.side_btn.setChecked(visible)
@@ -823,7 +863,13 @@ class ChatPanel(QtWidgets.QDockWidget):
         rest = url.toString()[len(url.scheme()) + 1:]
         if url.scheme() == "perm":
             decision, _, rid = rest.partition(":")
-            self._answer_permission(rid, decision)
+            if decision == "ans":
+                rid, _, pick = rid.partition(":")
+                qi, _, oi = pick.partition(":")
+                if qi.isdigit() and oi.isdigit():
+                    self._answer_question(rid, int(qi), int(oi))
+            else:
+                self._answer_permission(rid, decision)
         elif url.scheme() == "think":
             self._show_thought(int(rest) if rest.isdigit() else -1)
         elif url.scheme() == "import":
@@ -848,6 +894,7 @@ class ChatPanel(QtWidgets.QDockWidget):
             self.session = None
         self.perms.clear()
         self.session_always.clear()
+        self._update_approval_bar()
 
     def _ensure_session(self) -> ClaudeSession | None:
         if self.session and self.session.running():
@@ -1143,17 +1190,55 @@ class ChatPanel(QtWidgets.QDockWidget):
                        "resumes the conversation.", error=True)
         self.session = None
         self.perms.clear()
+        self._update_approval_bar()
         self._busy(False)
 
     # ----- permission prompts
 
+    def _on_auto_toggled(self, on: bool) -> None:
+        _params().SetBool("AutoApprove", on)
+        if on:
+            self._note("⚡ Auto is on: Claude's actions are allowed, its questions answered with the recommended "
+                       "option and its plans accepted, without asking you.", error=True)
+            for rid in list(self.perms):
+                self._auto_answer(self.perms.pop(rid))
+            self._update_approval_bar()
+        else:
+            self._note("Auto is off: Claude asks again before acting.")
+
+    def _auto_answer(self, ev: dict[str, Any]) -> None:
+        if not self.session:
+            return
+        inp = auto_answers(ev["tool"], ev.get("input") or {})
+        self.session.answer_permission(ev["request_id"], "allow", inp)
+        picked = "; ".join(f"{q} → {a}" for q, a in (inp.get("answers") or {}).items())
+        self._note(f"⚡ Auto-answered: {picked}" if picked else f"⚡ Auto-allowed: {ev.get('summary', ev['tool'])}")
+
     def _permission_card(self, ev: dict[str, Any]) -> None:
         rid, tool, inp = ev["request_id"], ev["tool"], ev.get("input") or {}
+        if self.auto_btn.isChecked() and self.session:
+            self._auto_answer(ev)
+            return
         if tool in self.session_always:
             self.session.answer_permission(rid, "allow", inp)
             self._note(f"Allowed (this session): {ev.get('summary', tool)}")
             return
         self.perms[rid] = ev
+        qs = questions(tool, inp)
+        if qs:                                          # Claude asks the user something: options as buttons
+            ev["questions"], ev["answers"] = qs, {}
+            parts = ["<table border='1' cellspacing='0' cellpadding='6' width='100%'><tr><td>"
+                     "<b>❓ Claude asks</b>"]
+            for qi, q in enumerate(qs):
+                parts.append(f"<br><b>{html.escape(q['header'] or '')}</b> {html.escape(q['question'])}")
+                parts.append(_buttons([(opt, f"perm:ans:{rid}:{qi}:{oi}", "option")
+                                       for oi, opt in enumerate(q["options"])]))
+            parts.append(_buttons([("Skip", f"perm:deny:{rid}", "deny")]) + "</td></tr></table>")
+            self._append("".join(parts))
+            self._update_approval_bar()
+            QtWidgets.QApplication.alert(self)
+            return
+
         def mono(text: str) -> str:   # wraps inside the narrow panel, unlike <pre>
             return ("<div style='font-family:monospace; white-space:pre-wrap'>"
                     + html.escape(text).replace("\n", "<br>") + "</div>")
@@ -1170,16 +1255,79 @@ class ChatPanel(QtWidgets.QDockWidget):
         elif inp.get("content"):
             detail = (f"<i>{html.escape(str(inp.get('file_path', '')))}</i>"
                       + mono("\n".join(str(inp["content"]).splitlines()[:10])))
+        elif inp.get("plan"):
+            detail = mono(str(inp["plan"])[:2000])
         always = _always_label(ev.get("suggestions") or [], short_tool_name(tool))
-        short = always if len(always) <= 48 else always[:45].rstrip() + "…"
+        ev["always_label"] = always
+        short = always if len(always) <= 36 else always[:33].rstrip() + "…"
+        title = ("📋 Claude has a plan" if tool == "ExitPlanMode"
+                 else f"🔐 Claude wants to use {html.escape(short_tool_name(tool))}")
+        first = "Accept plan" if tool == "ExitPlanMode" else "Allow once"
         self._append(
             "<table border='1' cellspacing='0' cellpadding='6' width='100%'><tr><td>"
-            f"<b>🔐 Claude wants to use {html.escape(short_tool_name(tool))}</b><br>{detail}<br>"
-            f"<a href='perm:allow:{rid}'>Allow once</a> · "
-            f"<a href='perm:always:{rid}' title='{html.escape(always)}'>{html.escape(short)}</a> · "
-            f"<a href='perm:deny:{rid}'>Deny</a></td></tr></table>")
+            f"<b>{title}</b><br>{detail}"
+            + _buttons([(first, f"perm:allow:{rid}", "allow"), (short, f"perm:always:{rid}", "always"),
+                        ("Deny", f"perm:deny:{rid}", "deny")], tip={f"perm:always:{rid}": always})
+            + "</td></tr></table>")
         self.status.setText("Waiting for your approval…")
+        self._update_approval_bar()
         QtWidgets.QApplication.alert(self)
+
+    def _update_approval_bar(self) -> None:
+        """Real buttons above the input for the oldest open request, so it never scrolls out of sight."""
+        ev = next(iter(self.perms.values()), None)
+        if ev is None:
+            self.approve_bar.setVisible(False)
+            return
+        is_q = bool(ev.get("questions"))
+        more = f"  (+{len(self.perms) - 1} more)" if len(self.perms) > 1 else ""
+        while self.option_lay.count():
+            w = self.option_lay.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        if is_q:
+            qi, q = next(((i, q) for i, q in enumerate(ev["questions"]) if q["question"] not in ev["answers"]),
+                         (0, ev["questions"][0]))
+            text = f"❓ {q['question']}"
+            for oi, opt in enumerate(q["options"]):
+                btn = QtWidgets.QPushButton(opt)
+                btn.setStyleSheet(f"QPushButton {{ background-color: {BUTTON_COLORS['option']}; color: white; "
+                                  "border-radius: 4px; padding: 3px 8px; font-weight: bold; }")
+                btn.clicked.connect(lambda _=False, r=ev["request_id"], a=qi, b=oi: self._answer_question(r, a, b))
+                self.option_lay.addWidget(btn)
+        else:
+            text = f"🔐 {ev.get('summary', ev['tool'])}"
+        metrics = self.approve_label.fontMetrics()
+        self.approve_label.setText(metrics.elidedText(text + more, QtCore.Qt.ElideMiddle,
+                                                      max(120, self.approve_label.width())))
+        self.approve_label.setToolTip(text)
+        self.approve_btns["allow"].setVisible(not is_q)
+        self.approve_btns["allow"].setText("Accept plan" if ev["tool"] == "ExitPlanMode" else "Allow once")
+        self.approve_btns["always"].setVisible(not is_q)
+        self.approve_btns["always"].setToolTip(ev.get("always_label", ""))
+        self.approve_btns["deny"].setText("Skip" if is_q else "Deny")
+        self.approve_bar.setVisible(True)
+
+    def _bar_answer(self, decision: str) -> None:
+        rid = next(iter(self.perms), None)
+        if rid:
+            self._answer_permission(rid, decision)
+
+    def _answer_question(self, rid: str, qi: int, oi: int) -> None:
+        ev = self.perms.get(rid)
+        if not ev or not self.session or qi >= len(ev.get("questions", [])):
+            self._note("This question is no longer open.")
+            return
+        q = ev["questions"][qi]
+        if oi >= len(q["options"]):
+            return
+        ev["answers"][q["question"]] = q["options"][oi]
+        self._note(f"{q['header'] or q['question']}: {q['options'][oi]}")
+        if len(ev["answers"]) == len(ev["questions"]):
+            self.perms.pop(rid, None)
+            self.session.answer_permission(rid, "allow", answered_input(ev.get("input") or {}, ev["answers"]))
+            self.status.setText("Claude is working…")
+        self._update_approval_bar()
 
     def _answer_permission(self, rid: str, decision: str) -> None:
         ev = self.perms.pop(rid, None)
@@ -1192,6 +1340,7 @@ class ChatPanel(QtWidgets.QDockWidget):
             self.session_always.add(ev["tool"])
         self.session.answer_permission(rid, decision, ev.get("input") or {}, ev.get("suggestions"),
                                        message or "The user declined this action.")
+        self._update_approval_bar()
         verdict = {"allow": "✓ Allowed once", "always": "✓ Allowed", "deny": "✗ Denied"}[decision]
         self._note(f"{verdict}: {ev.get('summary', ev['tool'])}"
                    + (". Type what Claude should do instead." if decision == "deny" else ""))
@@ -1409,6 +1558,20 @@ class ChatPanel(QtWidgets.QDockWidget):
 
     def transcript(self) -> str:
         return self.view.toPlainText()
+
+
+BUTTON_COLORS = {"allow": "#2e7d32", "always": "#1565c0", "deny": "#a12a2a", "option": "#455a64",
+                 "chosen": "#2e7d32"}
+
+
+def _buttons(items: list[tuple[str, str, str]], tip: dict[str, str] | None = None) -> str:
+    """Small clickable buttons inside the chat: (label, href, color key)."""
+    cells = []
+    for label, href, kind in items:
+        title = f" title='{html.escape(tip[href])}'" if tip and href in tip else ""
+        cells.append(f"<td bgcolor='{BUTTON_COLORS.get(kind, kind)}'><a href='{href}'{title} "
+                     f"style='color:#ffffff; text-decoration:none'><b>&nbsp;{html.escape(label)}&nbsp;</b></a></td>")
+    return "<table cellspacing='4' cellpadding='3'><tr>" + "".join(cells) + "</tr></table>"
 
 
 def _always_label(suggestions: list[dict[str, Any]], tool: str) -> str:

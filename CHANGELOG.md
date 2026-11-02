@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.0 – approval buttons and Auto (unreleased)
+
+- Approvals are buttons: green Allow once, blue Always, red Deny inside the chat card, plus a bar with real buttons above the input for the oldest open request, so it never scrolls out of sight.
+- Questions Claude asks (AskUserQuestion) show each option as a button, in the chat and in the bar; plans from plan mode show with Accept plan.
+- ⚡ Auto next to the permission mode: allows every action Claude asks for, answers its questions with the first (recommended) option and accepts its plans, without asking. Each automatic answer is logged in the chat; the switch is remembered and highlighted. Deny rules in the Claude Code settings still apply.
+
 ## 1.5.0 – the chat panel as a full Claude Code chat, drag and drop (unreleased)
 
 - One persistent Claude Code session per conversation (`--input-format stream-json`), instead of one process per message. Messages typed while Claude works are queued; Stop interrupts only the current step.
