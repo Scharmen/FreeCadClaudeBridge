@@ -67,6 +67,8 @@ def test_no_network_access_and_loopback_only():
         text = py.read_text(encoding="utf-8")
         assert not re.search(r"^\s*(?:import|from)\s+(?:urllib|http|requests|httpx|aiohttp)\b", text, re.M), py
         for m in re.finditer(r"\.bind\((.+?)\)\n", text):
+            if m[1].lstrip().startswith(('"<', "'<")):        # a Tk event binding, not a socket
+                continue
             assert "127.0.0.1" in m[1] or "path" in m[1], f"{py}: bind({m[1]})"
 
 

@@ -144,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
     p_wiz = sub.add_parser("wizard", help="one-step setup: check prerequisites, install plugin and FreeCAD addon")
     p_wiz.add_argument("--yes", action="store_true", help="no questions: install what can be installed")
     p_wiz.add_argument("--freecad", help="FreeCAD.app, install folder or AppImage to use")
+    p_wiz.add_argument("--gui", action="store_true", help="show the setup in a window instead of the terminal")
+    p_wiz.add_argument("--no-gui", action="store_true", help="stay in the terminal (overrides --gui)")
     p_pref = sub.add_parser("preferences", help="what Claude learned from your feedback (show, context, forget)")
     p_pref.add_argument("action", nargs="?", choices=["show", "context", "forget"], default="show")
     p_set = sub.add_parser("settings", help="show or change user settings (memory limits of headless jobs, ...)")
@@ -174,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "wizard":
         from . import wizard
 
-        return wizard.main(args.yes, args.freecad)
+        return wizard.main(args.yes, args.freecad, gui=args.gui and not args.no_gui)
     if args.cmd == "preferences":
         return preferences_cmd(args.action)
     if args.cmd == "settings":

@@ -5,7 +5,8 @@
 #
 # Needs FreeCAD and Claude Desktop installed and signed in; the wizard checks both and shows
 # where to get what is missing. It installs uv (if missing, after asking), the Claude plugin
-# and the Claude panel for FreeCAD. Options are passed on: ... | sh -s -- --yes
+# and the Claude panel for FreeCAD. It opens a setup window; options are passed on:
+#   ... | sh -s -- --yes      (no questions, in the terminal)      ... | sh -s -- --no-gui
 # FREECAD_BRIDGE_SRC overrides where the installer itself comes from (CI uses the checkout).
 set -e
 
@@ -51,5 +52,20 @@ if [ -z "$UVX" ]; then
     fi
 fi
 
-# --refresh: always the current installer, not a cached copy from an earlier run
-exec "$UVX" --refresh --from "$SRC" freecad-bridge wizard "$@" < "$TTY"
+# A window for people who started it themselves; the terminal for CI, --yes and --no-gui.
+GUI=--gui
+if [ "$TTY" = /dev/null ] || [ -n "$CI" ]; then
+    GUI=
+fi
+for a in "$@"; do
+    case "$a" in
+        --yes|--no-gui) GUI= ;;
+    esac
+done
+if [ -n "$GUI" ]; then
+    echo "Opening the setup window …"
+fi
+
+# --refresh: always the current installer, not a cached copy from an earlier run.
+# Managed Python first: it brings Tk for the window (some system Pythons have none).
+exec "$UVX" --refresh --python-preference managed --from "$SRC" freecad-bridge wizard $GUI "$@" < "$TTY"

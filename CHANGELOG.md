@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.12.0 – setup in a window (unreleased)
+
+- The installer opens a setup window (Tk, from uv's managed Python): a checklist of FreeCAD, Claude Desktop, Claude Code, sign-in, plugin, panel and start, each with its state; missing items get a Download/Open button; questions come as dialogs; *Show details* streams what runs, with clickable links and an input field when a program asks for something (e.g. the sign-in). Check again / Run again re-run it.
+- Double-click launchers: `installer/Install FreeCAD Claude.command` (macOS/Linux) and `installer/Install FreeCAD Claude.cmd` (Windows).
+- `freecad-bridge wizard --gui` / `--no-gui`; the one-line installers use the window when started by a person, the terminal in CI, with `--yes` or `--no-gui`, and when no window can be opened. The wizard reports every step as an event, so the terminal and the window share one tested flow.
 ## 1.11.0 – Claude explains its design (unreleased)
 
 - Claude explains why a model looks the way it does: before building, a short plan with the proportions, facts and assumptions it rests on (e.g. for a Labrador: body length about equal to shoulder height, hanging ears, otter tail, minimum leg thickness for printing); afterwards the main decisions, each with its reason and source (your request, your picture, a real-world reference, printability, or an assumption you can correct). Skill and panel instructions.

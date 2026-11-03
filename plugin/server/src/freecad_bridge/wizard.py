@@ -91,6 +91,9 @@ class System:
     def open_url(self, url: str) -> None:
         webbrowser.open(url)
 
+    def step(self, key: str, state: str, text: str, link: str | None = None) -> None:
+        """A step's state for a checklist (running, ok, missing, info); the terminal shows `say` lines."""
+
     def claude_desktop(self) -> str | None:
         return find_claude_desktop(self.platform, dict(os.environ),
                                    [Path("/Applications"), Path.home() / "Applications"])
@@ -176,62 +179,75 @@ def run_wizard(system: System, discover: Callable[..., list[installer.FreeCADIns
         """--yes takes `when_yes` without asking (installs yes, opening pages or starting FreeCAD no)."""
         return when_yes if yes else system.ask(question, default)
 
-    def fail(text: str, link: str) -> None:
+    def fail(text: str, link: str, key: str = "") -> None:
         system.say(f"{bad} {text}\n    {arrow} {link}")
         missing.append((text, link))
+        if key:
+            system.step(key, "missing", text, link)
+
+    def good(key: str, text: str) -> None:
+        system.say(f"{ok} {text}")
+        system.step(key, "ok", text)
 
     system.say("FreeCAD × Claude – setup\n")
     system.say("Checking what is needed …")
 
     # 1. FreeCAD
+    system.step("freecad", "running", "Looking for FreeCAD …")
     installs = discover(freecad)
     newest = installs[0] if installs else None
     if newest is None:
-        fail("FreeCAD is not installed (or not found). Install FreeCAD 1.0 or newer.", LINKS["freecad"])
+        fail("FreeCAD is not installed (or not found). Install FreeCAD 1.0 or newer.", LINKS["freecad"], "freecad")
     elif newest.version_tuple[:2] < MIN_FREECAD:
-        fail(f"FreeCAD {newest.version} is too old. Install FreeCAD 1.0 or newer.", LINKS["freecad"])
+        fail(f"FreeCAD {newest.version} is too old. Install FreeCAD 1.0 or newer.", LINKS["freecad"], "freecad")
         newest = None
     else:
-        system.say(f"{ok} FreeCAD {newest.version}")
+        good("freecad", f"FreeCAD {newest.version}")
 
     # 2. Claude Desktop
     if system.platform.startswith("linux"):
-        system.say(f"{ok} Claude Desktop is not available for Linux; Claude Code alone is fine")
+        good("desktop", "Claude Desktop is not available for Linux; Claude Code alone is fine")
     elif system.claude_desktop():
-        system.say(f"{ok} Claude Desktop")
+        good("desktop", "Claude Desktop")
     else:
-        fail("Claude Desktop is not installed. Install it and sign in.", LINKS["desktop"])
+        fail("Claude Desktop is not installed. Install it and sign in.", LINKS["desktop"], "desktop")
 
     # 3. Claude Code (the `claude` command the FreeCAD chat panel and the plugin use)
     claude = system.claude_cli()
     if not claude:
         system.say(f"{bad} Claude Code (the `claude` command) is missing")
+        system.step("claude_code", "running", "Claude Code (the `claude` command) is missing")
         if confirm("Install Claude Code now with the official installer from claude.ai?", True, True):
             key = "win32" if system.platform == "win32" else "posix"
+            system.step("claude_code", "running", "Installing Claude Code …")
             system.run(CLAUDE_CODE_INSTALL[key], interactive=True)
             claude = system.claude_cli()
         if claude:
-            system.say(f"{ok} Claude Code installed")
+            good("claude_code", "Claude Code installed")
         else:
-            fail("Claude Code is not installed.", LINKS["claude_code"])
+            fail("Claude Code is not installed.", LINKS["claude_code"], "claude_code")
     else:
-        system.say(f"{ok} Claude Code")
+        good("claude_code", "Claude Code")
 
     # 4. Signed in
     if claude:
+        system.step("login", "running", "Checking the Claude sign-in …")
         status = auth_status(system, claude)
         if not status.get("loggedIn"):
             system.say(f"{bad} Not signed in to Claude")
+            system.step("login", "running", "Not signed in to Claude")
             if confirm("Sign in now? A browser window opens; use the same account as in Claude Desktop.",
                        True, True):
                 system.run([claude, "auth", "login"], interactive=True)
                 status = auth_status(system, claude)
         if status.get("loggedIn"):
             plan = status.get("subscriptionType") or status.get("authMethod") or ""
-            system.say(f"{ok} Logged in to Claude" + (f" ({plan})" if plan else ""))
+            good("login", "Logged in to Claude" + (f" ({plan})" if plan else ""))
         else:
             fail("Not signed in to Claude. Run `claude auth login` or sign in when Claude asks.",
-                 LINKS["claude_code"])
+                 LINKS["claude_code"], "login")
+    else:
+        system.step("login", "missing", "Needs Claude Code first", LINKS["claude_code"])
 
     if missing:
         system.say("\nPlease install what is missing, then run the installer again:")
@@ -247,46 +263,58 @@ def run_wizard(system: System, discover: Callable[..., list[installer.FreeCADIns
                    "FreeCAD?", True, True):
         system.say("Cancelled; nothing was changed.")
         return 1
+    system.step("plugin", "running", "Installing the FreeCAD plugin into Claude …")
     _, out = system.run([claude, "plugin", "marketplace", "list", "--json"], timeout=120)
     names = {m.get("name") for m in _json(out) or [] if isinstance(m, dict)}
     if MARKETPLACE_NAME not in names:
         code, out = system.run([claude, "plugin", "marketplace", "add", MARKETPLACE], timeout=300)
         if code != 0:
-            fail(f"Could not add the plugin marketplace: {out.strip()[-300:]}", LINKS["help"])
+            fail(f"Could not add the plugin marketplace: {out.strip()[-300:]}", LINKS["help"], "plugin")
             return 1
     entry = plugin_entry(system, claude)
     action = "update" if entry else "install"
     code, out = system.run([claude, "plugin", action, PLUGIN], timeout=600)
     entry = plugin_entry(system, claude)
     if not entry:
-        fail(f"Could not {action} the Claude plugin: {out.strip()[-300:]}", LINKS["help"])
+        fail(f"Could not {action} the Claude plugin: {out.strip()[-300:]}", LINKS["help"], "plugin")
         return 1
-    system.say(f"{ok} Claude plugin {PLUGIN} {'updated' if action == 'update' else 'installed'}"
-               + (f" ({entry.get('version')})" if entry.get("version") else ""))
+    good("plugin", f"Claude plugin {PLUGIN} {'updated' if action == 'update' else 'installed'}"
+         + (f" ({entry.get('version')})" if entry.get("version") else ""))
 
     src = addon_source(entry)
     def addon_line(line: str) -> None:
         if not line.startswith(("FreeCAD is running", "Start FreeCAD")):   # the wizard says that itself
             system.say(f"    {line}")
 
+    system.step("addon", "running", "Installing the Claude panel into FreeCAD …")
     rc = install_addon(str(src), freecad, addon_line)
     if rc != 0:
-        fail("Could not install the Claude panel into FreeCAD.", LINKS["help"])
+        fail("Could not install the Claude panel into FreeCAD.", LINKS["help"], "addon")
         return 1
-    system.say(f"{ok} Claude panel installed in FreeCAD {newest.version}")
+    good("addon", f"Claude panel installed in FreeCAD {newest.version}")
 
     # 7. Start
     system.say("")
     if freecad_running():
         system.say(f"{arrow} FreeCAD is running: restart it to load the Claude panel.")
+        system.step("start", "ok", "FreeCAD is running: restart it to load the Claude panel")
     elif confirm("Start FreeCAD now?", True, False):
         start_freecad(newest)
+        system.step("start", "ok", "FreeCAD started")
+    else:
+        system.step("start", "ok", "Start FreeCAD whenever you like")
     system.say("\nDone. In FreeCAD the 'Claude' panel is on the right: type what you want to build.\n"
                "In Claude Desktop (Code) or Claude Code you can also just ask Claude to work in FreeCAD.")
     return 0
 
 
-def main(yes: bool = False, freecad: str | None = None) -> int:
+def main(yes: bool = False, freecad: str | None = None, gui: bool = False) -> int:
+    if gui and not yes:
+        from . import wizard_gui
+
+        if wizard_gui.available():
+            return wizard_gui.main(freecad)
+        print("No window can be opened here (no display or no Tk); continuing in the terminal.")
     if not shutil.which("uvx") and not shutil.which("uv"):
         print("note: uv was not found on PATH; the Claude plugin needs it (https://docs.astral.sh/uv/).")
     return run_wizard(System(), yes=yes, freecad=freecad)

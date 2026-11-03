@@ -51,6 +51,13 @@ if (-not $uvx) {
 
 $wizardArgs = @()
 if ($env:FREECAD_BRIDGE_WIZARD_ARGS) { $wizardArgs = $env:FREECAD_BRIDGE_WIZARD_ARGS -split " " }
-# --refresh: always the current installer, not a cached copy from an earlier run
-& $uvx --refresh --from $src freecad-bridge wizard @wizardArgs
+# A window for people who started it themselves; the console for CI, --yes and --no-gui.
+if ([Environment]::UserInteractive -and -not $env:CI -and -not ($wizardArgs -contains "--yes") -and
+    -not ($wizardArgs -contains "--no-gui")) {
+    Write-Host "Opening the setup window ..."
+    $wizardArgs = @("--gui") + $wizardArgs
+}
+# --refresh: always the current installer, not a cached copy from an earlier run.
+# Managed Python first: it brings Tk for the window.
+& $uvx --refresh --python-preference managed --from $src freecad-bridge wizard @wizardArgs
 $global:LASTEXITCODE = $LASTEXITCODE
