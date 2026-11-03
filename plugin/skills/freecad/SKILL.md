@@ -36,6 +36,15 @@ The user judges a model by its details. Plain blocks and bare cylinders look lik
 - **Repeated elements in the right number** (spokes, windows, teeth, fingers, ribs) and at the right spacing.
 - **Look, then add what is missing.** After the first build, look at screenshots from several sides and add the next layer of detail; one pass is rarely enough.
 
+## Explain your design
+
+The user wants to know why the model looks the way it does, not only what you built. For every model you create or substantially change:
+
+1. **Before building, a short plan** (3–6 lines): what you make and how big, and the facts and proportions it rests on, with numbers. Example for a Labrador: "Shoulder height about equal to body length; legs a bit over half the height; broad skull with a clear stop; hanging ears to the jaw line; thick otter tail; 8 cm long, so legs at least 4 mm thick to print." Say which of these are assumptions.
+2. **After building, "Why it looks like this":** the main decisions, each with its reason and source: the user's request, their picture, a real-world reference (anatomy, standards, typical dimensions), printability, or your own assumption. Keep it to the decisions that shape the result; mark assumptions so the user can correct them.
+3. **Record the same decisions with `design_notes`** (stored in the document as "Design notes", saved with the file). Before changing a model that already has notes, read them with `design_notes(action="list")` and keep the earlier decisions unless the user wants them changed; when a decision changes, add a note saying why.
+4. **When the user asks "why"**, answer from the notes and the facts, and say plainly if something was a guess.
+
 ## Check against the user's picture
 
 When the user gave a picture (attached in the chat, a file path, or one you used with `image_to_3d`), the model is only done when it matches it:

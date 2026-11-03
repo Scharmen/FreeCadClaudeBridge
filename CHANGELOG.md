@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.11.0 – Claude explains its design (unreleased)
+
+- Claude explains why a model looks the way it does: before building, a short plan with the proportions, facts and assumptions it rests on (e.g. for a Labrador: body length about equal to shoulder height, hanging ears, otter tail, minimum leg thickness for printing); afterwards the main decisions, each with its reason and source (your request, your picture, a real-world reference, printability, or an assumption you can correct). Skill and panel instructions.
+- New `design_notes` tool: the decisions are saved in the document as a "Design notes" text object (Markdown, saved with the file, one undo step per entry) and read back before the model is changed later. The panel shows "📝 Why it looks like this" after a turn that recorded notes.
 ## 1.10.0 – details first, picture check, real usage (unreleased)
 
 - New `compare_to_picture` tool: the user's picture next to a screenshot of the model from the matching view (the current camera or front/left/top…), with a checklist to go through part by part; the camera is put back afterwards. Pictures attached in the panel come with their file path and the request to check the finished model against them and fix every difference.

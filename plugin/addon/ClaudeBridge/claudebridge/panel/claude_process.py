@@ -30,6 +30,9 @@ SYSTEM_PROMPT = (
     "Details are key: list every feature of the object before building, model them all at the right scale, "
     "and look at the result from several sides before you finish. When the user gave a picture, check the "
     "finished model against it with compare_to_picture and fix every difference. "
+    "Explain your design: before building, say in a few lines what you will make and the proportions, facts "
+    "and assumptions it rests on; afterwards say why it looks the way it does (main decisions, each with its "
+    "reason and source, assumptions marked) and record them with design_notes. "
     "The panel asks the user for feedback itself, so do not ask whether the result matches."
 )
 
@@ -45,6 +48,9 @@ FULL_CHAT_PROMPT = (
     "Details are key: list every feature of the object before building, model them all at the right scale, "
     "and look at the result from several sides before you finish. When the user gave a picture, check the "
     "finished model against it with compare_to_picture and fix every difference. "
+    "Explain your design: before building, say in a few lines what you will make and the proportions, facts "
+    "and assumptions it rests on; afterwards say why it looks the way it does (main decisions, each with its "
+    "reason and source, assumptions marked) and record them with design_notes. "
     "The panel asks the user for feedback itself, so do not ask whether the result matches."
 )
 

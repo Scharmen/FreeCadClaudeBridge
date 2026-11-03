@@ -19,6 +19,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
 from . import __version__, client, headless, imaging, installer, learning, platforms, settings
+from . import notes as notes_mod
 from .client import NOT_RUNNING, BridgeError, call, fix_for
 
 MAX_CHARS = 38000  # ~10k tokens; Claude Code warns above that
@@ -519,6 +520,45 @@ async def compare_to_picture(path: str, views: list[Literal["current", "iso", "f
     if camera and shown != ["current"]:
         await _raw("view", {"action": "set_view", "camera": camera}, instance=instance)   # the user's camera back
     return [_dump({"picture": path, "views": shown, "check": COMPARE_NOTE}), *out]
+
+
+NOTES_CODE = """
+_t = doc.getObject("DesignNotes") if doc else None
+_add = {section!r}
+if _add:
+    if _t is None:
+        _t = doc.addObject("App::TextDocument", "DesignNotes")
+        _t.Label = "Design notes"
+        _t.Text = {header!r}
+    _t.Text = _t.Text.rstrip("\\n") + "\\n\\n" + _add
+_text = _t.Text if _t is not None else ""
+_result = {{"text": _text, "entries": sum(1 for _l in _text.splitlines() if _l.startswith("## "))}}
+if _t is not None and _add:
+    _result["object"] = _t.Name
+"""
+
+
+@mcp.tool(annotations=WRITE, structured_output=False)
+async def design_notes(action: Literal["add", "list"] = "add", topic: str = "",
+                       notes: list[dict[str, Any]] | None = None, doc: str | None = None,
+                       instance: int | None = None) -> str:
+    """Record why the model looks the way it does, in the document ("Design notes" text object,
+    saved with the file, readable by the user). Call it with your key decisions whenever you
+    build or substantially change a model, and tell the user the same in your answer.
+    notes = [{"part": "Legs", "decision": "what you did, with numbers",
+    "reason": "why: proportion, fact, what you saw", "source": "request|picture|reference|
+    printability|assumption|feedback"}]; mark guesses as "assumption" so the user can correct
+    them. topic: what this round was (e.g. "Labrador, 8 cm long, first version").
+    list: returns all notes so far (read them before changing a model someone designed)."""
+    section = ""
+    if action == "add":
+        try:
+            section = notes_mod.render(topic, notes or [])
+        except ValueError as e:
+            raise ToolError(f"INVALID_ARGS: {e}") from e
+    code = NOTES_CODE.format(section=section, header=notes_mod.HEADER)
+    return await _call("run_python", {"code": code, "doc": doc,
+                                      "transaction": "Design notes" if section else None}, instance=instance)
 
 
 @mcp.tool(annotations=READ, structured_output=False)

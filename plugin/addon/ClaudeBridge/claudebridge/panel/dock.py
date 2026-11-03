@@ -1009,6 +1009,8 @@ class ChatPanel(QtWidgets.QDockWidget):
 
             QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(os.path.join(bpaths.bridge_dir(),
                                                                                   "snapshots")))
+        elif url.scheme() == "notes":
+            self._show_design_notes()
         elif url.scheme() == "think":
             self._show_thought(int(rest) if rest.isdigit() else -1)
         elif url.scheme() == "import":
@@ -1789,6 +1791,26 @@ class ChatPanel(QtWidgets.QDockWidget):
                 App.ActiveDocument.abortTransaction()
             self._note(f"Import failed: {e}", error=True)
 
+    def _show_design_notes(self) -> None:
+        doc = App.ActiveDocument
+        notes = doc.getObject("DesignNotes") if doc else None
+        if notes is None or not getattr(notes, "Text", ""):
+            self._note("This document has no design notes yet.")
+            return
+        cur = self.view.textCursor()
+        cur.movePosition(QtGui.QTextCursor.End)
+        cur.insertBlock()
+        if hasattr(cur, "insertMarkdown"):
+            cur.insertMarkdown(notes.Text)
+        else:
+            cur.insertText(notes.Text)
+        cur.movePosition(QtGui.QTextCursor.End)
+        cur.insertBlock(QtGui.QTextBlockFormat(), QtGui.QTextCharFormat())   # leave the list
+        lst = cur.currentList()
+        if lst is not None:
+            lst.remove(cur.block())
+        self.view.ensureCursorVisible()
+
     def _render_turn_summary(self) -> bool:
         s = turn_summary(self.turn_results)
         parts = []
@@ -1799,6 +1821,9 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.last_result = "; ".join(parts)
         if parts:
             self._append(f"<div style='color:#666'>Changes: {'; '.join(parts)}</div>")
+        if "DesignNotes" in s["created"] + s["changed"]:
+            self._append("<div>📝 <a href='notes:'>Why it looks like this</a> (design notes, saved with the "
+                         "document)</div>")
         for e in s["errors"][:5]:
             self._append(f"<div style='color:#b00'>⚠ {html.escape(e.get('label') or e.get('name', '?'))} is in an "
                          f"error state ({html.escape(', '.join(e.get('state', [])))})</div>")
