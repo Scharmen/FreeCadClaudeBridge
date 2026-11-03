@@ -2,9 +2,9 @@
 
 Control FreeCAD by chat with Claude, either in a **"Claude" chat panel inside FreeCAD** or from **Claude Code**. Claude works on your open document through FreeCAD's Python API: it creates and changes geometry, reads the model tree and properties, and exports files. Every Claude step is exactly one undo step, and failed code leaves nothing behind.
 
-![FreeCAD with the Claude panel: a Labrador sculpted by Claude for 3D printing, with the conversation that built it](docs/images/freecad-labrador.png)
+![FreeCAD with the Claude panel: a Maserati Ghibli (1995) built from a photo for 3D printing](docs/images/freecad-maserati.png)
 
-*"Make a 3D model of a Labrador for printing": Claude sculpted it with the `sculpt` tool, looked at it from four sides, refined ears and skull, and exported 3MF and STL. Real screenshot of FreeCAD 1.1 on macOS.*
+*A Maserati Ghibli (1995) built from the user's photo for printing; here Claude checks the print mesh and repairs it until it is watertight. Real screenshot of FreeCAD 1.1 on macOS.*
 
 > Status: 1.12.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
 
@@ -60,9 +60,7 @@ Check everything with `/freecad:status`.
 
 ![The Claude panel: conversations per project, model and effort, plan usage, tool rows and the turn summary with real token counts](docs/images/panel.png)
 
-![A Maserati Ghibli (1995) built from a photo for printing; Claude repairs the mesh until it is watertight](docs/images/freecad-maserati.png)
-
-*Top: the chat panel with conversations grouped by project, model, effort and permission mode, plan usage, every tool call and the turn summary. Below: a Maserati Ghibli (1995) built from the user's photo; here Claude checks the print mesh and repairs it until it is watertight.*
+*The chat panel: conversations grouped by project, model, effort and permission mode, plan usage, every tool call with its time, and the turn summary.*
 
 - **In FreeCAD:** type into the Claude panel, e.g. "Make a 40×30×10 mm block with a 10 mm hole in the middle and export it as STEP to ~/Desktop/block.step". The active document and your current selection are sent along, so "make this face 2 mm thicker" works. Tool calls show up as rows, followed by a summary of created/changed objects and any errors; **Stop** ends the turn. Each document keeps its own conversations in a sidebar on the left (☰ hides it): click to switch, ＋ starts one, right-click to rename, delete or open it in the Desktop app. They are normal Claude Code sessions: ↗ opens the current one in the Claude Desktop app, and sessions you started in a terminal or the Desktop app in the same folder appear in the list to continue here. 📷 inserts a picture of the 3D view. If Claude needs a tool the panel doesn't allow, a link lets you allow it for that conversation. Toggle the panel with Ctrl+Alt+K or the *Claude* menu of the "Claude Bridge" workbench.
 - **In Claude Code:** just ask; the `freecad` tools talk to the running FreeCAD.
