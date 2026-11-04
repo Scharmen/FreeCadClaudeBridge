@@ -103,7 +103,7 @@ def test_floating_pieces_are_reported(tmp_path):
     scene = {"parts": [{"name": "Two", "primitives": [{"type": "sphere", "center": [0, 0, 0], "radius": 3},
                                                        {"type": "sphere", "center": [20, 0, 0], "radius": 3}]}]}
     part = sculpt.sculpt_scene(scene, str(tmp_path), voxel=0.4)["parts"][0]
-    assert part["pieces"] == 2 and "separate pieces" in part["warning"]
+    assert part["pieces"] == 2 and "float" in part["warning"]
 
 
 def test_split_vertices_survive_an_stl_round_trip(tmp_path):
@@ -123,3 +123,97 @@ def test_evaluation_in_slabs_gives_the_same_field(monkeypatch):
     monkeypatch.setattr(sculpt, "CHUNK", 777)             # many slabs and noise chunks of odd size
     sliced, _, _ = sculpt.field(part, voxel=0.5)
     assert np.allclose(whole, sliced, atol=1e-5)
+
+
+def test_default_resolution_is_fine_enough_for_faces():
+    v = sculpt.choose_voxel([(0, 0, 0), (30, 30, 60)])
+    assert v == pytest.approx(60 / sculpt.DEFAULT_CELLS)
+    assert 60 / v >= 300, "a 6 cm figure gets at least 300 cells: eyes and noses stay crisp"
+    assert sculpt.choose_voxel([(0, 0, 0), (30, 30, 60)], requested=0.01) == pytest.approx(60 / sculpt.MAX_CELLS)
+
+
+def test_all_parts_of_a_scene_share_one_grid(tmp_path):
+    scene = {"parts": [{"name": "Body", "primitives": [{"type": "box", "center": [0, 0, 30], "size": [20, 10, 60]}]},
+                       {"name": "Eye", "primitives": [{"type": "sphere", "center": [0, -5, 50], "radius": 0.8}]}]}
+    res = sculpt.sculpt_scene(scene, str(tmp_path))
+    assert res["voxel_mm"] == pytest.approx(60 / sculpt.DEFAULT_CELLS, rel=0.1)  # bounds include the blend
+    eye = next(p for p in res["parts"] if p["name"] == "Eye")
+    assert eye["triangles"] < 5000, "a small part is not meshed finer than the rest"
+
+
+def fur_part(**fur):
+    return {"primitives": [{"type": "capsule", "a": [0, 0, -10], "b": [0, 0, 10], "radius": 6}], "smooth": 1,
+            "fur": {"depth": 0.4, "length": 6, "width": 0.8, **fur}}
+
+
+def test_fur_grooves_run_along_the_flow_and_keep_the_size():
+    v, t = sculpt.mesh_part(fur_part(direction=[0, 0, -1]), voxel=0.12)
+    assert closed(t)
+    r = np.hypot(v[:, 0], v[:, 1])
+    mid = np.abs(v[:, 2]) < 7
+    assert 5.3 < r[mid].mean() < 6.6
+    assert r[mid].std() > 0.025, "the surface is grooved"
+    # grooves follow the flow (z): the radius changes slowly along z and fast around the body
+    ang = np.arctan2(v[mid, 1], v[mid, 0])
+    z, rr = v[mid, 2], r[mid]
+    ring = np.abs(z) < 0.15
+    line = np.abs(ang - 0.5) < 0.03
+    assert rr[ring].std() > 1.8 * rr[line].std()
+
+
+def test_fur_can_flow_away_from_a_point_and_is_repeatable():
+    a = sculpt.mesh_part(fur_part(**{"from": [0, 0, 12]}), voxel=0.25)
+    b = sculpt.mesh_part(fur_part(**{"from": [0, 0, 12]}), voxel=0.25)
+    assert np.array_equal(a[0], b[0])
+    with pytest.raises(ValueError, match="fur"):
+        sculpt.mesh_part(fur_part(depth=0), voxel=0.5)
+
+
+def test_templates_are_listed_scaled_and_extended(tmp_path):
+    names = sculpt.template_names()
+    assert {"cat_sitting", "dog_standing", "person_standing"} <= set(names)
+    scene = sculpt.expand_template({"template": "dog_standing", "height": 100,
+                                    "parts": [{"name": "Dog", "color": [0.1, 0.1, 0.1],
+                                               "primitives": [{"type": "sphere", "center": [0, 0, 120],
+                                                               "radius": 2}]},
+                                              {"name": "Collar", "primitives": [{"type": "sphere",
+                                                                                 "center": [0, 0, 0], "radius": 1}]}]})
+    base = sculpt.load_template("dog_standing")
+    k = 100 / base["height"]
+    dog = next(p for p in scene["parts"] if p["name"] == "Dog")
+    orig = next(p for p in base["parts"] if p["name"] == "Dog")
+    assert dog["color"] == [0.1, 0.1, 0.1]
+    assert len(dog["primitives"]) == len(orig["primitives"]) + 1
+    p0, q0 = dog["primitives"][0], orig["primitives"][0]
+    assert p0["center"] == pytest.approx([c * k for c in q0["center"]])
+    assert dog["blend"] == pytest.approx(orig["blend"] * k)
+    assert dog["primitives"][-1]["center"] == [0, 0, 120], "added primitives are already in the final size"
+    assert any(p["name"] == "Collar" for p in scene["parts"])
+    with pytest.raises(ValueError, match="cat_sitting"):
+        sculpt.expand_template({"template": "unicorn"})
+
+
+@pytest.mark.parametrize("name", ["cat_sitting", "dog_standing", "person_standing"])
+def test_every_template_meshes_watertight_in_one_piece_per_part(name, tmp_path):
+    res = sculpt.sculpt_scene({"template": name, "height": 30}, str(tmp_path), voxel=0.3)
+    assert res["parts"]
+    assert not [p["name"] for p in res["parts"] if p.get("warning")]
+    assert res["size_mm"][2] == pytest.approx(30, abs=1.5), "the template's height is the whole figure on its base"
+
+
+def test_a_piece_held_by_another_part_is_not_floating(tmp_path):
+    arms = {"name": "Arms", "primitives": [{"type": "capsule", "a": [-8, 0, 0], "b": [-4, 0, 0], "radius": 1},
+                                           {"type": "capsule", "a": [4, 0, 0], "b": [8, 0, 0], "radius": 1}]}
+    shirt = {"name": "Shirt", "primitives": [{"type": "box", "center": [0, 0, 0], "size": [10, 4, 4]}]}
+    res = sculpt.sculpt_scene({"parts": [arms, shirt]}, str(tmp_path), voxel=0.3)
+    part = res["parts"][0]
+    assert part["pieces"] == 2 and "warning" not in part
+    alone = sculpt.sculpt_scene({"parts": [arms]}, str(tmp_path / "b"), voxel=0.3)
+    assert "float" in alone["parts"][0]["warning"]
+
+
+def test_specks_smaller_than_three_voxels_are_dropped():
+    part = {"primitives": [{"type": "sphere", "center": [0, 0, 0], "radius": 5},
+                           {"type": "sphere", "center": [9, 0, 0], "radius": 0.3}], "blend": 0}
+    v, t = sculpt.mesh_part(part, voxel=0.25, smooth=0)
+    assert sculpt.pieces(len(v), t) == 1 and v[np.unique(t)][:, 0].max() < 6

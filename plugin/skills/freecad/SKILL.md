@@ -72,7 +72,7 @@ A picture in the chat without a file path: look at it, take screenshots from the
 
 ## References
 
-Before a model the user will judge by its look, read `references/quality.md`; for figures, animals, hair, plants and other organic forms read `references/organic.md` and use the `sculpt` tool. Tested patterns per area: `references/part.md`, `partdesign.md`, `sketcher.md`, `assembly.md`, `techdraw.md`, `varset-spreadsheet.md`, `export.md`, and `api-changes-1.1.md` for pitfalls.
+Before a model the user will judge by its look, read `references/quality.md`; for figures, animals, hair, plants and other organic forms read `references/organic.md` and use the `sculpt` tool. **People and animals always start from a `sculpt` template** (`person_standing`, `dog_standing`, `cat_sitting`, or the closest one changed into the animal you need); stacked Part primitives look like a snowman. Tested patterns per area: `references/part.md`, `partdesign.md`, `sketcher.md`, `assembly.md`, `techdraw.md`, `varset-spreadsheet.md`, `export.md`, and `api-changes-1.1.md` for pitfalls.
 
 ## Snippets (FreeCAD 1.1)
 

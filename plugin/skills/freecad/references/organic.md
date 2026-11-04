@@ -10,6 +10,29 @@ Tested by `tests/gui/test_references.py`. FreeCAD is a CAD program, not a sculpt
 | Coins, plaques, lithophanes from a picture | `image_to_3d` mode `relief` |
 | Mechanical parts | PartDesign (see `partdesign.md`) |
 
+## People and animals: start from a template
+
+Never build a person or an animal from scratch or from Part primitives. The `sculpt` tool has tested templates with correct proportions, faces and fur; scale one to the height you need and change it:
+
+| Template | What it is | Parts |
+| --- | --- | --- |
+| `person_standing` | adult, 7.5 heads tall, arms relaxed, T-shirt, jeans, sneakers, short hair, round base | Skin, Shirt, Jeans, Shoes_R, Shoes_L, Hair, Base |
+| `dog_standing` | Labrador-type dog: deep chest, tucked belly, stop, hanging ears, otter tail, short fur, oval base | Dog, Base |
+| `cat_sitting` | sitting cat, paws together, tail around the side, fur flowing down and back | Cat |
+
+```json
+{"template": "person_standing", "height": 80,
+ "parts": [
+  {"name": "Shirt", "color": [0.75, 0.1, 0.12]},
+  {"name": "Hair", "color": [0.85, 0.7, 0.35], "fur": {"depth": 0.15, "length": 4, "width": 0.5, "from": [0, 0.5, 81]}},
+  {"name": "Cap", "color": [0.1, 0.1, 0.1], "primitives": [{"type": "ellipsoid", "center": [0, 0.5, 78], "radii": [4.3, 4.9, 2.6]}]}]}
+```
+
+- **Coordinates:** base on z = 0, the figure faces -Y, X is its left-right axis, Z up. Primitives you add are in the final size (after scaling), so read `size_mm` and the screenshots first, then place them.
+- **Change, don't restart:** recolor parts, add a beard (strands on Skin), a jacket (a new part over Shirt), a different pose (new capsules for the arms; hide the old ones by overriding the part). Another animal: change the closest template (a horse or a fox from the dog: longer legs or a pointed muzzle) rather than a new blob.
+- **Fur and hair** give the look: `"fur": {"depth", "length", "width", "direction" | "from"}` carves grooves that run along the flow (down and back on an animal's body, out from the crown on a head). Short coat: depth 0.1–0.15 mm, width 0.6–0.8 mm on a 5 cm figure; long fur: depth 0.3, width 1, length 8–10. Depth is capped at 0.3 × width so the surface stays clean.
+- **Check the face up close:** `view` with a screenshot zoomed on the head; eyes, nose and mouth must read at the printed size.
+
 ## The `sculpt` tool
 
 Describe the form as primitives that melt into each other with a blend radius, like clay. It runs outside FreeCAD and imports a smooth, watertight mesh per part (one undo step), so it cannot crash FreeCAD.
@@ -34,11 +57,11 @@ Rules that make it look real instead of plastic:
 
 - **Proportions first.** Adult figure 7.5–8 heads tall (heroic 8–8.5, child 5–6); shoulders about 2 head widths; the eyes sit halfway down the head; the hand reaches mid-thigh; the elbow is at the waist. Animals: work from the skeleton masses (skull, rib cage, pelvis) outwards.
 - **Ellipsoids and tapered capsules, not spheres.** Equal spheres in a row read as bubbles. Limbs taper (`radius_b`); muscles are flattened ellipsoids rotated along the limb.
-- **Hair, beards, fur: many tapered strands.** 20–80 strands with 3–5 points each, thick at the root and fine at the tip (`radius_end` ≈ 0.3 × `radius`), slightly different lengths and curves, in overlapping layers and following the head's shape; a small blend (0.3–0.8 mm) so they merge into locks; a little detail noise along them.
+- **Hair, beards, fur: many tapered strands, plus `fur` grooves along them.** 20–80 strands with 3–5 points each, thick at the root and fine at the tip (`radius_end` ≈ 0.3 × `radius`), slightly different lengths and curves, in overlapping layers and following the head's shape; a small blend (0.3–0.8 mm) so they merge into locks; a little detail noise along them.
 - **Faces:** subtract the eye sockets and the mouth line with a small blend; add brow ridge, cheekbones, nose and chin as small ellipsoids. Break the symmetry slightly; real faces are not mirror-perfect.
 - **Cloth:** folds as long thin capsules added (ridges) and subtracted (valleys) along the direction of pull; hems as a torus or a strand.
 - **Surface detail scales with the object:** `detail.amplitude` 0.1–0.3 % of the size for skin, 1–3 % for stone or bark; `scale` is the feature size. Give each material its own part, color and detail.
-- **Resolution:** default about 1/200 of the size; set `voxel_mm` to roughly a third of the finest feature (0.15–0.3 mm for a 5 cm figure). Very fine settings take longer; split large scenes into parts.
+- **Resolution:** default 1/300 of the whole scene, the same for every part (0.2 mm on a 6 cm figure); set `voxel_mm` to roughly a third of the finest feature. The finest allowed is 1/400 of the scene.
 - **Iterate:** block out with a few primitives, look at it from front and side, then add.
 - **Matte by default.** Sculpted parts get no gloss; gloss makes skin, hair and cloth look like plastic. Give only metal or wet parts `"shininess"` (0.3–0.6).
 
