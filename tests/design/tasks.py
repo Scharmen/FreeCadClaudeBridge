@@ -1,4 +1,4 @@
-"""The twelve benchmark tasks: what the user asks, the numeric spec, and what a reviewer looks for.
+"""The benchmark tasks: what the user asks, the numeric spec, and what a reviewer looks for.
 
 Prompts read like a user's request; the spec checks the result in numbers (see spec.py), and
 `look` lists the features the visual judge checks on the screenshots. `reference` names a model
@@ -196,6 +196,23 @@ TASKS: list[dict[str, Any]] = [
         "spec": {"height": [57, 63], "solids": [1, 3]},
         "look": ["sitting pose", "pointed ears", "eyes", "muzzle", "front legs", "tail around the body",
                  "flat base", "fur or surface detail"],
+    },
+    {
+        "id": "dog",
+        "prompt": "Model a standing Labrador retriever figurine, 50 mm tall at the head, for 3D printing in one "
+                  "piece on a thin oval base. Make it look like a real dog.",
+        "spec": {"height": [47, 53], "solids": [1, 3]},
+        "look": ["four legs with paws", "deep chest and tucked belly", "broad head with a clear stop",
+                 "hanging ears", "eyes and nose", "thick tapering tail", "short fur texture", "oval base"],
+    },
+    {
+        "id": "person",
+        "prompt": "Model a standing person figurine, 80 mm tall, in casual clothes (T-shirt, jeans, sneakers), arms "
+                  "relaxed at the sides, on a round base, for 3D printing in one piece. Make it look like a real "
+                  "person, with a face and hair.",
+        "spec": {"height": [77, 83], "solids": [1, 10]},
+        "look": ["natural proportions (about 7.5 heads tall)", "face with eyes, nose and mouth", "hair",
+                 "arms with hands", "T-shirt with sleeves and folds", "jeans", "sneakers", "round base"],
     },
 ]
 
