@@ -1,0 +1,405 @@
+{
+ "haiku": {
+  "tasks": {
+   "bearing_housing": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 35,
+    "tools": 8,
+    "tool_errors": 2,
+    "cost_usd": 0.00846995,
+    "output_tokens": 4898,
+    "failed": []
+   },
+   "bolt_nut": {
+    "score": 100.0,
+    "visual": 80.0,
+    "seconds": 1127,
+    "tools": 40,
+    "tool_errors": 8,
+    "cost_usd": 0.16379292,
+    "output_tokens": 73531,
+    "failed": []
+   },
+   "bottle": {
+    "score": 88.9,
+    "visual": 85.7,
+    "seconds": 62,
+    "tools": 9,
+    "tool_errors": 2,
+    "cost_usd": 0.012760049999999998,
+    "output_tokens": 11030,
+    "failed": [
+     "bottle: thread pitch 3: measured 11.82 mm"
+    ]
+   },
+   "cat": {
+    "score": 100.0,
+    "visual": 37.5,
+    "seconds": 177,
+    "tools": 26,
+    "tool_errors": 9,
+    "cost_usd": 0.033021779999999994,
+    "output_tokens": 26995,
+    "failed": []
+   },
+   "enclosure": {
+    "score": 100.0,
+    "visual": 83.3,
+    "seconds": 53,
+    "tools": 8,
+    "tool_errors": 0,
+    "cost_usd": 0.01200994,
+    "output_tokens": 9373,
+    "failed": []
+   },
+   "from_picture": {
+    "score": 87.9,
+    "visual": 100.0,
+    "seconds": 91,
+    "tools": 7,
+    "tool_errors": 1,
+    "cost_usd": 0.01655715,
+    "output_tokens": 15487,
+    "failed": [
+     "organizer: holes 12–16 mm: found 0, wanted 3; hole sizes 17",
+     "shape matches the reference (IoU): IoU 0.82 (target 0.85)"
+    ]
+   },
+   "gear_pair": {
+    "score": 100.0,
+    "visual": 80.0,
+    "seconds": 79,
+    "tools": 10,
+    "tool_errors": 3,
+    "cost_usd": 0.017417840000000004,
+    "output_tokens": 15520,
+    "failed": []
+   },
+   "hinge": {
+    "score": 100.0,
+    "visual": 80.0,
+    "seconds": 214,
+    "tools": 29,
+    "tool_errors": 5,
+    "cost_usd": 0.04605146,
+    "output_tokens": 40505,
+    "failed": []
+   },
+   "shelf_bracket": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 151,
+    "tools": 13,
+    "tool_errors": 1,
+    "cost_usd": 0.03236155,
+    "output_tokens": 32341,
+    "failed": []
+   },
+   "snap_box": {
+    "score": 77.8,
+    "visual": 20.0,
+    "seconds": 97,
+    "tools": 9,
+    "tool_errors": 1,
+    "cost_usd": 0.01877734,
+    "output_tokens": 19334,
+    "failed": [
+     "box: size: 28.4 × 40 × 60 mm, wanted 24 × 40 × 60 ± 3",
+     "gap box–lid 0.1–0.5 mm: 0 mm"
+    ]
+   },
+   "spring": {
+    "score": 100.0,
+    "visual": 50.0,
+    "seconds": 67,
+    "tools": 8,
+    "tool_errors": 0,
+    "cost_usd": 0.013466149999999998,
+    "output_tokens": 11551,
+    "failed": []
+   },
+   "tube_bracket": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 54,
+    "tools": 12,
+    "tool_errors": 4,
+    "cost_usd": 0.01212931,
+    "output_tokens": 10005,
+    "failed": []
+   }
+  },
+  "mean_score": 96.2,
+  "mean_visual": 76.4,
+  "cost_usd": 0.39,
+  "run": "20261103-090948"
+ },
+ "sonnet": {
+  "tasks": {
+   "bearing_housing": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 36,
+    "tools": 8,
+    "tool_errors": 1,
+    "cost_usd": 0.16220110000000001,
+    "output_tokens": 3749,
+    "failed": []
+   },
+   "bolt_nut": {
+    "score": 100.0,
+    "visual": 80.0,
+    "seconds": 402,
+    "tools": 20,
+    "tool_errors": 6,
+    "cost_usd": 0.41773710000000003,
+    "output_tokens": 18945,
+    "failed": []
+   },
+   "bottle": {
+    "score": 88.9,
+    "visual": 85.7,
+    "seconds": 85,
+    "tools": 13,
+    "tool_errors": 1,
+    "cost_usd": 0.2341057,
+    "output_tokens": 9142,
+    "failed": [
+     "bottle: thread pitch 3: measured 9.62 mm"
+    ]
+   },
+   "cat": {
+    "score": 100.0,
+    "visual": 87.5,
+    "seconds": 71,
+    "tools": 17,
+    "tool_errors": 1,
+    "cost_usd": 0.2360851,
+    "output_tokens": 6873,
+    "failed": []
+   },
+   "enclosure": {
+    "score": 100.0,
+    "visual": 83.3,
+    "seconds": 48,
+    "tools": 9,
+    "tool_errors": 0,
+    "cost_usd": 0.1567223,
+    "output_tokens": 3825,
+    "failed": []
+   },
+   "from_picture": {
+    "score": 99.0,
+    "visual": 75.0,
+    "seconds": 38,
+    "tools": 5,
+    "tool_errors": 0,
+    "cost_usd": 0.14216910000000002,
+    "output_tokens": 3625,
+    "failed": [
+     "shape matches the reference (IoU): IoU 0.82 (target 0.85)"
+    ]
+   },
+   "gear_pair": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 36,
+    "tools": 5,
+    "tool_errors": 0,
+    "cost_usd": 0.1299074,
+    "output_tokens": 3736,
+    "failed": []
+   },
+   "hinge": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 101,
+    "tools": 16,
+    "tool_errors": 3,
+    "cost_usd": 0.28704910000000006,
+    "output_tokens": 10807,
+    "failed": []
+   },
+   "shelf_bracket": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 73,
+    "tools": 13,
+    "tool_errors": 1,
+    "cost_usd": 0.24184019999999998,
+    "output_tokens": 9014,
+    "failed": []
+   },
+   "snap_box": {
+    "score": 88.9,
+    "visual": 40.0,
+    "seconds": 82,
+    "tools": 9,
+    "tool_errors": 0,
+    "cost_usd": 0.23377440000000002,
+    "output_tokens": 9115,
+    "failed": [
+     "gap box–lid 0.1–0.5 mm: 0 mm"
+    ]
+   },
+   "spring": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 28,
+    "tools": 7,
+    "tool_errors": 0,
+    "cost_usd": 0.1309091,
+    "output_tokens": 2922,
+    "failed": []
+   },
+   "tube_bracket": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 125,
+    "tools": 16,
+    "tool_errors": 5,
+    "cost_usd": 0.2506807,
+    "output_tokens": 8425,
+    "failed": []
+   }
+  },
+  "mean_score": 98.1,
+  "mean_visual": 87.6,
+  "cost_usd": 2.62,
+  "run": "20261103-095841"
+ },
+ "opus": {
+  "tasks": {
+   "bearing_housing": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 426,
+    "tools": 23,
+    "tool_errors": 6,
+    "cost_usd": 1.2264606000000002,
+    "output_tokens": 26336,
+    "failed": []
+   },
+   "bolt_nut": {
+    "score": 100.0,
+    "visual": 80.0,
+    "seconds": 839,
+    "tools": 30,
+    "tool_errors": 5,
+    "cost_usd": 1.5503117000000002,
+    "output_tokens": 38927,
+    "failed": []
+   },
+   "bottle": {
+    "score": 77.8,
+    "visual": 85.7,
+    "seconds": 414,
+    "tools": 21,
+    "tool_errors": 1,
+    "cost_usd": 1.6041747999999998,
+    "output_tokens": 43878,
+    "failed": [
+     "bottle: thread pitch 3: measured 130.3 mm",
+     "valid shapes: invalid or open: Bottle"
+    ]
+   },
+   "cat": {
+    "score": 100.0,
+    "visual": 87.5,
+    "seconds": 459,
+    "tools": 51,
+    "tool_errors": 4,
+    "cost_usd": 2.0660540000000003,
+    "output_tokens": 52916,
+    "failed": []
+   },
+   "enclosure": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 383,
+    "tools": 20,
+    "tool_errors": 3,
+    "cost_usd": 0.9125630000000001,
+    "output_tokens": 20864,
+    "failed": []
+   },
+   "from_picture": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 263,
+    "tools": 21,
+    "tool_errors": 1,
+    "cost_usd": 1.0758782,
+    "output_tokens": 25361,
+    "failed": []
+   },
+   "gear_pair": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 237,
+    "tools": 24,
+    "tool_errors": 5,
+    "cost_usd": 0.9435761,
+    "output_tokens": 21893,
+    "failed": []
+   },
+   "hinge": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 342,
+    "tools": 37,
+    "tool_errors": 3,
+    "cost_usd": 1.6367127999999997,
+    "output_tokens": 36107,
+    "failed": []
+   },
+   "shelf_bracket": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 379,
+    "tools": 29,
+    "tool_errors": 4,
+    "cost_usd": 1.5603121999999996,
+    "output_tokens": 39037,
+    "failed": []
+   },
+   "snap_box": {
+    "score": 88.9,
+    "visual": 60.0,
+    "seconds": 322,
+    "tools": 23,
+    "tool_errors": 4,
+    "cost_usd": 1.2043306,
+    "output_tokens": 31148,
+    "failed": [
+     "gap box–lid 0.1–0.5 mm: 0 mm"
+    ]
+   },
+   "spring": {
+    "score": 100.0,
+    "visual": 100.0,
+    "seconds": 964,
+    "tools": 40,
+    "tool_errors": 11,
+    "cost_usd": 1.0274176,
+    "output_tokens": 21459,
+    "failed": []
+   },
+   "tube_bracket": {
+    "score": 100.0,
+    "visual": 85.7,
+    "seconds": 648,
+    "tools": 30,
+    "tool_errors": 3,
+    "cost_usd": 1.6640146,
+    "output_tokens": 41257,
+    "failed": []
+   }
+  },
+  "mean_score": 97.2,
+  "mean_visual": 91.6,
+  "cost_usd": 16.47,
+  "run": "20261103-161522"
+ }
+}

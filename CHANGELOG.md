@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.13.0 – design benchmark (unreleased)
+
+- New design benchmark in `tests/design/` (`make bench`): 12 tasks (bearing housing, tube bracket, enclosure, snap box, gear pair, bolt and nut, spring, bottle, hinge assembly, parametric shelf bracket, a model from a picture, a cat figure) run through Claude Code like the chat panel does, in a separate FreeCAD with its own settings and bridge directory, so the user's documents, preferences and feedback are untouched.
+- Each task has a numeric spec, scored headless from the saved file: sizes (orientation-free), holes and diameters, holes lined up between parts, gaps between parts, interference, tooth count, thread pitch, round and sloped faces, parameters and expressions, a flex test that changes parameters and checks the model still rebuilds, joints, and overlap (IoU) with a reference model. Every check says what it found. Known-good models score 100; the same file always scores the same.
+- A second Claude checks the screenshots against a list of features per task (visual score, kept separate from the numeric score). `tests/design/baseline.json` holds the scores for Opus, Sonnet and Haiku.
+- The chat panel's system prompts moved to `claudebridge/panel/prompts.py` (no FreeCAD import), so the benchmark uses exactly the panel's instructions.
 ## 1.12.0 – setup in a window (unreleased)
 
 - The installer opens a setup window (Tk, from uv's managed Python): a checklist of FreeCAD, Claude Desktop, Claude Code, sign-in, plugin, panel and start, each with its state; missing items get a Download/Open button; questions come as dialogs; *Show details* streams what runs, with clickable links and an input field when a program asks for something (e.g. the sign-in). Check again / Run again re-run it.

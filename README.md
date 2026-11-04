@@ -6,7 +6,7 @@ Control FreeCAD by chat with Claude, either in a **"Claude" chat panel inside Fr
 
 *A Maserati Ghibli (1995) built from the user's photo for printing; here Claude checks the print mesh and repairs it until it is watertight. Real screenshot of FreeCAD 1.1 on macOS.*
 
-> Status: 1.12.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
+> Status: 1.13.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
@@ -106,7 +106,10 @@ make test     # unit tests, no FreeCAD needed
 make itest    # GUI integration tests against a running FreeCAD with the addon (incl. every skill snippet)
 make lint
 make validate # claude plugin validate .
+make bench    # design benchmark: 12 tasks through Claude Code in a separate FreeCAD, scored headless
 ```
+
+The design benchmark ([tests/design/](tests/design/)) measures how good the models are, not only whether the tools work: each task has a numeric spec (sizes, holes, fits, tooth counts, interference, parameters that survive changes, overlap with a reference model) and a list of features a second Claude checks on the screenshots. It runs in its own FreeCAD instance with its own settings and bridge directory, so your documents and learned preferences stay untouched. `tests/design/baseline.json` holds the current scores.
 
 Layout: `plugin/` is the Claude Code plugin (`server/` = Python package `freecad-bridge`, `addon/ClaudeBridge/` = FreeCAD addon, `skills/`, `commands/`, `hooks/`). `uvx --from plugin/server` rebuilds automatically after code changes (sources are uv cache keys). Restart FreeCAD to load a changed addon. Conventions are in [CLAUDE.md](CLAUDE.md).
 
