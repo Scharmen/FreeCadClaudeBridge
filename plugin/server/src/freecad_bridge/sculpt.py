@@ -3,23 +3,30 @@
 A part is a list of primitives (sphere, ellipsoid, tapered capsule, strand, rounded box, torus,
 cylinder) that are added, subtracted or intersected with a smooth blend radius, so limbs grow
 out of a body like clay instead of meeting at hard seams. Optional fractal surface detail adds
-skin, stone or fur texture. The signed distance field is sampled on a grid, turned into a closed
-triangle mesh (surface nets), Taubin-smoothed, and written as binary STL. FreeCAD only imports
-the finished file: no geometry kernel call that could crash the user's FreeCAD.
+skin or stone texture; `fur` adds grooves that run along a flow direction. Templates (a sitting cat,
+a standing dog, a standing person) are tested starting points that are scaled to the wanted height
+and extended with the caller's own parts and primitives. The signed distance field is sampled on
+a grid, turned into a closed triangle mesh (surface nets), Taubin-smoothed, and written as binary
+STL. FreeCAD only imports the finished file: no geometry kernel call that could crash the user's FreeCAD.
 
 All sizes in mm. NumPy only.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-MAX_CELLS = 200            # grid cells along the longest side
+DEFAULT_CELLS = 300        # grid cells along the scene's longest side: a 6 cm figure gets 0.2 mm voxels
+MAX_CELLS = 400            # the finest grid a caller can ask for (memory: ~0.3 GB for a cube-shaped part)
+TEMPLATES = Path(__file__).with_name("templates")
+FUR_MAX_DEPTH = 0.3        # × groove width
 MAX_PRIMITIVES = 3000
 CHUNK = 1 << 20             # points evaluated at once (keeps the temporaries of one primitive near 100 MB)
 PINCH_NUDGE = 0.002        # mm a split vertex moves into its own sheet
@@ -218,8 +225,36 @@ def _value_noise(points: np.ndarray, scale: float, seed: int, octaves: int = 3) 
 def choose_voxel(bounds: list[tuple[float, float, float]], requested: float | None = None) -> float:
     lo, hi = np.asarray(bounds[0], dtype=float), np.asarray(bounds[1], dtype=float)
     longest = float((hi - lo).max())
-    smallest = longest / MAX_CELLS
-    return max(float(requested or 0), smallest, 0.05)
+    return max(float(requested or longest / DEFAULT_CELLS), longest / MAX_CELLS, 0.05)
+
+
+def _fur_params(fur: dict[str, Any]) -> tuple[float, float, float]:
+    try:
+        depth, length, width = (float(fur[k]) for k in ("depth", "length", "width"))
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError("fur needs depth, length and width in mm") from e
+    if min(depth, length, width) <= 0:
+        raise ValueError("fur depth, length and width must be > 0")
+    # deeper than about a third of the groove width, the surface folds over itself (islands, bad edges)
+    return min(depth, FUR_MAX_DEPTH * width), length, width
+
+
+def fur_noise(points: np.ndarray, fur: dict[str, Any]) -> np.ndarray:
+    """Ridges in [-1, 1] stretched along the flow: grooves like locks of fur.
+
+    The flow is a fixed `direction`, or away `from` a point (fur that grows out from a crown or the nose).
+    Noise sampled in coordinates squeezed along the flow changes slowly along it and fast across it.
+    """
+    _, length, width = _fur_params(fur)
+    if fur.get("from") is not None:
+        d = points - np.asarray(fur["from"], dtype=float)
+    else:
+        d = np.broadcast_to(np.asarray(fur.get("direction", [0, 0, -1]), dtype=float), points.shape).copy()
+    d /= np.linalg.norm(d, axis=1, keepdims=True) + 1e-9
+    along = np.einsum("ij,ij->i", points, d)[:, None]
+    q = points - d * along * (1 - min(1.0, width / length))
+    n = _value_noise(q, width, int(fur.get("seed", 3)), octaves=2)
+    return np.cos(np.pi * np.clip(n, -1, 1))       # smooth ridges where the noise crosses zero
 
 
 def field(part: dict[str, Any], voxel: float | None = None) -> tuple[np.ndarray, np.ndarray, float]:
@@ -231,13 +266,16 @@ def field(part: dict[str, Any], voxel: float | None = None) -> tuple[np.ndarray,
     blend = float(part.get("blend", DEFAULT_BLEND))
     detail = part.get("detail") or {}
     amp = float(detail.get("amplitude", 0))
+    fur = part.get("fur") or None
+    fur_depth = _fur_params(fur)[0] if fur else 0.0
     boxes = [_bounds(p) for p in prims]
     for p in prims:                        # validate everything before the heavy work
         _sdf(p, np.zeros((1, 3)))
-    lo = np.min([b[0] for b in boxes], axis=0)
-    hi = np.max([b[1] for b in boxes], axis=0)
+    adds = [b for p, b in zip(prims, boxes, strict=True) if p.get("op", "add") == "add"] or boxes
+    lo = np.min([b[0] for b in adds], axis=0)     # cuts never make a shape larger: a big box that
+    hi = np.max([b[1] for b in adds], axis=0)     # flattens the base does not enlarge the grid
     voxel = choose_voxel([tuple(lo), tuple(hi)], voxel)
-    margin = 2 * voxel + max(blend, 0) + abs(amp)
+    margin = 2 * voxel + max(blend, 0) + abs(amp) + fur_depth
     lo, hi = lo - margin, hi + margin
     n = np.ceil((hi - lo) / voxel).astype(int) + 1
     axes = [lo[i] + np.arange(n[i]) * voxel for i in range(3)]
@@ -272,6 +310,13 @@ def field(part: dict[str, Any], voxel: float | None = None) -> tuple[np.ndarray,
             part_idx = tuple(i[start:start + CHUNK] for i in idx)
             pts = np.stack([axes[0][part_idx[0]], axes[1][part_idx[1]], axes[2][part_idx[2]]], axis=1)
             grid[part_idx] -= amp * _value_noise(pts, scale, seed)
+    if fur:
+        idx = np.nonzero(np.abs(grid) < fur_depth * 3 + voxel * 3)
+        for start in range(0, len(idx[0]), CHUNK):
+            part_idx = tuple(i[start:start + CHUNK] for i in idx)
+            pts = np.stack([axes[0][part_idx[0]], axes[1][part_idx[1]], axes[2][part_idx[2]]], axis=1)
+            # carve only (0..depth): grooves between the locks; pushing out could leave islands in the air
+            grid[part_idx] += (fur_depth * 0.5 * (1 - fur_noise(pts, fur))).astype(np.float32)
     return grid, lo, voxel
 
 
@@ -476,7 +521,9 @@ def mesh_part(part: dict[str, Any], voxel: float | None = None, smooth: int = 4)
         if bad == 0:
             break
     _, verts, tris = best
-    return taubin(verts, tris, int(part.get("smooth", smooth))), tris
+    tris = drop_specks(verts, tris, 3 * used)
+    passes = int(part.get("smooth", min(smooth, 2) if part.get("fur") else smooth))  # more would erase the fur
+    return taubin(verts, tris, passes), tris
 
 
 def non_manifold_edges(tris: np.ndarray) -> int:
@@ -494,6 +541,11 @@ def _part_bounds(part: dict[str, Any]) -> tuple[list[tuple[float, float, float]]
 
 def pieces(n_verts: int, tris: np.ndarray) -> int:
     """Number of separate pieces (connected components): more than one means something floats."""
+    return len(set(piece_labels(n_verts, tris)[np.unique(tris)].tolist()))
+
+
+def piece_labels(n_verts: int, tris: np.ndarray) -> np.ndarray:
+    """The connected component (a representative vertex index) of every vertex."""
     parent = np.arange(n_verts)
 
     def find(x: int) -> int:
@@ -506,8 +558,54 @@ def pieces(n_verts: int, tris: np.ndarray) -> int:
         ra, rb, rc = find(a), find(b), find(c)
         parent[rb] = ra
         parent[rc] = ra
+    return np.array([find(int(v)) for v in range(n_verts)])
+
+
+def drop_specks(verts: np.ndarray, tris: np.ndarray, size: float) -> np.ndarray:
+    """Triangles without the pieces smaller than `size` in every direction (noise leaves such specks)."""
+    if not len(tris):
+        return tris
+    labels = piece_labels(len(verts), tris)
+    tri_label = labels[tris[:, 0]]
+    keep = np.ones(len(tris), dtype=bool)
+    for lab in np.unique(tri_label):
+        sel = tri_label == lab
+        pts = verts[np.unique(tris[sel])]
+        if (pts.max(0) - pts.min(0)).max() < size:
+            keep[sel] = False
+    return tris[keep] if keep.any() else tris
+
+
+def _added_distance(parts: list[dict[str, Any]], points: np.ndarray) -> np.ndarray:
+    """Distance from points to the added primitives of other parts (blends and cuts ignored)."""
+    best = np.full(len(points), np.inf)
+    for part in parts:
+        for p in part.get("primitives") or []:
+            if p.get("op", "add") == "add":
+                best = np.minimum(best, _sdf(p, points))
+    return best
+
+
+def floating_pieces(verts: np.ndarray, tris: np.ndarray, others: list[dict[str, Any]], reach: float) -> int:
+    """Pieces besides the largest that touch neither the rest of their part nor another part.
+
+    Arms under sleeves or two shoes are separate pieces of their part but are held by the shirt or
+    the base; an eyeball floating inside its socket is not.
+    """
+    labels = piece_labels(len(verts), tris)[np.unique(tris)]
     used = np.unique(tris)
-    return len({find(int(v)) for v in used})
+    ids, counts = np.unique(labels, return_counts=True)
+    if len(ids) < 2:
+        return 0
+    largest = ids[np.argmax(counts)]
+    loose = 0
+    for i in ids:
+        if i == largest:
+            continue
+        pts = verts[used[labels == i]]
+        if not others or _added_distance(others, pts[:: max(1, len(pts) // 400)]).min() > reach:
+            loose += 1
+    return loose
 
 
 def write_stl(path: str, verts: np.ndarray, tris: np.ndarray) -> None:
@@ -523,26 +621,118 @@ def write_stl(path: str, verts: np.ndarray, tris: np.ndarray) -> None:
         f.write(rec.tobytes())
 
 
+# ---------- templates ----------
+
+VECTOR_KEYS = ("center", "radii", "a", "b", "size", "from")
+SCALAR_KEYS = ("radius", "radius_b", "radius_end", "round", "thickness", "blend", "voxel", "amplitude", "scale",
+               "depth", "length", "width")
+
+
+def template_names() -> list[str]:
+    return sorted(p.stem for p in TEMPLATES.glob("*.json"))
+
+
+def load_template(name: str) -> dict[str, Any]:
+    path = TEMPLATES / f"{name}.json"
+    if not path.is_file():
+        raise ValueError(f"unknown template '{name}' (available: {', '.join(template_names())})")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _scaled(obj: Any, k: float) -> Any:
+    """A copy of a template piece with every length multiplied by k (angles, colors, flags unchanged)."""
+    if isinstance(obj, list):
+        return [_scaled(x, k) for x in obj]
+    if not isinstance(obj, dict):
+        return obj
+    out: dict[str, Any] = {}
+    for key, v in obj.items():
+        if key in VECTOR_KEYS and isinstance(v, list):
+            out[key] = [float(x) * k for x in v]
+        elif key == "points":
+            out[key] = [[float(x) * k for x in p] for p in v]
+        elif key in SCALAR_KEYS and isinstance(v, (int, float)):
+            out[key] = float(v) * k
+        elif key in ("primitives", "detail", "fur"):
+            out[key] = _scaled(v, k)
+        else:
+            out[key] = v
+    return out
+
+
+def expand_template(scene: dict[str, Any]) -> dict[str, Any]:
+    """{"template": name, "height": mm, "parts": [...]} -> a plain scene.
+
+    The template is scaled to `height` (its base on z = 0, facing -Y). A part of the same name as a
+    template part changes it: its keys replace the template's, its primitives are added (in final mm).
+    Other parts are added as they are. Scene-level keys (blend, detail, fur) stay.
+    """
+    if "template" not in scene:
+        return scene
+    tpl = load_template(str(scene["template"]))
+    k = float(scene.get("height") or tpl["height"]) / float(tpl["height"])
+    parts = [_scaled(p, k) for p in tpl["parts"]]
+    by_name = {p["name"]: p for p in parts}
+    for extra in scene.get("parts") or []:
+        target = by_name.get(extra.get("name"))
+        if target is None:
+            parts.append(extra)
+            continue
+        for key, v in extra.items():
+            if key == "primitives":
+                target["primitives"] = target["primitives"] + list(v)
+            else:
+                target[key] = v
+    rest = {key: v for key, v in scene.items() if key not in ("template", "height", "parts")}
+    return {**rest, "parts": parts}
+
+
+def _scene_bounds(parts: list[dict[str, Any]]) -> list[tuple[float, float, float]]:
+    boxes = [_bounds(p) for part in parts for p in part.get("primitives") or [] if p.get("op", "add") == "add"]
+    if not boxes:
+        raise ValueError("a part needs at least one primitive")
+    lo = np.min([b[0] for b in boxes], axis=0)
+    hi = np.max([b[1] for b in boxes], axis=0)
+    return [tuple(lo), tuple(hi)]
+
+
 def sculpt_scene(scene: dict[str, Any], out_dir: str, voxel: float | None = None, smooth: int = 4) -> dict[str, Any]:
-    """Mesh every part of a scene into out_dir/<part>.stl. A scene is {"parts": [...]} or one part."""
+    """Mesh every part of a scene into out_dir/<part>.stl. A scene is {"parts": [...]}, one part, or a template.
+
+    All parts share one grid size, chosen from the whole scene, so small parts (eyes, shoes) are not
+    meshed finer than the body and large ones not coarser.
+    """
     t0 = time.monotonic()
+    scene = expand_template(scene)
     parts = scene.get("parts") or [{"name": scene.get("name", "Sculpt"), **scene}]
+    for part in parts:
+        for p in part.get("primitives") or []:
+            _sdf(p, np.zeros((1, 3)))      # explain bad input before the heavy work
+    shared = choose_voxel(_scene_bounds(parts), voxel)
     os.makedirs(out_dir, exist_ok=True)
     out = []
+    lo_all, hi_all = None, None
     for i, part in enumerate(parts):
-        merged = {"blend": scene.get("blend", DEFAULT_BLEND), **({"detail": scene["detail"]} if "detail" in scene
-                                                                else {}), **part}
-        verts, tris = mesh_part(merged, part.get("voxel", voxel), smooth)
+        inherited = {key: scene[key] for key in ("detail", "fur") if key in scene and key not in part}
+        merged = {"blend": scene.get("blend", DEFAULT_BLEND), **inherited, **part}
+        verts, tris = mesh_part(merged, part.get("voxel", shared), smooth)
         name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in str(part.get("name") or f"Part{i + 1}"))
         path = os.path.join(out_dir, f"{name}.stl")
         write_stl(path, verts, tris)
         size = (verts.max(0) - verts.min(0)) if len(verts) else np.zeros(3)
+        if len(verts):
+            lo_all = verts.min(0) if lo_all is None else np.minimum(lo_all, verts.min(0))
+            hi_all = verts.max(0) if hi_all is None else np.maximum(hi_all, verts.max(0))
         n_pieces = pieces(len(verts), tris)
+        others = [p for j, p in enumerate(parts) if j != i]
+        loose = floating_pieces(verts, tris, others, 2 * shared) if n_pieces > 1 else 0
         entry = {"name": name, "path": path, "triangles": int(len(tris)), "color": part.get("color"),
                  "shininess": float(part.get("shininess", 0.0)),
                  "size_mm": [round(float(x), 2) for x in size], "pieces": n_pieces}
-        if n_pieces > 1:
-            entry["warning"] = (f"{n_pieces} separate pieces: something does not touch the rest (a floating "
-                                "strand, a fold sticking out). Move it into the body or remove it.")
+        if loose:
+            entry["warning"] = (f"{loose} piece(s) float: they touch neither the rest of the part nor another part "
+                                "(a strand in the air, an eyeball inside its socket). Move them into the body.")
         out.append(entry)
-    return {"parts": out, "seconds": round(time.monotonic() - t0, 2)}
+    total = (hi_all - lo_all) if lo_all is not None else np.zeros(3)
+    return {"parts": out, "voxel_mm": round(shared, 4), "size_mm": [round(float(x), 2) for x in total],
+            "seconds": round(time.monotonic() - t0, 2)}

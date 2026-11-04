@@ -627,18 +627,26 @@ _result = {{"group": _grp.Name, "parts": _made}}
 @mcp.tool(annotations=WRITE, structured_output=False)
 async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | None = None, smooth: int = 4,
                  doc: str | None = None, instance: int | None = None) -> str:
-    """Sculpt organic shapes (figures, animals, faces, hair, plants, rocks, terrain) from smoothly
-    blended primitives, like clay: they melt into each other instead of meeting at hard seams.
-    scene = {"blend": 1.5, "detail": {...}, "parts": [{"name", "color": [r,g,b] 0..1, "blend",
-    "detail", "shininess": 0..1 (default 0, matte), "primitives": [...]}, ...]} (or a single
-    part's keys at the top level).
+    """Sculpt organic shapes (people, animals, figures, faces, hair, plants, rocks, terrain) from
+    smoothly blended primitives, like clay: they melt into each other instead of meeting at hard seams.
+    Use it for every person or animal; Part boxes and cylinders look like a snowman.
+    Start people and animals from a template: {"template": "person_standing" | "dog_standing" |
+    "cat_sitting", "height": mm, "parts": [...]} scales a tested figure (base on z=0, facing -Y)
+    to the height; a part with a template part's name (Skin, Shirt, Jeans, Shoes_L, Shoes_R, Hair,
+    Dog, Cat, Base) changes its keys and adds its primitives (in final mm), other parts are added.
+    scene = {"blend": 1.5, "detail": {...}, "fur": {...}, "parts": [{"name", "color": [r,g,b] 0..1,
+    "blend", "detail", "fur", "shininess": 0..1 (default 0, matte), "primitives": [...]}, ...]} (or a
+    single part's keys at the top level).
     Primitives (mm): sphere {center, radius}; ellipsoid {center, radii, rotate:[rx,ry,rz] deg};
     capsule {a, b, radius, radius_b} (tapered limb/finger); strand {points:[[x,y,z]...], radius,
     radius_end} (hair lock, tail, beard, vine); box {center, size, round, rotate}; torus {center,
     radius, thickness, rotate}; cylinder {a, b, radius}. Each may set "op": add|subtract|intersect
     and its own "blend" (mm, 0 = hard edge). "detail": {"amplitude": mm, "scale": mm, "seed"}
-    adds skin/stone/fur texture. voxel_mm sets the resolution (default: automatic, about 1/200 of
-    the size); smooth = Taubin passes. The meshes are computed outside FreeCAD and imported as
+    adds skin/stone texture; "fur": {"depth": mm, "length": mm, "width": mm, "direction": [x,y,z]
+    or "from": [x,y,z], "seed"} carves grooves that run along the flow, like locks of fur or hair
+    (depth up to 0.3 × width; "fur": null switches a scene-wide fur off for a part). voxel_mm sets
+    the resolution (default: automatic, 1/300 of the scene, the same for every part); smooth =
+    Taubin passes (2 with fur). The meshes are computed outside FreeCAD and imported as
     Mesh objects in a group (one undo step); export them as STL/3MF for printing."""
     from . import sculpt as sculpt_mod
 
@@ -653,7 +661,8 @@ async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | 
                      instance=instance)
     if isinstance(out, dict):
         warnings = {p["name"]: p["warning"] for p in res["parts"] if p.get("warning")}
-        out = {"computed_in_s": res["seconds"], **out, **({"part_warnings": warnings} if warnings else {})}
+        out = {"computed_in_s": res["seconds"], "voxel_mm": res["voxel_mm"], "size_mm": res["size_mm"], **out,
+               **({"part_warnings": warnings} if warnings else {})}
     return _dump(out)
 
 
