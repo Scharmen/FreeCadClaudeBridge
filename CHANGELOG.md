@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.14.0 – people and animals that look real (unreleased)
+
+- `sculpt` templates: `person_standing` (7.5 heads tall, T-shirt, jeans, sneakers, hair, round base), `dog_standing` (Labrador-type, short fur, oval base) and `cat_sitting` (fur flowing down and back). `{"template": ..., "height": mm, "parts": [...]}` scales one to the height; parts with a template part's name change it and add primitives, others are added.
+- Fur and hair: `"fur": {"depth", "length", "width", "direction" | "from"}` carves grooves that run along a flow; the depth is capped at 0.3 × the groove width so the mesh stays clean.
+- Finer and more even meshes: one grid for the whole scene at 1/300 of its size (was up to 1/200 per part), finest 1/400; cutting shapes no longer enlarge the grid; specks smaller than three voxels are dropped; a piece held by another part (an arm under a sleeve) is no longer reported as floating.
+- The skill and the panel send every person and animal to a `sculpt` template instead of stacked primitives.
+- Benchmark: `dog` and `person` tasks.
+- Fix: `list_commands` could crash FreeCAD. It asked every command whether it is active, and FreeCAD's `Std_Expressions` (and other commands whose menu action is not built yet) dereferences a null action there; commands without an action now report `active: null`.
 ## 1.13.0 – design benchmark (unreleased)
 
 - New design benchmark in `tests/design/` (`make bench`): 12 tasks (bearing housing, tube bracket, enclosure, snap box, gear pair, bolt and nut, spring, bottle, hinge assembly, parametric shelf bracket, a model from a picture, a cat figure) run through Claude Code like the chat panel does, in a separate FreeCAD with its own settings and bridge directory, so the user's documents, preferences and feedback are untouched.

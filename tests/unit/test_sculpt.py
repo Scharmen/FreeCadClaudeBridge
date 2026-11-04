@@ -21,6 +21,16 @@ def closed(tris):
     return bool((counts == 2).all())
 
 
+def read_stl(path):
+    """Points and triangles as an STL reader (FreeCAD) sees them: identical coordinates are one point."""
+    data = open(path, "rb").read()
+    n = struct.unpack("<I", data[80:84])[0]
+    rec = np.frombuffer(data[84:84 + 50 * n], dtype=np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")]))
+    coords = rec["v"].reshape(-1, 3)
+    pts, idx = np.unique(coords, axis=0, return_inverse=True)
+    return pts, idx.reshape(-1, 3)
+
+
 def test_sphere_is_closed_outward_and_the_right_size():
     v, t = sculpt.mesh_part({"primitives": [{"type": "sphere", "center": [0, 0, 0], "radius": 10}]},
                             voxel=0.5, smooth=3)
@@ -198,6 +208,9 @@ def test_every_template_meshes_watertight_in_one_piece_per_part(name, tmp_path):
     res = sculpt.sculpt_scene({"template": name, "height": 30}, str(tmp_path), voxel=0.3)
     assert res["parts"]
     assert not [p["name"] for p in res["parts"] if p.get("warning")]
+    for p in res["parts"]:   # what FreeCAD's Mesh.isSolid() needs: every edge between exactly two triangles
+        v, t = read_stl(p["path"])
+        assert closed(t), p["name"]
     assert res["size_mm"][2] == pytest.approx(30, abs=1.5), "the template's height is the whole figure on its base"
 
 

@@ -133,6 +133,14 @@ def test_list_commands():
     assert any(c["name"] == "PartDesign_Pad" for c in pd["commands"])
 
 
+def test_list_commands_survives_commands_without_an_action():
+    # Std_Expressions has no QAction until its menu is built; isActive() on it used to crash FreeCAD
+    out = call("list_commands", filter="expression", limit=500)
+    expr = next(c for c in out["commands"] if c["name"] == "Std_Expressions")
+    assert expr["active"] is None
+    assert call("status")["freecad_version"]
+
+
 def test_run_command_and_task_dialog():
     r = call("run_command", name="Part_Box")
     assert any(c.endswith("#Box") for c in r["changes"]["created"])

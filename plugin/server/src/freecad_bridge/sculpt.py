@@ -512,18 +512,46 @@ def mesh_part(part: dict[str, Any], voxel: float | None = None, smooth: int = 4)
     for attempt in range(3):
         # a pinch that survives the split depends on how the grid happens to lie over the shape:
         # a slightly finer grid moves the samples and usually removes it
-        grid, origin, used = field(part, None if voxel is None and attempt == 0 else
-                                   (voxel or choose_voxel(*_part_bounds(part))) * (1 - 0.07 * attempt))
+        wanted = None if voxel is None and attempt == 0 else \
+            (voxel or choose_voxel(*_part_bounds(part))) * (1 - 0.07 * attempt)
+        grid, origin, used = field(part, wanted)
         verts, tris = split_pinches(*surface_nets(grid, origin, used))
         bad = non_manifold_edges(tris)
         if best is None or bad < best[0]:
-            best = (bad, verts, tris)
+            best = (bad, verts, tris, wanted, used)
         if bad == 0:
             break
-    _, verts, tris = best
+    bad, verts, tris, wanted, used = best
+    if bad:
+        verts, tris = _carve_bad_edges(part, wanted, verts, tris)
     tris = drop_specks(verts, tris, 3 * used)
     passes = int(part.get("smooth", min(smooth, 2) if part.get("fur") else smooth))  # more would erase the fur
     return taubin(verts, tris, passes), tris
+
+
+def bad_edge_points(verts: np.ndarray, tris: np.ndarray) -> np.ndarray:
+    """Midpoints of the edges shared by more than two triangles."""
+    e = np.sort(np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]]), axis=1)
+    uniq, counts = np.unique(e, axis=0, return_counts=True)
+    bad = uniq[counts > 2]
+    return (verts[bad[:, 0]] + verts[bad[:, 1]]) / 2 if len(bad) else np.zeros((0, 3))
+
+
+def _carve_bad_edges(part: dict[str, Any], voxel: float | None, verts: np.ndarray,
+                     tris: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Edges the splitter cannot untangle (two sheets meeting at a fur ridge): carve the field a third of a
+    voxel deeper around them, which turns the ambiguous cell into an ordinary one, and mesh again."""
+    grid, origin, used = field(part, voxel)
+    for _ in range(4):
+        spots = bad_edge_points(verts, tris)
+        if not len(spots):
+            break
+        idx = np.round((spots - origin) / used).astype(int)
+        for i, j, k in idx:
+            sl = tuple(slice(max(0, c - 1), c + 2) for c in (i, j, k))
+            grid[sl] += np.float32(used / 3)
+        verts, tris = split_pinches(*surface_nets(grid, origin, used))
+    return verts, tris
 
 
 def non_manifold_edges(tris: np.ndarray) -> int:

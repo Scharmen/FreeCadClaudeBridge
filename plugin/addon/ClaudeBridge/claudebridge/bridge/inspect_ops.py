@@ -231,8 +231,11 @@ def list_commands(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         text = f"{n} {info.get('menuText', '')} {info.get('toolTip', '')}".lower()
         if flt and flt not in text:
             continue
+        cmd = Gui.Command.get(n)
         try:
-            active = bool(Gui.Command.get(n).isActive())
+            # isActive() on a command whose action was never created segfaults in FreeCAD's core
+            # (StdCmdExpression::isActive -> QAction::setEnabled on null): ask only commands with an action
+            active = bool(cmd.isActive()) if cmd.getAction() else None
         except Exception:
             active = None
         out.append({"name": n, "menu": (info.get("menuText") or "").replace("&", ""),
