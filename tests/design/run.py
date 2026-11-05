@@ -120,15 +120,19 @@ def freecad_gui(cmd: list[str]) -> str:
     raise RuntimeError(f"no FreeCAD GUI next to {exe}")
 
 
-def start_freecad(fc_cmd: list[str]) -> int:
+def start_freecad(fc_cmd: list[str], own: str | None = None) -> int:
+    """The benchmark FreeCAD: the running one, or with `own` a new one just for this worker."""
     use_bench_bridge()
     running = list_instances()
-    if running:
+    if running and not own:
         return running[0].pid
     user_cfg = BENCH_HOME / "user.cfg"
     if not user_cfg.exists():
         cfg_dir = score.run_freecad("import FreeCAD as App\n_result = App.getUserConfigDir()", fc_cmd)
         shutil.copy2(Path(cfg_dir) / "user.cfg", user_cfg)
+    if own:      # FreeCAD writes its settings on exit: every instance gets its own file
+        shutil.copy2(user_cfg, BENCH_HOME / f"user-{own}.cfg")
+        user_cfg = BENCH_HOME / f"user-{own}.cfg"
     env = platforms.clean_env()
     env["FREECAD_BRIDGE_DIR"] = str(BENCH_BRIDGE)
     proc = subprocess.Popen([freecad_gui(fc_cmd), "-u", str(user_cfg)], env=env, stdin=subprocess.DEVNULL,
@@ -302,6 +306,38 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     return by_model
 
 
+def collect(run_dir: Path) -> list[dict[str, Any]]:
+    """The results of a run as saved, without the runs that a plan limit stopped."""
+    out = []
+    for f in sorted(run_dir.glob("*/*/result.json")):
+        r = json.loads(f.read_text(encoding="utf-8"))
+        if r.get("run", {}).get("api_error") != "usage_limit_reached":
+            out.append(r)
+    return out
+
+
+def worker_args(model: str, args: argparse.Namespace, run_dir: Path) -> list[str]:
+    """The command line of one model's worker in a parallel run: its own FreeCAD, a shared run folder."""
+    cmd = [sys.executable, "-m", "design.run", "--models", model, "--tasks", args.tasks, "--run-dir", str(run_dir),
+           "--own-freecad"]
+    if args.no_judge:
+        cmd.append("--no-judge")
+    if args.no_checks:
+        cmd.append("--no-checks")
+    return cmd
+
+
+def write_summary(results: list[dict[str, Any]], run_dir: Path, baseline: bool) -> None:
+    summary = summarize(results)
+    (run_dir / "summary.json").write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding="utf-8")
+    if baseline:
+        old = json.loads(BASELINE.read_text(encoding="utf-8")) if BASELINE.exists() else {}
+        old.update({m: {**v, "run": run_dir.name} for m, v in summary.items()})
+        BASELINE.write_text(json.dumps(old, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    for model, m in summary.items():
+        print(f"{model}: mean score {m['mean_score']}, visual {m['mean_visual']}, cost ${m['cost_usd']}")
+
+
 def rescore(run_dir: Path, fc_cmd: list[str]) -> list[dict[str, Any]]:
     out = []
     for f in sorted(run_dir.glob("*/*/result.json")):
@@ -322,38 +358,47 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-judge", action="store_true")
     ap.add_argument("--no-checks", action="store_true", help="block the check tools (a before measurement)")
     ap.add_argument("--rescore", type=Path)
+    ap.add_argument("--parallel", action="store_true", help="each model at the same time, in its own FreeCAD")
+    ap.add_argument("--run-dir", type=Path, help="write into this folder")
+    ap.add_argument("--own-freecad", action="store_true", help="start a FreeCAD just for this run, close it afterwards")
     ap.add_argument("--baseline", action="store_true", help="write the summary to tests/design/baseline.json")
     args = ap.parse_args(argv)
+    if args.parallel:     # each model in its own process and FreeCAD: the slowest sets the time
+        run_dir = args.run_dir or RUNS / time.strftime("%Y%m%d-%H%M%S")
+        run_dir.mkdir(parents=True, exist_ok=True)
+        prepare_bridge()
+        workers = [subprocess.Popen(worker_args(m, args, run_dir), cwd=HERE.parent) for m in args.models.split(",")]
+        code = max(w.wait() for w in workers)
+        write_summary(collect(run_dir), run_dir, args.baseline)
+        return code
     fc_cmd = score.freecadcmd()
     if args.rescore:
         results = rescore(args.rescore, fc_cmd)
         run_dir = args.rescore
     else:
         prepare_bridge()
-        pid = start_freecad(fc_cmd)
-        run_dir = RUNS / time.strftime("%Y%m%d-%H%M%S")
+        pid = start_freecad(fc_cmd, args.models.replace(",", "-") if args.own_freecad else None)
+        run_dir = args.run_dir or RUNS / time.strftime("%Y%m%d-%H%M%S")
         results = []
-        for model in args.models.split(","):
-            for tid in args.tasks.split(","):
-                task = tasks.get(tid)
-                t0 = time.time()
-                r = run_task(task, model, pid, run_dir / model / tid, fc_cmd, not args.no_judge, args.no_checks)
-                if r["run"].get("api_error") == "usage_limit_reached":
-                    print(f"{model}: plan usage limit reached at {tid}; stopping. Run the rest later with "
-                          f"--tasks.", flush=True)
-                    break
-                results.append(r)
-                vis = (r.get("visual") or {}).get("score")
-                print(f"{model:7} {tid:16} score {r.get('score'):5}  visual {vis}  {time.time() - t0:5.0f} s  "
-                      f"tools {len(r['run'].get('tools', []))}  " + "; ".join(r.get("failed", [])[:3]), flush=True)
-    summary = summarize(results)
-    (run_dir / "summary.json").write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding="utf-8")
-    if args.baseline:
-        old = json.loads(BASELINE.read_text(encoding="utf-8")) if BASELINE.exists() else {}
-        old.update({m: {**v, "run": run_dir.name} for m, v in summary.items()})
-        BASELINE.write_text(json.dumps(old, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    for model, m in summary.items():
-        print(f"{model}: mean score {m['mean_score']}, visual {m['mean_visual']}, cost ${m['cost_usd']}")
+        try:
+            for model in args.models.split(","):
+                for tid in args.tasks.split(","):
+                    task = tasks.get(tid)
+                    t0 = time.time()
+                    r = run_task(task, model, pid, run_dir / model / tid, fc_cmd, not args.no_judge, args.no_checks)
+                    if r["run"].get("api_error") == "usage_limit_reached":
+                        print(f"{model}: plan usage limit reached at {tid}; stopping. Run the rest later with "
+                              f"--tasks.", flush=True)
+                        break
+                    results.append(r)
+                    vis = (r.get("visual") or {}).get("score")
+                    print(f"{model:7} {tid:16} score {r.get('score'):5}  visual {vis}  {time.time() - t0:5.0f} s  "
+                          f"tools {len(r['run'].get('tools', []))}  " + "; ".join(r.get("failed", [])[:3]), flush=True)
+        finally:
+            if args.own_freecad:
+                os.kill(pid, signal.SIGTERM)
+    if not args.own_freecad:      # a worker's parent writes the summary of the whole run
+        write_summary(results, run_dir, args.baseline)
     return 0
 
 

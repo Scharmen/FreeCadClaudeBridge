@@ -107,7 +107,7 @@ make test     # unit tests, no FreeCAD needed
 make itest    # GUI integration tests against a running FreeCAD with the addon (incl. every skill snippet)
 make lint
 make validate # claude plugin validate .
-make bench    # design benchmark: 12 tasks through Claude Code in a separate FreeCAD, scored headless
+make bench    # design benchmark through Claude Code in a separate FreeCAD, scored headless; PARALLEL=1: one FreeCAD per model
 ```
 
 The design benchmark ([tests/design/](tests/design/)) measures how good the models are, not only whether the tools work: each task has a numeric spec (sizes, holes, fits, tooth counts, interference, parameters that survive changes, overlap with a reference model) and a list of features a second Claude checks on the screenshots. It runs in its own FreeCAD instance with its own settings and bridge directory, so your documents and learned preferences stay untouched. `tests/design/baseline.json` holds the current scores.

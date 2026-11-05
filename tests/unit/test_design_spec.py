@@ -212,3 +212,20 @@ def test_a_seated_clearance_counts_the_sides_when_the_parts_touch():
     assert not by_name(spec.evaluate(s, bad))["gap box–lid 0.1–0.5 mm"]["ok"]
     no_seat = measured(*parts, gaps=[{"a": "Box", "b": "Lid", "d": 0.0}])
     assert not by_name(spec.evaluate(s, no_seat))["gap box–lid 0.1–0.5 mm"]["ok"]
+
+
+def test_a_parallel_run_gives_each_model_its_own_worker_and_skips_limit_stopped_runs(tmp_path):
+    import argparse
+
+    from design import run
+
+    args = argparse.Namespace(tasks="cat,dog", no_judge=True, no_checks=False)
+    cmd = run.worker_args("opus", args, tmp_path)
+    assert cmd[1:3] == ["-m", "design.run"] and "--own-freecad" in cmd and "--no-judge" in cmd
+    assert cmd[cmd.index("--models") + 1] == "opus" and cmd[cmd.index("--run-dir") + 1] == str(tmp_path)
+    for task, error in (("cat", None), ("dog", "usage_limit_reached")):
+        (tmp_path / "opus" / task).mkdir(parents=True)
+        (tmp_path / "opus" / task / "result.json").write_text(
+            json.dumps({"task": task, "model": "opus", "run": {"api_error": error}}), encoding="utf-8")
+    assert [r["task"] for r in run.collect(tmp_path)] == ["cat"]
+

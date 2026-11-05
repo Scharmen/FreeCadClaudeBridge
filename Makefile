@@ -9,9 +9,9 @@ test:  ## unit tests (no FreeCAD needed)
 itest:  ## GUI integration tests against a running FreeCAD with ClaudeBridge
 	$(RUN) pytest tests/gui -q
 
-bench:  ## design benchmark; MODELS=opus,sonnet,haiku TASKS=a,b (default: all)
+bench:  ## design benchmark; MODELS=opus,sonnet,haiku TASKS=a,b PARALLEL=1 (default: all, one by one)
 	cd tests && $(UV) run --project ../plugin/server python -m design.run --models $(or $(MODELS),opus) \
-		$(if $(TASKS),--tasks $(TASKS))
+		$(if $(TASKS),--tasks $(TASKS)) $(if $(PARALLEL),--parallel)
 
 lint:
 	$(RUN) ruff check plugin tests spikes
