@@ -194,6 +194,19 @@ def pose(camera):
     return [ln.strip() for ln in camera.splitlines() if ln.strip().startswith(("position", "orientation"))]
 
 
+def test_view_jumps_without_animation_and_leaves_the_setting_as_it_was():
+    py("doc.addObject('Part::Box','A').Height = 300")
+    call("document", action="activate", name=DOC)
+    py("Gui.ActiveDocument.ActiveView.setAnimationEnabled(True)")
+    first = pose(call("view", action="fit", view="iso", return_camera=True, screenshot=True)["camera"]) and pose(
+        py("_result = Gui.ActiveDocument.ActiveView.getCamera()")["result"])
+    time.sleep(0.5)
+    py("Gui.updateGui()")
+    state = py("v = Gui.ActiveDocument.ActiveView\n_result = [v.getCamera(), v.isAnimationEnabled()]")["result"]
+    py("Gui.ActiveDocument.ActiveView.setAnimationEnabled(False)")
+    assert pose(state[0]) == first and state[1] is True
+
+
 def test_view_returns_and_restores_the_camera():
     py("doc.addObject('Part::Box','A')")
     call("document", action="activate", name=DOC)

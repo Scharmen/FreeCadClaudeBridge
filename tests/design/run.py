@@ -181,6 +181,8 @@ App.setActiveDocument(d.Name)
 gd = Gui.getDocument(d.Name)
 v = gd.ActiveView
 shots = []
+if v.isAnimationEnabled():   # a camera still gliding to the new view ends up off centre, the picture cropped
+    v.setAnimationEnabled(False)
 def settle():   # a new view draws only after a few event loop rounds; otherwise the image is blank
     for _ in range(10):
         Gui.updateGui()

@@ -172,6 +172,18 @@ def import_file(args: dict[str, Any], ex: Any) -> dict[str, Any]:
 
 
 def view(args: dict[str, Any], ex: Any) -> dict[str, Any]:
+    v = Gui.ActiveDocument.ActiveView if Gui.ActiveDocument else None
+    animated = v.isAnimationEnabled() if v and hasattr(v, "isAnimationEnabled") else False
+    if animated:      # jump: a camera still moving ends up off centre, and the screenshot cropped
+        v.setAnimationEnabled(False)
+    try:
+        return _view(args, ex)
+    finally:
+        if animated:
+            v.setAnimationEnabled(True)
+
+
+def _view(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     gdoc = Gui.ActiveDocument
     if gdoc is None:
         raise OpError(protocol.NO_DOCUMENT, "no active document")
@@ -186,14 +198,7 @@ def view(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         method = VIEWS.get(str(args["view"]).lower())
         if not method:
             raise OpError(protocol.INVALID_ARGS, f"view must be one of {', '.join(sorted(set(VIEWS)))}")
-        animated = v.isAnimationEnabled() if hasattr(v, "isAnimationEnabled") else False
-        if animated:                       # jump: an animated turn is still moving when the screenshot is taken
-            v.setAnimationEnabled(False)
-        try:
-            getattr(v, method)()
-        finally:
-            if animated:
-                v.setAnimationEnabled(True)
+        getattr(v, method)()
     if action == "show":
         for o in objs:
             o.Visibility = True
