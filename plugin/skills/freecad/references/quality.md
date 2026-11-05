@@ -46,6 +46,4 @@ Use gloss only for metal, glass, glazed or wet surfaces; skin, hair, cloth, wood
 
 ## Printable by design
 
-- Wall thickness at least 1.2 mm (FDM) or 0.8 mm (resin); pins and thin limbs at least 2 mm thick at the target scale.
-- A flat base or plinth for figures; overhangs beyond 45° need supports, so lean shapes against the body.
-- One closed solid or watertight mesh per part. Run `check_print` before `export`.
+See `printing.md` for limits, gaps and snap fits; run `check_print` before `export`. Figures need a flat base or plinth; lean overhangs against the body.
