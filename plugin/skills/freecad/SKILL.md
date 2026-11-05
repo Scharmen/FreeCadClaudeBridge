@@ -33,13 +33,14 @@ You control the user's running FreeCAD through the `freecad` MCP tools. The user
 
 ## Check with numbers
 
-**Design spec first.** Before building, write down in a few lines: what the part does, the envelope, the interfaces with mating parts (with their real standard sizes), process and material, the load if any, and the key parameters. Ask one round of questions if an interface or size is really missing; otherwise state your assumption. The spec goes into a VarSet (sizes) and `design_notes` (reasons), and becomes the argument of `check_design`.
+**Design spec first.** Before building, write down in a few lines: what the part does, the envelope, the interfaces with mating parts (with their real standard sizes), process and material, the load if any, and the key parameters. Ask one round of questions if an interface or size is really missing; otherwise state your assumption. The spec goes into a VarSet (sizes) and `design_notes` (reasons), and becomes the argument of `check_design`. A holder for several things gets one seat for each (dividers or cradles): one big cavity lets them rattle.
 
 Size, position and fit errors do not show in a screenshot, and they are the most common mistakes: parts that touch where they need a gap, walls too thin to print, holes a little off. All check tools work on a saved copy: your document stays as it is, no undo step, and a crash cannot reach FreeCAD. For every model that has to fit, work or print, copy this list and tick it off:
 
 ```
 - [ ] Spec written from the request, before building (sizes, holes, gaps, parameters)
 - [ ] Built
+- [ ] Only what was asked for is left visible: delete or hide the bearing, tube, screw or cable you added to check a fit, so that exports and prints do not carry them
 - [ ] check_design(spec) clean
 - [ ] check_fit for every pair of parts that meet, in their mounted position
 - [ ] check_print if it will be printed (also tells the best orientation)

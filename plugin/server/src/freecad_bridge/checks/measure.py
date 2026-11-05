@@ -24,6 +24,7 @@ V = App.Vector
 CONTAINERS = {"App::Part", "Assembly::AssemblyObject", "App::DocumentObjectGroup", "App::Origin",
               "Assembly::JointGroup", "App::TextDocument", "App::VarSet", "Spreadsheet::Sheet"}
 HOLE_SPAN = math.radians(250)   # a cylinder around at least this much of the circle is a hole, less is a fillet
+OPEN_SPAN = math.radians(179)
 INTERFERENCE_MM3 = 0.5
 
 
@@ -69,7 +70,7 @@ def _holes_and_radii(s: Any) -> tuple[list[dict[str, Any]], list[float]]:
         rel = p - surf.Center
         radial = rel - axis * rel.dot(axis)
         concave = nrm.dot(radial) < 0
-        if not concave or span < math.radians(179):
+        if not concave:
             radii.append(r4(surf.Radius))
             continue
         for g in groups:
@@ -77,18 +78,30 @@ def _holes_and_radii(s: Any) -> tuple[list[dict[str, Any]], list[float]]:
                 d = (V(surf.Center) - g["point"])
                 if (d - g["axis"] * d.dot(g["axis"])).Length < 1e-3:
                     g["span"] += span
+                    g["widest"] = max(g["widest"], span)
                     break
         else:
-            groups.append({"r": surf.Radius, "axis": axis, "point": V(surf.Center), "span": span})
+            groups.append({"r": surf.Radius, "axis": axis, "point": V(surf.Center), "span": span, "widest": span})
     holes = []
     for g in groups:
         hole = {"d": r4(2 * g["r"]), "axis": [r4(x) for x in g["axis"]], "point": [r4(x) for x in g["point"]]}
-        if g["span"] >= HOLE_SPAN:
+        if g["span"] >= HOLE_SPAN:           # quarters of a bore count together
             holes.append(hole)
-        else:   # a bore open on one side (a clip ring), or a large concave fillet
+            continue
+        if g["widest"] >= OPEN_SPAN:          # a bore open on one side (a clip ring), or a large concave fillet
             holes.append({**hole, "open": True})
-            radii.append(r4(g["r"]))
+        radii.append(r4(g["r"]))
     return holes, sorted(radii)
+
+
+def volume_of(s: Any) -> float:
+    """Volume of a shape. On long B-spline faces the kernel's number can be far off, so check it on triangles."""
+    kernel = float(s.Volume)
+    if not any(type(f.Surface).__name__ == "BSplineSurface" for f in s.Faces):
+        return kernel
+    pts, tris = s.tessellate(max(0.02, s.BoundBox.DiagonalLength / 1000))
+    meshed = abs(sum(pts[a].dot(pts[b].cross(pts[c])) for a, b, c in tris)) / 6
+    return meshed if abs(meshed - kernel) > 0.2 * max(meshed, 1e-9) else kernel
 
 
 def count_teeth(s: Any) -> int | None:
@@ -212,7 +225,7 @@ def _solid_part(o: Any, s: Any, want_teeth: bool) -> dict[str, Any]:
     dims = [r4(bb.XLength), r4(bb.YLength), r4(bb.ZLength)]
     holes, radii = _holes_and_radii(s)
     p = {"label": o.Label, "type": o.TypeId, "dims": dims, "sorted": sorted(dims),
-         "center": [r4(bb.Center.x), r4(bb.Center.y), r4(bb.Center.z)], "volume": r4(s.Volume),
+         "center": [r4(bb.Center.x), r4(bb.Center.y), r4(bb.Center.z)], "volume": r4(volume_of(s)),
          "area": r4(s.Area), "valid": bool(s.isValid()), "closed": all(sh.isClosed() for sh in s.Shells),
          "solids": len(s.Solids), "holes": holes, "radii": radii,
          "surfaces": dict(Counter(type(f.Surface).__name__ for f in s.Faces)), "inclined": inclined_planes(s)}

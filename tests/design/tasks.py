@@ -201,7 +201,7 @@ TASKS: list[dict[str, Any]] = [
         "id": "dog",
         "prompt": "Model a standing Labrador retriever figurine, 50 mm tall at the head, for 3D printing in one "
                   "piece on a thin oval base. Make it look like a real dog.",
-        "spec": {"height": [47, 53], "solids": [1, 3]},
+        "spec": {"height": [47, 53], "solids": [1, 6]},   # sculpted parts: figure, eyes, nose, base
         "look": ["four legs with paws", "deep chest and tucked belly", "broad head with a clear stop",
                  "hanging ears", "eyes and nose", "thick tapering tail", "short fur texture", "oval base"],
     },

@@ -19,8 +19,20 @@ def _inv(a: float) -> float:
     return math.tan(a) - a
 
 
+def _root_fillet(rf: float, rb: float, half_gap: float, module: float) -> float:
+    """Radius of the arc from the radial foot of a flank into the root circle; 0 when there is no room for one."""
+    if rb - rf < 0.05 * module:
+        return 0.0
+    largest = (rb ** 2 - rf ** 2) / (2 * rf)                  # the arc would start right at the base circle
+    slope = math.tan(0.9 * half_gap)                          # leave some root circle between two arcs
+    radius = largest
+    for _ in range(6):
+        radius = min(largest, slope * math.sqrt(rf ** 2 + 2 * rf * radius))
+    return radius
+
+
 def gear_outline(module: float, teeth: int, pressure_deg: float = 20.0, backlash: float = 0.1) -> Any:
-    """Closed wire of an involute gear: spline flanks, arcs on the tip and root circles, radial feet."""
+    """Closed wire of an involute gear: spline flanks, arcs on the tip and root circles, filleted radial feet."""
     a = math.radians(pressure_deg)
     rp, rb = module * teeth / 2, module * teeth / 2 * math.cos(a)
     ra, rf = rp + module, rp - 1.25 * module
@@ -34,14 +46,32 @@ def gear_outline(module: float, teeth: int, pressure_deg: float = 20.0, backlash
         return V(r * math.cos(th), r * math.sin(th), 0)
 
     radii = [start + (ra - start) * i / 6 for i in range(7)]
-    edges = []
     pitch = 2 * math.pi / teeth
+    fillet = _root_fillet(rf, rb, pitch / 2 - half, module)
+    edges = []
+
+    def foot(theta: float, side: int) -> tuple[Any, Any]:
+        """The way from the root circle to the flank at `theta`: its point on the root circle, and its edges."""
+        base = pt(rb, theta)
+        if not fillet:
+            return pt(rf, theta), [Part.makeLine(pt(rf, theta), base)] if rf < rb else []
+        u, n = V(math.cos(theta), math.sin(theta), 0), V(-math.sin(theta), math.cos(theta), 0) * side
+        along = math.sqrt(rf ** 2 + 2 * rf * fillet)
+        centre = u * along + n * fillet
+        tangent, root = u * along, centre * (rf / (rf + fillet))
+        middle = (tangent - centre) + (root - centre)
+        middle = centre + middle * (fillet / middle.Length)
+        out = [Part.Arc(root, middle, tangent).toShape()]
+        if rb - along > 1e-6:
+            out.append(Part.makeLine(tangent, base))
+        return root, out
+
     for k in range(teeth):
         c = k * pitch
         left = [pt(r, c - flank_angle(r)) for r in radii]
         right = [pt(r, c + flank_angle(r)) for r in reversed(radii)]
         if rf < rb:
-            edges.append(Part.makeLine(pt(rf, c - flank_angle(rb)), left[0]))
+            edges += foot(c - flank_angle(rb), -1)[1]
         spline = Part.BSplineCurve()
         spline.interpolate(left)
         edges.append(spline.toShape())
@@ -49,12 +79,14 @@ def gear_outline(module: float, teeth: int, pressure_deg: float = 20.0, backlash
         spline = Part.BSplineCurve()
         spline.interpolate(right)
         edges.append(spline.toShape())
-        foot = pt(rf, c + flank_angle(rb)) if rf < rb else right[-1]
+        end = right[-1]
         if rf < rb:
-            edges.append(Part.makeLine(right[-1], foot))
-        next_foot = pt(rf, c + pitch - flank_angle(max(rb, rf)))
-        mid = pt(rf, c + pitch / 2)
-        edges.append(Part.Arc(foot, mid, next_foot).toShape())
+            end, rising = foot(c + flank_angle(rb), 1)
+            for e in reversed(rising):               # the same edges, walked down to the root
+                e.reverse()
+                edges.append(e)
+        start_next = foot(c + pitch - flank_angle(rb), -1)[0] if rf < rb else pt(rf, c + pitch - flank_angle(rf))
+        edges.append(Part.Arc(end, pt(rf, c + pitch / 2), start_next).toShape())
     return Part.Wire(edges)
 
 
@@ -94,20 +126,28 @@ def gear_pair(p: dict[str, Any]) -> dict[str, Any]:
 def spring(p: dict[str, Any]) -> dict[str, Any]:
     d, r = p["wire"], (p["outer"] - p["wire"]) / 2
     active, length = p["active_coils"], p["free_length"]
-    # height of the wire's centre over the turns: one closed coil, the active coils, one closed coil
-    closed_rise = d * 1.05
-    rise = length + d - 2 * closed_rise                      # ground ends take half a wire off each end
+    # Ground like a real spring: the flat runs around 3/4 of the end coil, from a tip left at about a fifth of the wire
+    # to nothing. The plane lies GRIND above the height of the wire's centre at the tip.
+    grind = 0.29 * d
+    closed = d * 1.05                                         # the end coil's rise: its tip touches the next coil
+    rise = length + 2 * grind - 2 * closed                    # centre height gained over the active coils
+    even = (rise - closed) / (active - 1) if active > 1 else rise
     pts = []
-    per_turn = 16
+    per_turn = 24
     total = active + 2
+
+    def lift(t: float) -> float:
+        """Centre height over the first turns: closed, then the pitch opens over one turn, then even."""
+        if t <= 1 or active <= 1:
+            return closed * min(t, 1) + (rise * (t - 1) / active if t > 1 else 0.0)
+        if t <= 2:
+            return closed + closed * (t - 1) + (even - closed) * (t - 1) ** 2 / 2
+        return closed + (closed + even) / 2 + even * (t - 2)
+
+    height = lift(total / 2) * 2
     for i in range(total * per_turn + 1):
         turn = i / per_turn
-        if turn <= 1:
-            z = closed_rise * turn
-        elif turn >= total - 1:
-            z = closed_rise + rise + closed_rise * (turn - (total - 1))
-        else:
-            z = closed_rise + rise * (turn - 1) / active
+        z = lift(turn) if turn <= total / 2 else height - lift(total - turn)
         th = 2 * math.pi * turn
         pts.append(V(r * math.cos(th), r * math.sin(th), z))
     path = Part.BSplineCurve()
@@ -116,11 +156,11 @@ def spring(p: dict[str, Any]) -> dict[str, Any]:
     start_dir = path.tangent(path.FirstParameter)[0]
     circle = Part.Wire(Part.makeCircle(d / 2, pts[0], start_dir))
     coil = wire.makePipeShell([circle], True, True)
-    top = 2 * closed_rise + rise
-    cut = Part.makeBox(4 * r + 8 * d, 4 * r + 8 * d, 4 * d, V(-2 * r - 4 * d, -2 * r - 4 * d, -4 * d + d / 2))
-    cut = cut.fuse(Part.makeBox(4 * r + 8 * d, 4 * r + 8 * d, 4 * d, V(-2 * r - 4 * d, -2 * r - 4 * d, top - d / 2)))
+    side = 4 * r + 8 * d
+    cut = Part.makeBox(side, side, 4 * d, V(-side / 2, -side / 2, grind - 4 * d))
+    cut = cut.fuse(Part.makeBox(side, side, 4 * d, V(-side / 2, -side / 2, height - grind)))
     done = coil.cut(cut)
-    done.translate(V(0, 0, -d / 2))
+    done.translate(V(0, 0, -grind))
     return {"Spring": done}
 
 
