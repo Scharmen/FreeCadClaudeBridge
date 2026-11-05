@@ -39,6 +39,8 @@ Never build a person or an animal from scratch or from Part primitives. The `scu
 - **Fur and hair** give the look: `"fur": {"depth", "length", "width", "direction" | "from"}` carves grooves that run along the flow (down and back on an animal's body, out from the crown on a head). Short coat: depth 0.1–0.15 mm, width 0.6–0.8 mm on a 5 cm figure; long fur: depth 0.3, width 1, length 8–10. Depth is capped at 0.3 × width so the surface stays clean.
 - **Check the face up close:** `view` with a screenshot zoomed on the head; eyes, nose and mouth must read at the printed size.
 
+**One piece:** a template's parts touch and print together. To join them, put all their primitives into one part in the `sculpt` scene. Do not fuse the finished meshes: that leaves open, invalid meshes and costs many minutes.
+
 ## The `sculpt` tool
 
 Describe the form as primitives that melt into each other with a blend radius, like clay. It runs outside FreeCAD and imports a smooth, watertight mesh per part (one undo step), so it cannot crash FreeCAD.
