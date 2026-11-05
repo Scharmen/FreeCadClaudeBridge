@@ -20,11 +20,18 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 
-from . import __version__, client, headless, imaging, installer, learning, platforms, settings
+from . import __version__, client, headless, imaging, installer, learning, library, platforms, settings
 from . import notes as notes_mod
 from .client import NOT_RUNNING, BridgeError, call, fix_for
 
 MAX_CHARS = 38000  # ~10k tokens; Claude Code warns above that
+_recent_code: list[str] = []     # what built the current model: goes to the design library when the user likes it
+MAX_RECENT_CODE = 40
+
+
+def remember_code(code: str) -> None:
+    _recent_code.append(code)
+    del _recent_code[:-MAX_RECENT_CODE]
 
 INSTRUCTIONS = """\
 Controls the user's running FreeCAD (GUI). Start with `status`, then `get_tree`.
@@ -234,6 +241,7 @@ async def run_python(code: str, doc: str | None = None, transaction: str | None 
     stdout, stderr, changes (created/changed/deleted) and errors (objects in error state).
     Pure-Python loops stop at timeout_s; heavy geometry belongs in run_headless.
     snapshot=true saves a copy of the document first (for risky changes)."""
+    remember_code(code)
     return await _call("run_python", {"code": code, "doc": doc, "transaction": transaction,
                                       "recompute": recompute, "snapshot": snapshot},
                        timeout_s=timeout_s, instance=instance)
@@ -589,7 +597,105 @@ async def record_feedback(rating: Literal["good", "partly", "bad"], comment: str
                                          source="claude-code", lesson=lesson or "")
     except ValueError as e:
         raise ToolError(f"INVALID_ARGS: {e}") from e
-    return _dump({"recorded": True, "lesson_added": entry["lesson_added"], "lessons": len(learning.lessons(bd))})
+    out = {"recorded": True, "lesson_added": entry["lesson_added"], "lessons": len(learning.lessons(bd))}
+    if rating == "good":
+        saved = library.record(bd, request or "", result or "", comment or "", list(_recent_code))
+        if saved:
+            out["library_entry"] = saved
+        _recent_code.clear()  # the next design starts empty; after a bad rating the fix builds on this code
+    return _dump(out)
+
+
+@mcp.tool(annotations=WRITE, structured_output=False)
+async def design_library(action: Literal["search", "list", "show", "delete"] = "search", query: str = "",
+                         id: str = "") -> str:
+    """Designs this user rated good, with the code that built them (local, on this machine only;
+    stored when record_feedback says "good"). Before you build something, search for it: search
+    returns the closest ones, show gives one with its code. Reuse what worked; the request decides."""
+    bd = platforms.bridge_dir()
+    if action == "search":
+        return _dump({"designs": [library.brief(e) for e in library.search(bd, query)]})
+    if action == "list":
+        return _dump({"designs": [library.brief(e) for e in library.entries(bd)][:50]})
+    if action == "show":
+        entry = library.show(bd, id)
+        if entry is None:
+            raise ToolError(f"NOT_FOUND: no design '{id}'; use action list")
+        return _dump(entry)
+    if not library.delete(bd, id):
+        raise ToolError(f"NOT_FOUND: no design '{id}'; use action list")
+    return _dump({"deleted": id})
+
+
+PART_CODE = """
+import json as _json
+_d = doc if doc is not None else App.newDocument("Parts")
+for _n in _json.loads({replace!r}):
+    if _d.getObject(_n) is None:
+        raise ValueError("replace: no object " + _n)
+    _d.removeObject(_n)
+_at = Vector(*_json.loads({at!r}))
+_made = []
+for _p in _json.loads({parts!r}):
+    _s = Part.Shape()
+    _s.read(_p["path"])
+    _s.translate(_at)
+    _o = _d.addObject("Part::Feature", _p["name"])
+    _o.Shape = _s
+    _o.addProperty("App::PropertyString", "Family", "Standard part", "make_part family")
+    _o.addProperty("App::PropertyString", "Parameters", "Standard part", "make_part parameters (JSON)")
+    _o.Family = {family!r}
+    _o.Parameters = {params!r}
+    _made.append(_o.Name)
+_result = _made
+"""
+HEADLESS_PART = """\
+import importlib.util as _u, json as _j, sys as _s
+_spec = _u.spec_from_file_location("fcb_builders", {path!r})
+_b = _u.module_from_spec(_spec)
+_s.modules["fcb_builders"] = _b
+_spec.loader.exec_module(_b)
+_result = _b.export({family!r}, _j.loads({params!r}), _j.loads({iso!r}), _j.loads({strain!r}), WORKDIR)
+"""
+
+
+@mcp.tool(annotations=WRITE, structured_output=False)
+async def make_part(family: str = "list", params: dict[str, Any] | None = None, at: list[float] | None = None,
+                    replace: list[str] | None = None, doc: str | None = None, instance: int | None = None) -> str:
+    """Standard parts, right the first time: gear, gear_pair, spring, bolt, nut, bolt_nut, hinge,
+    enclosure, snap_box, bracket, knob. family="list" shows every family and its parameters with
+    defaults. Use it instead of building these by hand; then change or add to the result. Each part
+    is a solid in one undo step, in its mounted position; at=[x, y, z] moves the group. The shape does
+    not follow parameters by itself: to change sizes call it again with replace=["ObjectName"]; the
+    object's Family and Parameters properties say how it was made."""
+    from .parts import builders_path, catalog
+
+    if family == "list":
+        return _dump({"families": catalog.describe()})
+    try:
+        full = catalog.resolve(family, params)
+    except ValueError as e:
+        raise ToolError(f"INVALID_ARGS: {e}") from e
+    text = json.dumps(full)
+    script = HEADLESS_PART.format(path=str(builders_path()), family=family, params=text,
+                                  iso=json.dumps(catalog.ISO_METRIC), strain=json.dumps(catalog.STRAIN))
+    try:
+        out = await headless.run_headless(script, 300.0)
+    except RuntimeError as e:
+        raise ToolError(str(e)) from e
+    if not out["ok"]:
+        raise ToolError(f"BUILD_FAILED: {family} {text}: " + (out.get("killed") or out["output"][-800:]))
+    made = out["result"]
+    code = PART_CODE.format(replace=json.dumps(replace or []), at=json.dumps(list(at or [0, 0, 0])),
+                            parts=json.dumps(made), family=family, params=text)
+    remember_code(f"# make_part({family!r}, {text}, at={at})")
+    res = await _raw("run_python", {"code": code, "doc": doc, "transaction": f"Part {family}"}, timeout_s=120,
+                     instance=instance)
+    names = res["result"] if isinstance(res, dict) else []
+    parts = [{"object": n, **{k: m[k] for k in ("valid", "solids", "size_mm", "volume_mm3")}}
+             for n, m in zip(names, made, strict=True)]
+    return _dump({"family": family, "parameters": full, "parts": parts,
+                  "next": "check the parts that meet with check_fit, then add what the request needs"})
 
 
 SCULPT_CODE = """
@@ -658,6 +764,7 @@ async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | 
         res = await anyio.to_thread.run_sync(lambda: sculpt_mod.sculpt_scene(scene, out_dir, voxel_mm, smooth))
     except ValueError as e:
         raise ToolError(f"INVALID_ARGS: {e}") from e
+    remember_code(f"# sculpt {safe}\n{json.dumps(scene)}")
     code = SCULPT_CODE.format(parts=json.dumps(res["parts"]), name=safe)
     out = await _raw("run_python", {"code": code, "doc": doc, "transaction": f"Sculpt {safe}"}, timeout_s=300,
                      instance=instance)
