@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.18.0 (unreleased)
+
+- `make_part` springs: end coils ground over about 3/4 of a turn, pitch opens gradually over one turn. Gears: filleted tooth roots, no waist at 18 to 30 teeth.
+- Measuring: a bore split into quarter faces counts as a hole; the volume is checked on triangles where the kernel is far off on long B-spline faces (a spring read 62 instead of 930 mm³).
+- Skill: leave only what was asked for visible; a holder gets one seat for each item.
+- Benchmark: the dog spec allows its sculpted parts (figure, eyes, nose, base).
+
 ## 1.17.0 – standard parts and your own library (unreleased)
 
 - `make_part(family, params, at, replace)`: tested builders for gear, gear pair, spring, bolt, nut, bolt and nut, hinge, enclosure, snap box, bracket and knob. `family="list"` shows them with their parameters. Sizes that cannot work are refused with the reason. Each object stores how it was made; call again with `replace` to change sizes (no parametric expressions in the shapes).
