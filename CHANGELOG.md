@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.15.0 – check tools: numbers, not guesses (unreleased)
+
+- `check_design(spec)`: the model against a numeric spec (sizes in any orientation, volume, holes, holes lined up between parts, gaps, interference, thread pitch, teeth, fillets, parameters, expressions, joints); every failed check says what it found.
+- `check_print`: closed, wall thickness, overhangs in all six orientations with the best one to print in, bridges measured between the walls that hold them, bed contact and tipping, for FDM, resin or CNC. Works on solids and sculpted meshes; findings say where and how to fix them. Overlapping parts count as one print.
+- `check_fit(a, b, kind)`: smallest gap and shared volume of two solids against press, sliding and loose fits per process, or your own range.
+- `flex_test`: changes each parameter (±20 % by default), rebuilds, and reports what breaks or does not follow.
+- `inspect_views`: isometric, front, right and top in one image with axes, scale bars and the overall size; `section` adds a filled cross-section. The camera is put back.
+- All of them work on a saved copy (the section too) in a separate `freecadcmd`: the document stays as it is, no undo step, and a crash cannot reach FreeCAD. The skill and the panel ask Claude to write a spec first and to clear every problem before finishing.
+- Benchmark: three open briefs without dimensions (`battery_box`, `cable_clip`, `knob`) that also have to pass the print check; `--no-checks` blocks the tools for a before measurement. Spec and measuring moved to `freecad_bridge/checks`.
+
 ## 1.14.0 – people and animals that look real (unreleased)
 
 - `sculpt` templates: `person_standing` (7.5 heads tall, T-shirt, jeans, sneakers, hair, round base), `dog_standing` (Labrador-type, short fur, oval base) and `cat_sitting` (fur flowing down and back). `{"template": ..., "height": mm, "parts": [...]}` scales one to the height; parts with a template part's name change it and add primitives, others are added.

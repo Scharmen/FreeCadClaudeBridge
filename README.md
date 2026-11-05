@@ -6,7 +6,7 @@ Control FreeCAD by chat with Claude, either in a **"Claude" chat panel inside Fr
 
 *A Maserati Ghibli (1995) built from the user's photo for printing; here Claude checks the print mesh and repairs it until it is watertight. Real screenshot of FreeCAD 1.1 on macOS.*
 
-> Status: 1.14.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
+> Status: 1.15.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
@@ -76,9 +76,10 @@ Check everything with `/freecad:status`.
 
 ## Tools
 
-27 tools; in Claude Code they are named `mcp__plugin_freecad_freecad__<tool>`.
+32 tools; in Claude Code they are named `mcp__plugin_freecad_freecad__<tool>`.
 
 - **Read:** `status`, `instances`, `get_preferences`, `get_tree`, `get_object`, `inspect_shape` (faces/edges with geometry), `inspect_sketch` (constraints, degrees of freedom, conflicts), `get_changes` (what you did in the GUI meanwhile), `get_console` (Report view), `api_help` (API of the installed FreeCAD), `list_commands`.
+- **Check** (on a saved copy, the document stays as it is): `check_design` (the model against a numeric spec), `check_print` (walls, overhangs, best orientation, bridges, tipping), `check_fit` (gap between two parts against the fit), `flex_test` (does it survive changed parameters), `inspect_views` (four labelled views with scale bars, cross-sections).
 - **Act:** `run_python` (one undo step per call, rolled back on errors), `run_command`, `task_dialog`, `selection`, `document`, `export`, `import`, `view` (optional screenshot), `run_headless` (heavy work in a separate `freecadcmd` process so FreeCAD stays responsive; stopped before it exhausts memory, with a budget derived from the machine's RAM), `snapshot`, `select_instance`, `image_to_3d` (picture → outline extrusion/revolve, relief mesh or reference plane, all local), `sculpt` (organic forms such as figures, faces, hair, animals, rocks from smoothly blended primitives, like clay, imported as watertight matte meshes), `compare_to_picture` (the user's picture next to the model from the matching view, to find what is missing), `design_notes` (why the model looks the way it does: each decision with its reason and source, saved in the document), `record_feedback`.
 
 Allow all of them with `mcp__plugin_freecad_freecad__*` in `permissions.allow` (note that `run_python` runs arbitrary code in FreeCAD). The bundled skill carries tested FreeCAD 1.1 patterns for Part, PartDesign, Sketcher, Assembly, TechDraw, VarSet/Spreadsheet and export, plus guides for model quality (workflow, robust sketches, a realistic look, printability) and organic shapes.

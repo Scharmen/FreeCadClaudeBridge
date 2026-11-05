@@ -8,7 +8,7 @@ Tested by `tests/gui/test_references.py`. Read this before a model the user will
 2. **Get a reference.** If the user has a picture, look at it (`image_to_3d` mode `show`) and place it as an image plane (mode `reference`) to model against. Otherwise describe the proportions you are going for in one line before building.
 3. **Block out first.** Build the big masses with few, simple shapes and check the proportions from the front, the side and the top (`view` with a screenshot) before adding any detail. Wrong proportions cannot be fixed with detail.
 4. **Refine, then detail; detail is what makes it real.** List every feature first (see "Details make the model" in the skill) and work down the list. Secondary forms (muscles, folds, chamfers), then tertiary detail (texture, small features). Keep the detail size proportional: on a 5 cm figure 0.2–0.5 mm surface detail reads well; a printed detail below the nozzle width (0.4 mm FDM) disappears.
-5. **Check after every step,** and against the user's picture when there is one (`compare_to_picture`, see the skill). `changes` and `errors` in each result; `get_object` for real sizes; one undo step per call, so bundle a stage into one call.
+5. **Check after every step,** and against the user's picture when there is one (`compare_to_picture`, see the skill). `changes` and `errors` in each result; `check_design`, `check_fit` and `check_print` for sizes, gaps and printability; `inspect_views` to look; one undo step per call, so bundle a stage into one call.
 6. **Show, explain and ask.** A screenshot from a good angle, why it looks like this (main decisions with reasons and sources, assumptions marked; also recorded with `design_notes`), then ask whether it matches (the panel asks with 👍/👎).
 
 ## Robust parametric models
@@ -17,7 +17,7 @@ Tested by `tests/gui/test_references.py`. Read this before a model the user will
 - **Independent features:** let each sketch hang on a datum, not on the previous pad, so one can change without breaking the next. Avoid links to external geometry where a datum works.
 - **Key dimensions in one place:** a VarSet or Spreadsheet with expressions (see `varset-spreadsheet.md`), so "make it 10 % bigger" is one change.
 - **Names:** meaningful `Label`s (Base, Handle, Hole_M6) so the user and later calls find things.
-- **Check validity:** `shape.isValid()` and `errors` after booleans and fillets; a fillet that fails usually needs a smaller radius or a different edge order.
+- **Check validity:** `shape.isValid()` and `errors` after booleans and fillets; a fillet that fails usually needs a smaller radius or a different edge order. `flex_test` shows whether the model survives changed parameters.
 
 ## A realistic look in the 3D view
 
@@ -48,4 +48,4 @@ Use gloss only for metal, glass, glazed or wet surfaces; skin, hair, cloth, wood
 
 - Wall thickness at least 1.2 mm (FDM) or 0.8 mm (resin); pins and thin limbs at least 2 mm thick at the target scale.
 - A flat base or plinth for figures; overhangs beyond 45° need supports, so lean shapes against the body.
-- One closed solid or watertight mesh per part; check `isSolid()` on meshes and `isValid()` on shapes before `export`.
+- One closed solid or watertight mesh per part. Run `check_print` before `export`.
