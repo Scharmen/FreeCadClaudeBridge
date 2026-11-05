@@ -176,3 +176,20 @@ def test_overlapping_parts_are_one_print_with_walls_checked_per_part():
     assert not rep["ok"] and "Plate:" in problems(rep["prints"][0]) and "wall" in problems(rep["prints"][0])
     apart = pr.analyze_objects([("A", *box((0, 0, 0), (20, 20, 20))), ("B", *box((40, 0, 0), (60, 20, 20)))])
     assert apart["ok"] and len(apart["prints"]) == 2
+
+
+def test_a_seated_lid_may_touch_at_the_seat_but_needs_room_at_the_sides():
+    good = pr.fit_verdict(0.0, 0, "seated", "fdm", side_gap=0.2)
+    assert good["ok"] and good["side_gap_mm"] == 0.2
+    tight = pr.fit_verdict(0.0, 0, "snap", "fdm", side_gap=0.0)
+    assert not tight["ok"] and "side" in tight["problem"]["cause"]
+    unknown = pr.fit_verdict(0.0, 0, "seated", "fdm")
+    assert not unknown["ok"] and "seat" in unknown["problem"]["cause"]
+    assert pr.fit_verdict(0.25, 0, "seated", "fdm")["ok"], "not touching at all: the gap itself counts"
+    assert not pr.fit_verdict(0.0, 3.0, "seated", "fdm", side_gap=0.2)["ok"], "overlap is never seating"
+
+
+def test_a_press_fit_does_not_excuse_parts_that_run_into_each_other():
+    assert pr.fit_verdict(0.0, 30.0, "press", "fdm", overlap_depth=0.08)["ok"]
+    deep = pr.fit_verdict(0.0, 20.8, "press", "fdm", overlap_depth=1.5)
+    assert not deep["ok"] and "1.5" in deep["problem"]["cause"]

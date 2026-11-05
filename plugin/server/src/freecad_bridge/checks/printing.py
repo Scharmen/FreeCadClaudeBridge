@@ -25,6 +25,8 @@ FITS = {   # gap between the parts in mm: press fits may touch, the others need 
 BED_MM = 0.2            # faces this close to the lowest point lie on the bed
 THIN_SHARE = 0.01       # thin area below this share of the surface is a tip or a crest, not a wall
 MIN_BASE_MM2 = 10.0
+PRESS_MAX_MM = 0.2      # deeper than this, an overlap is a collision and no press fit
+TOUCH_MM = 1e-3
 UPS = {"+Z": (0, 0, 1), "-Z": (0, 0, -1), "+X": (1, 0, 0), "-X": (-1, 0, 0), "+Y": (0, 1, 0), "-Y": (0, -1, 0)}
 
 
@@ -273,24 +275,51 @@ def analyze(v: np.ndarray, t: np.ndarray, process: str = "fdm", min_wall: float 
     return {"ok": not problems, "problems": problems, "warnings": warnings, "values": values}
 
 
-def fit_verdict(gap: float, overlap: float, kind: str, process: str = "fdm",
-                gap_range: list[float] | None = None) -> dict[str, Any]:
-    """Does the gap between two parts suit the fit? `overlap` is the shared volume in mm³."""
+def fit_verdict(gap: float, overlap: float, kind: str, process: str = "fdm", gap_range: list[float] | None = None,
+                side_gap: float | None = None, overlap_depth: float = 0.0) -> dict[str, Any]:
+    """Does the gap between two parts suit the fit? `overlap` is the shared volume in mm³.
+
+    A seated part (a lid on a rim, a snap lid, a bearing against its shoulder) touches at its seat, which
+    is right; what counts then is `side_gap`, the room around it. A press fit may overlap, but only
+    by the interference (`overlap_depth`), not by running into the other part.
+    """
+    seated = kind in ("seated", "snap")
     if gap_range is not None:
         lo, hi = float(gap_range[0]), float(gap_range[1])
     else:
         table = FITS.get(process)
         if table is None:
             raise ValueError(f"unknown process '{process}' (use {', '.join(FITS)})")
-        if kind not in table:
-            raise ValueError(f"unknown fit '{kind}' (use {', '.join(table)}, or give gap_range)")
-        lo, hi = table[kind]
+        name = "sliding" if seated else kind
+        if name not in table:
+            raise ValueError(f"unknown fit '{kind}' (use {', '.join(table)}, seated, snap, or give gap_range)")
+        lo, hi = table[name]
     wanted = f"{lo:g}–{hi:g} mm"
     out: dict[str, Any] = {"gap_mm": r2(gap), "overlap_mm3": r2(overlap), "wanted_gap_mm": [lo, hi], "ok": True}
-    if overlap > 0.5 and kind != "press":
+    if side_gap is not None:
+        out["side_gap_mm"] = r2(side_gap)
+    if kind == "press":
+        if overlap_depth > PRESS_MAX_MM:
+            out["ok"] = False
+            out["problem"] = {"cause": f"the parts overlap {overlap_depth:.1f} mm deep: more than a press fit's "
+                              f"{PRESS_MAX_MM:g} mm of interference", "fix": "the parts run into each other: move them"}
+        elif overlap <= 0.5 and not lo <= gap <= hi:
+            out["ok"] = False
+            out["problem"] = {"cause": f"the gap is {gap:.2f} mm, a press fit in {process} needs {wanted}",
+                              "fix": f"change the mating sizes so that the gap is {wanted}"}
+    elif overlap > 0.5:
         out["ok"] = False
         out["problem"] = {"cause": f"the parts overlap by {overlap:.1f} mm³",
                           "fix": f"move or shrink them to a gap of {wanted}"}
+    elif seated and gap <= TOUCH_MM:
+        if side_gap is None:
+            out["ok"] = False
+            out["problem"] = {"cause": "they touch, but not only at one flat seat",
+                              "fix": f"let them touch only on faces of one direction, with {wanted} around them"}
+        elif not lo <= side_gap <= hi:
+            out["ok"] = False
+            out["problem"] = {"cause": f"the side gap around the seat is {side_gap:.2f} mm, a {kind} part in {process} "
+                              f"needs {wanted}", "fix": f"change the mating sizes so that the side gap is {wanted}"}
     elif not lo <= gap <= hi:
         out["ok"] = False
         out["problem"] = {"cause": f"the gap is {gap:.2f} mm, a {kind} fit in {process} needs {wanted}",

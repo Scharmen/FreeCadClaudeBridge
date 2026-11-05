@@ -97,7 +97,7 @@
     "failed": []
    },
    "snap_box": {
-    "score": 77.8,
+    "score": 88.9,
     "visual": 20.0,
     "seconds": 97,
     "tools": 9,
@@ -105,8 +105,7 @@
     "cost_usd": 0.01877734,
     "output_tokens": 19334,
     "failed": [
-     "box: size: 28.4 × 40 × 60 mm, wanted 24 × 40 × 60 ± 3",
-     "gap box–lid 0.1–0.5 mm: 0 mm"
+     "box: size: 28.4 × 40 × 60 mm, wanted 24 × 40 × 60 ± 3"
     ]
    },
    "spring": {
@@ -130,7 +129,7 @@
     "failed": []
    }
   },
-  "mean_score": 96.2,
+  "mean_score": 97.1,
   "mean_visual": 76.4,
   "cost_usd": 0.39,
   "run": "20261103-090948"
@@ -240,7 +239,7 @@
     "cost_usd": 0.23377440000000002,
     "output_tokens": 9115,
     "failed": [
-     "gap box–lid 0.1–0.5 mm: 0 mm"
+     "gap box–lid 0.1–0.5 mm: 0 mm at the sides"
     ]
    },
    "spring": {
@@ -373,7 +372,7 @@
     "cost_usd": 1.2043306,
     "output_tokens": 31148,
     "failed": [
-     "gap box–lid 0.1–0.5 mm: 0 mm"
+     "gap box–lid 0.1–0.5 mm: 0 mm at the sides"
     ]
    },
    "spring": {

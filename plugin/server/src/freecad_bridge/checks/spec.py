@@ -175,9 +175,15 @@ def evaluate(spec: dict[str, Any], measured: dict[str, Any]) -> dict[str, Any]:
         pa, pb = matched.get(cl["a"]), matched.get(cl["b"])
         lo, hi = cl["range"]
         name = f"gap {cl['a']}–{cl['b']} {rng(lo, hi)} mm"
-        got = next((g["d"] for g in measured.get("gaps", []) if pa and pb
-                    and {g["a"], g["b"]} == {pa["label"], pb["label"]}), None)
-        c.add(name, got is not None and lo <= got <= hi, f"{n(got)} mm" if got is not None else "part missing")
+        pair = next((g for g in measured.get("gaps", []) if pa and pb
+                     and {g["a"], g["b"]} == {pa["label"], pb["label"]}), None)
+        got = pair["d"] if pair else None
+        side = ""
+        if pair and cl.get("seated") and got < 1e-3:      # touching at the seat is right: the sides count
+            got = pair.get("side_gap")
+            side = "at the sides" if got is not None else "they touch, and not only at one flat seat"
+        ok = got is not None and lo <= got <= hi
+        c.add(name, ok, f"{n(got)} mm {side}".strip() if got is not None else side or "part missing")
     if "params" in spec:
         have = {k.lower() for k in measured.get("params", {})}
         missing = [k for k in spec["params"] if k.lower() not in have]

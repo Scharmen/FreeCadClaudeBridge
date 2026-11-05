@@ -41,7 +41,7 @@ Size, position and fit errors do not show in a screenshot, and they are the most
 - [ ] Every problem fixed, then checked again
 ```
 
-- **Choose sizes that fit.** Parts that move or come apart need a gap: FDM press 0–0.1 mm, sliding 0.15–0.35, loose 0.3–0.7. A gap of 0 means they touch: they print as one or do not go together, even a snap lid.
+- **Choose sizes that fit.** Parts that move or come apart need a gap: FDM press 0–0.1 mm, sliding 0.15–0.35, loose 0.3–0.7. A lid or bearing may rest on its seat; use `check_fit(kind="seated")` for those, and the room around it still needs a sliding gap.
 - **Walls:** at least 1.2 mm for FDM and 0.8 mm for resin, also on clips, ribs and thin spots of a curved part.
 - **Numbers beat pictures** for size and position; pictures show what numbers cannot (is the form right, is anything missing).
 - `check_print`'s `problems` must be fixed; `warnings` (supports, long bridges) are for you to weigh and mention.

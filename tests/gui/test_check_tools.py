@@ -116,3 +116,20 @@ def test_inspect_views_gives_a_sheet_and_puts_the_camera_back():
     pose = [[float(x) for x in ln.split()[1:]] for text in (cam, now) for ln in text.splitlines()
             if "orientation" in ln]
     assert pose[0] == pytest.approx(pose[1], abs=1e-4)
+
+
+def test_check_fit_knows_a_seated_lid():
+    call("run_python", doc=DOC, code=f"""
+import Part
+d = App.getDocument("{DOC}")
+box = d.addObject("Part::Feature", "Box")
+box.Shape = Part.makeBox(40, 30, 20, Vector(0, 200, 0)).cut(Part.makeBox(36, 26, 20, Vector(2, 202, 2)))
+good = d.addObject("Part::Feature", "GoodLid")     # rests on the rim, its plug has 0.2 mm all round
+good.Shape = Part.makeBox(40, 30, 3, Vector(0, 200, 20)).fuse(Part.makeBox(35.6, 25.6, 4, Vector(2.2, 202.2, 16)))
+tight = d.addObject("Part::Feature", "TightLid")   # the plug touches the walls
+tight.Shape = Part.makeBox(40, 30, 3, Vector(0, 200, 20)).fuse(Part.makeBox(36, 26, 4, Vector(2, 202, 16)))
+""")
+    ok = tool(mcp_server.check_fit, a="Box", b="GoodLid", kind="seated")
+    assert ok["ok"] and ok["gap_mm"] == 0 and ok["side_gap_mm"] == pytest.approx(0.2, abs=0.01)
+    snug = tool(mcp_server.check_fit, a="Box", b="TightLid", kind="snap")
+    assert not snug["ok"] and snug["side_gap_mm"] == 0

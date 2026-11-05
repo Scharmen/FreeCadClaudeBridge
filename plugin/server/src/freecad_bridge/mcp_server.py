@@ -720,7 +720,8 @@ async def check_print(objects: list[str] | None = None, process: Literal["fdm", 
                       instance: int | None = None) -> str:
     """Can it be printed? Checks each visible result (or the named objects, solids and meshes alike):
     closed, wall thickness, overhangs and supports per orientation with the best one to print in,
-    bridges, base area on the bed and whether it tips over. Objects that overlap count as one print.
+    bridges, base area on the bed and whether it tips over. Objects that overlap count as one print;
+    name one object to check it alone (a closed lid and box printed apart).
     `problems` must be fixed, `warnings` depend on the printer; each says where (mm) and how to fix
     it. Use it before you show a model meant for printing. Works on a saved copy."""
     from .checks import printing, runner
@@ -734,14 +735,16 @@ async def check_print(objects: list[str] | None = None, process: Literal["fdm", 
 
 
 @mcp.tool(annotations=READ, structured_output=False)
-async def check_fit(a: str, b: str, kind: Literal["press", "sliding", "loose", "custom"] = "sliding",
+async def check_fit(a: str, b: str, kind: Literal["press", "sliding", "loose", "seated", "snap", "custom"] = "sliding",
                     gap_mm: list[float] | None = None, process: Literal["fdm", "resin", "cnc"] = "fdm",
                     doc: str | None = None, instance: int | None = None) -> str:
     """Do two parts fit? Measures their smallest gap and shared volume and compares them with the fit
     for the process: FDM press 0–0.1 mm, sliding 0.15–0.35, loose 0.3–0.7; resin 0–0.05, 0.05–0.2,
     0.2–0.4; CNC 0–0.01, 0.01–0.06, 0.06–0.3. gap_mm=[lo, hi] sets your own range (kind custom). Parts
-    that should move or come apart need a gap; touching parts print as one. Call it for every
-    pair that meets (lid and box, pin and hole, gears, nut and bolt) in their mounted position.
+    that should move or come apart need a gap. kind seated or snap: a part that rests on a seat (lid
+    on a rim, snap lid, bearing on its shoulder) may touch on flat faces of one direction; the room
+    around it must then be a sliding gap. Press allows only up to 0.2 mm of overlap depth. Call it for
+    every pair that meets (lid and box, pin and hole, gears, nut and bolt) in their mounted position.
     a, b: object name or label of solids. Works on a saved copy."""
     from .checks import printing
 
@@ -749,7 +752,8 @@ async def check_fit(a: str, b: str, kind: Literal["press", "sliding", "loose", "
         raise ToolError("INVALID_ARGS: kind custom needs gap_mm=[lo, hi]")
 
     def after(res: dict[str, Any], _tmp: str) -> dict[str, Any]:
-        verdict = printing.fit_verdict(res["gap"], res["overlap"], kind, process, gap_mm)
+        verdict = printing.fit_verdict(res["gap"], res["overlap"], kind, process, gap_mm,
+                                       (res.get("seat") or {}).get("side_gap"), res.get("depth", 0.0))
         return {"a": res["a"], "b": res["b"], "kind": kind, "process": process, "closest_at": res["where"], **verdict}
 
     return _dump(await _on_copy(lambda path, _tmp: f"_result = measure.fit({path!r}, {a!r}, {b!r})", doc, instance,

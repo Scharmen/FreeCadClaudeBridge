@@ -80,7 +80,7 @@ TASKS: list[dict[str, Any]] = [
         "spec": {
             "parts": [{"name": "box", "bbox": [60, 40, 24], "tol": 3}, {"name": "lid"}],
             "solids": [2, 2], "no_interference": True, "total": {"bbox": [60, 40, 30], "tol": 1.0},
-            "clearance": [{"a": "box", "b": "lid", "range": [0.1, 0.5]}],
+            "clearance": [{"a": "box", "b": "lid", "range": [0.1, 0.5], "seated": True}],
         },
         "look": ["box", "lid in the closed position", "two snap clips", "ledges the clips catch on",
                  "visible gap between lid and box"],
@@ -220,7 +220,7 @@ TASKS: list[dict[str, Any]] = [
         "prompt": "Design a 3D-printable holder for four AA batteries side by side with a snap-on lid, for FDM "
                   "printing. Show the lid closed.",
         "spec": {"parts": [{"name": "box"}, {"name": "lid"}], "solids": [2, 2], "no_interference": True,
-                 "clearance": [{"a": "box", "b": "lid", "range": [0.1, 0.5]}],
+                 "clearance": [{"a": "box", "b": "lid", "range": [0.1, 0.5], "seated": True}],
                  "total": {"bbox": [66, 58, 22], "tol": 12}},
         "printable": "fdm",
         "look": ["four battery compartments", "walls between or around the batteries", "lid", "snap features",

@@ -337,6 +337,7 @@ def measure(path: str, spec: dict[str, Any], reference: Any = None) -> dict[str,
     try:
         objs = [o for o in doc.Objects if _is_result(o)]
         want_teeth = any("teeth" in p for p in spec.get("parts", []))
+        want_seat = any(c.get("seated") for c in spec.get("clearance", []))
         parts, shapes, seen = [], [], set()
         for o in objs:
             if o.TypeId.startswith("Mesh::"):
@@ -362,7 +363,12 @@ def measure(path: str, spec: dict[str, Any], reference: Any = None) -> dict[str,
             for j in range(i + 1, len(shapes)):
                 (oa, sa), (ob, sb) = shapes[i], shapes[j]
                 try:
-                    gaps.append({"a": oa.Label, "b": ob.Label, "d": r4(sa.distToShape(sb)[0])})
+                    gap = {"a": oa.Label, "b": ob.Label, "d": r4(sa.distToShape(sb)[0])}
+                    if want_seat and gap["d"] < 1e-3:
+                        contact = seat(sa, sb)
+                        if contact and contact["side_gap"] is not None:
+                            gap["side_gap"] = contact["side_gap"]
+                    gaps.append(gap)
                 except Exception:  # noqa: BLE001
                     pass
                 if not sa.BoundBox.intersect(sb.BoundBox):
@@ -457,6 +463,59 @@ def export_meshes(path: str, names: list[str] | None, out_dir: str) -> list[dict
         App.closeDocument(doc.Name)
 
 
+def seat(sa: Any, sb: Any, touch: float = 1e-3, reach: float = 2.0, max_pairs: int = 20000) -> dict[str, Any] | None:
+    """Two touching solids: do they touch only on flat faces of one direction (a seat), and how much room is
+    left on the faces around it? None when they touch in other ways, or are too complex to tell."""
+    pairs = []
+    for fa in sa.Faces:
+        box = fa.BoundBox
+        box.enlarge(reach)
+        for fb in sb.Faces:
+            if box.intersect(fb.BoundBox):
+                pairs.append((fa, fb))
+                if len(pairs) > max_pairs:
+                    return None
+
+    def normal(f: Any) -> Any:
+        return V(f.Surface.Axis) if type(f.Surface).__name__ == "Plane" else None
+
+    def along(f: Any, axis: Any) -> bool:
+        n = normal(f)
+        return n is not None and abs(n.dot(axis)) > 0.999
+
+    near = [(fa, fb, fa.distToShape(fb)[0]) for fa, fb in pairs]
+    contacts: list[tuple[Any, float]] = []     # direction and area of each real contact on flat faces
+    for fa, fb, d in near:
+        na, nb = normal(fa), normal(fb)
+        if d < touch and na is not None and nb is not None and abs(na.dot(nb)) > 0.999:
+            area = fa.common(fb).Area
+            if area > 1e-6:                     # a shared edge is no contact: flush sides meet at one
+                contacts.append((na, area))
+    if not contacts:
+        return None
+    totals: list[list[Any]] = []
+    for n, area in contacts:
+        for t in totals:
+            if abs(t[0].dot(n)) > 0.999:
+                t[1] += area
+                break
+        else:
+            totals.append([n, area])
+    axis = max(totals, key=lambda t: t[1])[0]   # the seat is the largest contact direction
+
+    def side_distance(fa: Any, fb: Any, d: float) -> float | None:
+        if along(fa, axis) or along(fb, axis):
+            return None
+        na, nb = normal(fa), normal(fb)
+        if d < touch and na is not None and nb is not None:
+            parallel = abs(na.dot(nb)) > 0.999
+            return 0.0 if parallel and fa.common(fb).Area > 1e-6 else None   # else they only meet at an edge
+        return d
+
+    sides = [x for x in (side_distance(fa, fb, d) for fa, fb, d in near) if x is not None]
+    return {"axis": [r4(axis.x), r4(axis.y), r4(axis.z)], "side_gap": r4(min(sides)) if sides else None}
+
+
 def fit(path: str, a: str, b: str) -> dict[str, Any]:
     """Smallest gap and shared volume of two solids, and where they come closest."""
     doc = App.openDocument(path)
@@ -467,12 +526,17 @@ def fit(path: str, a: str, b: str) -> dict[str, Any]:
                 raise ValueError(f"'{o.Label}' is not a solid; check_fit works on solids")
         sa, sb = _global_shape(oa), _global_shape(ob)
         d, pairs, _ = sa.distToShape(sb)
-        overlap = 0.0
+        overlap, depth = 0.0, 0.0
         if sa.BoundBox.intersect(sb.BoundBox):
-            overlap = sa.common(sb).Volume
+            shared = sa.common(sb)
+            overlap = shared.Volume
+            if overlap > 0:
+                bb = shared.BoundBox
+                depth = min(bb.XLength, bb.YLength, bb.ZLength)
         p = pairs[0][0] if pairs else sa.BoundBox.Center
-        return {"a": oa.Label, "b": ob.Label, "gap": float(d), "overlap": float(overlap),
-                "where": [r4(p.x), r4(p.y), r4(p.z)]}
+        contact = seat(sa, sb) if d < 1e-3 and overlap <= 0.5 else None
+        return {"a": oa.Label, "b": ob.Label, "gap": float(d), "overlap": float(overlap), "depth": float(depth),
+                "seat": contact, "where": [r4(p.x), r4(p.y), r4(p.z)]}
     finally:
         App.closeDocument(doc.Name)
 

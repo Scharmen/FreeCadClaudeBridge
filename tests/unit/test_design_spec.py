@@ -200,3 +200,15 @@ def test_an_open_bore_counts_only_where_the_spec_allows_it():
     assert not by_name(spec.evaluate(closed, measured(ring)))["b: holes 22–23 mm"]["ok"]
     assert by_name(spec.evaluate(clip, measured(ring)))["b: holes 22–23 mm"]["ok"]
 
+
+
+def test_a_seated_clearance_counts_the_sides_when_the_parts_touch():
+    s = {"parts": [{"name": "box", "bbox": [60, 40, 24]}, {"name": "lid", "bbox": [60, 40, 6]}],
+         "clearance": [{"a": "box", "b": "lid", "range": [0.1, 0.5], "seated": True}]}
+    parts = part("Box", (60, 40, 24)), part("Lid", (60, 40, 6))
+    good = measured(*parts, gaps=[{"a": "Box", "b": "Lid", "d": 0.0, "side_gap": 0.2}])
+    assert by_name(spec.evaluate(s, good))["gap box–lid 0.1–0.5 mm"]["ok"]
+    bad = measured(*parts, gaps=[{"a": "Box", "b": "Lid", "d": 0.0, "side_gap": 0.0}])
+    assert not by_name(spec.evaluate(s, bad))["gap box–lid 0.1–0.5 mm"]["ok"]
+    no_seat = measured(*parts, gaps=[{"a": "Box", "b": "Lid", "d": 0.0}])
+    assert not by_name(spec.evaluate(s, no_seat))["gap box–lid 0.1–0.5 mm"]["ok"]
