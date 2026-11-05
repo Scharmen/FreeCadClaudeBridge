@@ -16,6 +16,16 @@ PART_KEYS = {"name", "bbox", "tol", "oriented", "volume", "holes", "teeth", "rad
 WEIGHTS = {"iou": 3.0}
 
 
+def normalize(spec: dict[str, Any]) -> dict[str, Any]:
+    """A single number where a range belongs means that number; a height may be 2 % off."""
+    out = dict(spec)
+    if isinstance(out.get("solids"), int | float):
+        out["solids"] = [out["solids"], out["solids"]]
+    if isinstance(out.get("height"), int | float):
+        out["height"] = [out["height"] * 0.98, out["height"] * 1.02]
+    return out
+
+
 def n(x: float) -> str:
     return f"{round(x, 2):g}"
 

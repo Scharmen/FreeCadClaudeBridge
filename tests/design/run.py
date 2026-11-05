@@ -12,6 +12,7 @@ panel's one-shot mode, without the user's learned preferences. Results go to tes
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -274,7 +275,6 @@ def judge(task: dict[str, Any], shots: list[str], work: Path, model: str = "opus
 def run_task(task: dict[str, Any], model: str, pid: int, out: Path, fc_cmd: list[str],
              with_judge: bool, no_checks: bool = False) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
-    close_all(pid)
     name = "Bench_" + task["id"]
     py(f"App.newDocument({name!r})", pid)
     prompt = f"[FreeCAD] Active document: {name} ({name}). Selection: nothing.\n{task['prompt']}"
@@ -294,7 +294,10 @@ def run_task(task: dict[str, Any], model: str, pid: int, out: Path, fc_cmd: list
         result["score"], result["error"] = 0.0, str(e)[-1500:]
     if with_judge and result.get("shots"):
         result["visual"] = judge(task, result["shots"], out / "work")
-    close_all(pid)
+    try:
+        close_all(pid)
+    except BridgeError as e:   # it crashed or hangs; the caller starts a new one
+        result["freecad_lost"] = str(e)[:300]
     (out / "result.json").write_text(json.dumps(result, indent=1, ensure_ascii=False), encoding="utf-8")
     return result
 
@@ -435,18 +438,25 @@ def main(argv: list[str] | None = None) -> int:
                 for tid in args.tasks.split(","):
                     task = tasks.get(tid)
                     t0 = time.time()
+                    close_all(pid)
                     r = run_task(task, model, pid, run_dir / model / tid, fc_cmd, not args.no_judge, args.no_checks)
                     if r["run"].get("api_error") == "usage_limit_reached":
                         print(f"{model}: plan usage limit reached at {tid}; stopping. Run the rest later with "
                               f"--tasks.", flush=True)
                         break
                     results.append(r)
+                    if r.get("freecad_lost") and args.own_freecad:
+                        print(f"{model} {tid}: FreeCAD lost ({r['freecad_lost'][:80]}); starting a new one", flush=True)
+                        with contextlib.suppress(OSError):
+                            os.kill(pid, signal.SIGKILL)
+                        pid = start_freecad(fc_cmd, args.models.replace(",", "-"))
                     vis = (r.get("visual") or {}).get("score")
                     print(f"{model:7} {tid:16} score {r.get('score'):5}  visual {vis}  {time.time() - t0:5.0f} s  "
                           f"tools {len(r['run'].get('tools', []))}  " + "; ".join(r.get("failed", [])[:3]), flush=True)
         finally:
             if args.own_freecad:
-                os.kill(pid, signal.SIGTERM)
+                with contextlib.suppress(OSError):
+                    os.kill(pid, signal.SIGTERM)
     if not args.own_freecad:      # a worker's parent writes the summary of the whole run
         write_summary(results, run_dir, args.baseline)
     return 0

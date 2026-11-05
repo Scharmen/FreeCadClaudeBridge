@@ -48,6 +48,15 @@ def clean_output(text: str, limit: int = 1500) -> str:
     return "\n".join(lines)[-limit:]
 
 
+class CheckCrash(CheckError):
+    """freecadcmd itself died on the copy, usually inside the geometry kernel."""
+
+
+CRASH_TEXT = ("FreeCAD's geometry kernel crashed while working on a copy (exit code {code}); your document is safe. The "
+              "same operation in the open document would close FreeCAD and lose unsaved work, so do not try it there. "
+              "Usual cause: a fillet or chamfer that does not fit. Make it smaller or leave it out.")
+
+
 async def on_copy(raw: Raw, make_call: Callable[[str, str], str], doc: str | None, instance: int | None,
                   after: Callable[[Any, str], Any] | None = None) -> Any:
     """Save a copy of the document, run `make_call(path, workdir)` code in freecadcmd, return its `_result`."""
@@ -59,6 +68,9 @@ async def on_copy(raw: Raw, make_call: Callable[[str, str], str], doc: str | Non
         await raw("run_python", {"code": SAVE_CODE.format(path=path), "doc": doc, "recompute": False,
                                  "transaction": "Check"}, timeout_s=120, instance=instance)
         out = await headless.run_headless(script(make_call(path, tmp)), TIMEOUT_S)
+        code = out.get("exit_code")
+        if not out["ok"] and not out.get("killed") and not out.get("timed_out") and code not in (0, 1, None):
+            raise CheckCrash(CRASH_TEXT.format(code=code))
         if not out["ok"]:
             reason = out.get("killed") or ("timed out" if out.get("timed_out") else clean_output(out["output"]))
             raise CheckError(f"the check failed in freecadcmd: {reason}")
@@ -91,7 +103,11 @@ def flex_summary(res: dict[str, Any]) -> dict[str, Any]:
     problems = [{"cause": f"parameter '{n}' not found", "fix": "use the name in the VarSet or the Spreadsheet alias"}
                 for n in res["missing"]]
     for r in res["runs"]:
-        if not r["ok"]:
+        if r.get("crash"):
+            problems.append({"cause": f"{r['param']} × {r['factor']:g} crashes FreeCAD's geometry kernel",
+                             "fix": "do not try this value in the open document, it would close FreeCAD; make the "
+                             "fillets or chamfers smaller, or leave them out"})
+        elif not r["ok"]:
             problems.append({"cause": f"{r['param']} × {r['factor']:g} breaks the model: {r.get('error')}",
                              "fix": "drive the failing feature from the parameter too, or attach its sketch to a "
                              "datum plane instead of a face"})
@@ -103,6 +119,24 @@ def flex_summary(res: dict[str, Any]) -> dict[str, Any]:
                          "fix": "put the key dimensions in a VarSet and drive the model with expressions"})
     return {"ok": not problems, "params": res["params"], "problems": problems[:20], "runs": len(res["runs"]),
             "note": "tested on a copy; your document is unchanged"}
+
+
+async def flex_each(raw: Raw, names: list[str] | None, steps: list[float], doc: str | None,
+                    instance: int | None) -> dict[str, Any]:
+    """After a crash: every parameter and factor in its own process, to find the values that crash."""
+    names = names or await on_copy(raw, lambda path, _t: f"_result = measure.param_names({path!r})", doc, instance)
+    merged: dict[str, Any] = {"params": names, "missing": [], "runs": []}
+    for name in names:
+        for step in steps:
+            try:
+                res = await on_copy(raw, lambda path, _t, n=name, f=step: f"_result = measure.flex({path!r}, {[n]!r}, "
+                                    f"{[f]!r})", doc, instance)
+            except CheckCrash:
+                merged["runs"].append({"param": name, "factor": step, "ok": False, "changed": False, "crash": True})
+            else:
+                merged["missing"] += [m for m in res["missing"] if m not in merged["missing"]]
+                merged["runs"] += res["runs"]
+    return merged
 
 
 def spec_json(spec: dict[str, Any]) -> str:

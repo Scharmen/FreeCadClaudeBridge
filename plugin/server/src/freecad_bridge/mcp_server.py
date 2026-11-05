@@ -813,6 +813,13 @@ async def check_design(spec: dict[str, Any] | None = None, doc: str | None = Non
         raise ToolError(f"INVALID_ARGS: unknown spec keys {sorted(unknown | bad_part)}; known: "
                         f"{sorted(spec_mod.KNOWN)}, per part: {sorted(spec_mod.PART_KEYS)}")
 
+    try:
+        spec = spec_mod.normalize(spec)
+        spec_mod.evaluate(spec, {"parts": []})
+    except (TypeError, ValueError, KeyError, AttributeError) as e:
+        raise ToolError(f"INVALID_ARGS: this spec cannot be read ({type(e).__name__}: {e}). Ranges are "
+                        "[lo, hi], see the tool description.") from e
+
     def after(measured: dict[str, Any], _tmp: str) -> dict[str, Any]:
         return runner.design_summary(spec_mod.evaluate(spec, measured), measured)
 
@@ -881,8 +888,13 @@ async def flex_test(params: list[str] | None = None, factors: list[float] | None
     def after(res: dict[str, Any], _tmp: str) -> dict[str, Any]:
         return runner.flex_summary(res)
 
-    return _dump(await _on_copy(lambda path, _tmp: f"import json\n_result = measure.flex({path!r}, "
-                                f"json.loads({wanted!r}), {steps!r})", doc, instance, after))
+    try:
+        return _dump(await runner.on_copy(_raw, lambda path, _tmp: f"import json\n_result = measure.flex({path!r}, "
+                                          f"json.loads({wanted!r}), {steps!r})", doc, instance, after))
+    except runner.CheckCrash:
+        return _dump(runner.flex_summary(await runner.flex_each(_raw, params, steps, doc, instance)))
+    except (runner.CheckError, RuntimeError) as e:
+        raise ToolError(str(e)) from e
 
 
 VIEWS_CODE = """

@@ -141,34 +141,70 @@ def inclined_planes(s: Any) -> int:
     return count
 
 
-def thread_pitch(s: Any, band: list[float], step: float = 0.04) -> dict[str, Any] | None:
-    """Pitch of a thread: walk a line parallel to the axis at the middle of the thread's radial band and
-    note where it runs through material; crests repeat once per pitch (works for internal threads too).
+def pitch_from_crests(lines: list[list[float]], eps: float = 0.02) -> float | None:
+    """The pitch of a helix from where lines at equal angles around the axis run through material.
+
+    Going one line further, a helix moves by pitch / number of lines. A ring, a wall or a base does not
+    move, so it casts no vote, and a thread of only a turn or two still counts, which repeats along one
+    line would not show.
+    """
+    votes = []
+    for here, there in zip(lines, lines[1:] + lines[:1], strict=True):
+        for z in here:
+            if there:
+                dz = min((t - z for t in there), key=abs)
+                if abs(dz) > eps:
+                    votes.append(dz * len(lines))
+    best, most = None, 0
+    for v in votes:
+        near = [w for w in votes if abs(w - v) <= 0.15 * abs(v) + eps]
+        if len(near) > most:
+            best, most = sorted(abs(w) for w in near)[len(near) // 2], len(near)
+    return best if most >= 4 else None
+
+
+def _line_runs(pts: Any, tris: Any, u: float, w: float) -> list[float]:
+    """Middles of the stretches where a line along the first coordinate runs through the mesh."""
+    import numpy as np
+
+    a, b, c = pts[tris[:, 0]], pts[tris[:, 1]], pts[tris[:, 2]]
+    ab, ac = b[:, 1:] - a[:, 1:], c[:, 1:] - a[:, 1:]
+    ap = np.array([u, w]) - a[:, 1:]
+    det = ab[:, 0] * ac[:, 1] - ab[:, 1] * ac[:, 0]
+    good = np.abs(det) > 1e-12
+    p = (ap[good, 0] * ac[good, 1] - ap[good, 1] * ac[good, 0]) / det[good]
+    q = (ab[good, 0] * ap[good, 1] - ab[good, 1] * ap[good, 0]) / det[good]
+    hit = (p >= 0) & (q >= 0) & (p + q <= 1)
+    z = a[good][hit, 0] + p[hit] * (b[good][hit, 0] - a[good][hit, 0]) + q[hit] * (c[good][hit, 0] - a[good][hit, 0])
+    z = np.sort(z)
+    z = z[np.concatenate(([True], np.diff(z) > 1e-6))] if len(z) else z   # a line through a shared edge hits twice
+    return [float((z[i] + z[i + 1]) / 2) for i in range(0, len(z) - 1, 2)]
+
+
+def thread_pitch(s: Any, band: list[float], lines: int = 6) -> dict[str, Any] | None:
+    """Pitch of a thread: lines parallel to the axis at the middle of the thread's radial band, at equal
+    angles around it, and where they run through material (works for internal threads too).
 
     The axis is the box dimension that differs most from the other two (long for a bolt, short for a nut).
-    Point tests are used instead of a section because sections of swept thread faces often fail.
+    Lines are cut with the triangles of the shape because sections of swept thread faces often fail.
     """
+    import numpy as np
+
     bb = tight_box(s)
     dims = [bb.XLength, bb.YLength, bb.ZLength]
     k = max(range(3), key=lambda i: abs(dims[i] - (sum(dims) - dims[i]) / 2))
-    axes = [V(1, 0, 0), V(0, 1, 0), V(0, 0, 1)]
-    axis, across = axes[k], axes[(k + 1) % 3]
-    c = bb.Center
+    verts, faces = s.tessellate(0.01)
+    order = [k, (k + 1) % 3, (k + 2) % 3]
+    pts = np.array([[v.x, v.y, v.z] for v in verts])[:, order]
+    tris = np.array(faces)
+    c = np.array([bb.Center.x, bb.Center.y, bb.Center.z])[order]
     r = (band[0] + band[1]) / 2
-    lo = [bb.XMin, bb.YMin, bb.ZMin][k] - c.dot(axis)
-    count = int(dims[k] / step)
-    inside = [s.isInside(c + across * r + axis * (lo + i * step), 1e-4, True) for i in range(count + 1)]
-    centres, start = [], None
-    for i, v in enumerate(inside):
-        if v and start is None:
-            start = i
-        elif not v and start is not None:
-            centres.append((start + i - 1) / 2 * step)
-            start = None
-    gaps = sorted(b - a for a, b in zip(centres, centres[1:], strict=False))
-    if len(gaps) < 2:
-        return {"crests": len(centres), "pitch": None}
-    return {"crests": len(centres), "pitch": r4(gaps[len(gaps) // 2])}
+    found = []
+    for j in range(lines):
+        angle = 2 * math.pi * j / lines + 0.0137       # off the seams of round faces
+        found.append(_line_runs(pts, tris, c[1] + r * math.cos(angle), c[2] + r * math.sin(angle)))
+    pitch = pitch_from_crests(found)
+    return {"crests": len(found[0]), "pitch": None if pitch is None else r4(pitch)}
 
 
 def _solid_part(o: Any, s: Any, want_teeth: bool) -> dict[str, Any]:
@@ -537,6 +573,14 @@ def fit(path: str, a: str, b: str) -> dict[str, Any]:
         contact = seat(sa, sb) if d < 1e-3 and overlap <= 0.5 else None
         return {"a": oa.Label, "b": ob.Label, "gap": float(d), "overlap": float(overlap), "depth": float(depth),
                 "seat": contact, "where": [r4(p.x), r4(p.y), r4(p.z)]}
+    finally:
+        App.closeDocument(doc.Name)
+
+
+def param_names(path: str) -> list[str]:
+    doc = App.openDocument(path)
+    try:
+        return list(_params(doc))[:20]
     finally:
         App.closeDocument(doc.Name)
 

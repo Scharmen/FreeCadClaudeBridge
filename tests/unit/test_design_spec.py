@@ -229,3 +229,9 @@ def test_a_parallel_run_gives_each_model_its_own_worker_and_skips_limit_stopped_
             json.dumps({"task": task, "model": "opus", "run": {"api_error": error}}), encoding="utf-8")
     assert [r["task"] for r in run.collect(tmp_path)] == ["cat"]
 
+
+
+def test_a_single_number_is_accepted_where_a_range_belongs():
+    s = spec.normalize({"height": 50, "solids": 1})
+    assert s["solids"] == [1, 1] and s["height"] == [49, 51]
+    assert spec.normalize({"height": [1, 2]}) == {"height": [1, 2]}

@@ -58,3 +58,21 @@ def test_thread_pitch_is_measured_on_a_helical_thread_and_inside_a_nut(cmd):
         "_result = [measure.thread_pitch(bolt, [3.0, 4.6]), measure.thread_pitch(nut, [3.0, 4.6])]\n", cmd)
     assert r[0]["pitch"] == pytest.approx(1.25, abs=0.05), r
     assert r[1]["pitch"] == pytest.approx(1.25, abs=0.05), r
+
+
+def test_a_short_thread_on_a_bottle_is_measured_and_rings_are_no_thread(cmd):
+    r = score.run_freecad(
+        "import FreeCAD as App, Part\nfrom freecad_bridge.checks import measure\nV = App.Vector\n"
+        "body = Part.makeCylinder(30, 110).fuse(Part.makeCone(30, 14, 30, V(0, 0, 110)))"
+        ".fuse(Part.makeCylinder(14, 10, V(0, 0, 140)))\n"
+        "bottle = body.cut(Part.makeCylinder(12.4, 200, V(0, 0, -1)).cut(Part.makeCylinder(13, 2, V(0, 0, -1))))\n"
+        "tri = Part.makePolygon([V(13.8, 0, -0.9), V(15.5, 0, -0.3), V(15.5, 0, 0.3), V(13.8, 0, 0.9), V(13.8, 0, -0.9)])\n"
+        "helix = Part.Wire(Part.makeHelix(3, 4.5, 13.8))\nhelix.translate(V(0, 0, 142))\n"
+        "tri.translate(V(0, 0, 142))\n"
+        "threaded = bottle.fuse(helix.makePipeShell([tri], True, True))\n"
+        "rings = bottle\n"
+        "for z in (142, 145, 148):\n"
+        "    rings = rings.fuse(Part.makeCylinder(15.5, 1, V(0, 0, z)).cut(Part.makeCylinder(13, 3, V(0, 0, z - 1))))\n"
+        "_result = [measure.thread_pitch(threaded, [13.0, 16.5]), measure.thread_pitch(rings, [13.0, 16.5])]\n", cmd)
+    assert r[0]["pitch"] == pytest.approx(3.0, abs=0.3), r
+    assert r[1]["pitch"] is None, r
