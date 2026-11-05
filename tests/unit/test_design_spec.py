@@ -3,7 +3,9 @@
 import json
 
 import pytest
-from design import spec, tasks
+from design import tasks
+
+from freecad_bridge.checks import spec
 
 
 def part(label, dims, holes=(), volume=1000.0, valid=True, center=(0, 0, 0), **extra):
@@ -136,7 +138,7 @@ def test_scoring_is_deterministic():
 
 
 def test_every_task_is_complete_and_its_spec_is_known():
-    assert len(tasks.TASKS) == 14
+    assert len(tasks.TASKS) == 17
     ids = [t["id"] for t in tasks.TASKS]
     assert len(set(ids)) == len(ids)
     for t in tasks.TASKS:

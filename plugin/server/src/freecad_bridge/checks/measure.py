@@ -1,4 +1,6 @@
-"""Measure a saved model for the benchmark. Runs inside FreeCAD (freecadcmd), see `score.py`.
+"""Measure a saved model, for the check tools and the benchmark. Runs inside freecadcmd.
+
+Loaded by its file path, not as a package: FreeCAD's Python must not see the server's site-packages.
 
 The result is plain JSON for `spec.evaluate`: the visible solids with size, holes, round faces and
 surface types, plus tree errors, parameters, expressions, joints, interference, a flex test and the
@@ -9,6 +11,9 @@ gives the same numbers.
 from __future__ import annotations
 
 import math
+import os
+import sys
+from array import array
 from collections import Counter
 from typing import Any
 
@@ -405,5 +410,83 @@ def measure(path: str, spec: dict[str, Any], reference: Any = None) -> dict[str,
         out["flex"] = _flex(doc, flex["params"], flex.get("factors", [0.8, 1.2]),
                             [o for o, _ in shapes]) if flex else []
         return out
+    finally:
+        App.closeDocument(doc.Name)
+
+
+# ---------- for the check tools, on a saved copy of the user's document
+
+def _pick(doc: Any, names: list[str] | None) -> list[Any]:
+    if not names:
+        return [o for o in doc.Objects if _is_result(o)]
+    out = []
+    for n in names:
+        o = doc.getObject(n) or next((x for x in doc.Objects if x.Label == n), None)
+        if o is None:
+            known = ", ".join(x.Label for x in doc.Objects if _is_result(x))
+            raise ValueError(f"no object '{n}' (visible results: {known})")
+        out.append(o)
+    return out
+
+
+def export_meshes(path: str, names: list[str] | None, out_dir: str) -> list[dict[str, Any]]:
+    """Each object as triangles in two binary files (little endian float64 points, int32 corners)."""
+    doc = App.openDocument(path)
+    try:
+        out = []
+        for i, o in enumerate(_pick(doc, names)):
+            if o.TypeId.startswith("Mesh::"):
+                pts, tris = o.Mesh.Topology
+            else:
+                s = _global_shape(o)
+                diag = s.BoundBox.DiagonalLength
+                pts, tris = s.tessellate(min(0.2, max(0.02, diag / 1000)))
+            pv = array("d", [c for p in pts for c in (p.x, p.y, p.z)])
+            tv = array("i", [c for t in tris for c in t])
+            if sys.byteorder != "little":
+                pv.byteswap()
+                tv.byteswap()
+            base = os.path.join(out_dir, f"mesh{i}")
+            with open(base + ".pts", "wb") as f:
+                pv.tofile(f)
+            with open(base + ".tris", "wb") as f:
+                tv.tofile(f)
+            out.append({"label": o.Label, "base": base})
+        return out
+    finally:
+        App.closeDocument(doc.Name)
+
+
+def fit(path: str, a: str, b: str) -> dict[str, Any]:
+    """Smallest gap and shared volume of two solids, and where they come closest."""
+    doc = App.openDocument(path)
+    try:
+        oa, ob = _pick(doc, [a, b])
+        for o in (oa, ob):
+            if o.TypeId.startswith("Mesh::") or not hasattr(o, "Shape"):
+                raise ValueError(f"'{o.Label}' is not a solid; check_fit works on solids")
+        sa, sb = _global_shape(oa), _global_shape(ob)
+        d, pairs, _ = sa.distToShape(sb)
+        overlap = 0.0
+        if sa.BoundBox.intersect(sb.BoundBox):
+            overlap = sa.common(sb).Volume
+        p = pairs[0][0] if pairs else sa.BoundBox.Center
+        return {"a": oa.Label, "b": ob.Label, "gap": float(d), "overlap": float(overlap),
+                "where": [r4(p.x), r4(p.y), r4(p.z)]}
+    finally:
+        App.closeDocument(doc.Name)
+
+
+def flex(path: str, params: list[str] | None, factors: list[float]) -> dict[str, Any]:
+    """Change the parameters of the copy one by one and rebuild it. Nothing reaches the user's document."""
+    doc = App.openDocument(path)
+    try:
+        names = params or list(_params(doc))[:20]
+        missing = [n for n in names if not _find_param(doc, n)]
+        parts = [o for o in doc.Objects if _is_result(o) and not o.TypeId.startswith("Mesh::")]
+        doc.recompute()
+        return {"params": names, "missing": missing, "before_errors": _errors(doc),
+                "runs": _flex(doc, [n for n in names if n not in missing], factors, parts),
+                "objects": [o.Label for o in parts]}
     finally:
         App.closeDocument(doc.Name)

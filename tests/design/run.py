@@ -45,6 +45,7 @@ BENCH_HOME = USER_BRIDGE / "benchmark"
 BENCH_BRIDGE = BENCH_HOME / "bridge"
 TIMEOUT_S = 25 * 60
 VIEWS = ("Isometric", "Front", "Right", "Top")
+CHECK_TOOLS = ("check_design", "check_print", "check_fit", "flex_test", "inspect_views")
 
 
 # ---------- statistics from Claude Code's stream-json
@@ -193,8 +194,10 @@ def claude_path() -> str:
     return path
 
 
-def run_claude(prompt: str, model: str, pid: int, work: Path, log: Path) -> dict[str, Any]:
+def run_claude(prompt: str, model: str, pid: int, work: Path, log: Path, no_checks: bool = False) -> dict[str, Any]:
     args = [claude_path(), *build_args(prompt), "--model", model, "--append-system-prompt", SYSTEM_PROMPT]
+    if no_checks:     # a "before" measurement: as if the check tools did not exist
+        args += ["--disallowedTools", ",".join(FREECAD_TOOL_PREFIX + t for t in CHECK_TOOLS)]
     env = platforms.clean_env()
     env.pop("ANTHROPIC_API_KEY", None)   # the subscription login, as in the panel's default mode
     env["FREECAD_BRIDGE_DIR"] = str(BENCH_BRIDGE)
@@ -255,14 +258,14 @@ def judge(task: dict[str, Any], shots: list[str], work: Path, model: str = "opus
 
 
 def run_task(task: dict[str, Any], model: str, pid: int, out: Path, fc_cmd: list[str],
-             with_judge: bool) -> dict[str, Any]:
+             with_judge: bool, no_checks: bool = False) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
     close_all(pid)
     name = "Bench_" + task["id"]
     py(f"App.newDocument({name!r})", pid)
     prompt = f"[FreeCAD] Active document: {name} ({name}). Selection: nothing.\n{task['prompt']}"
     result: dict[str, Any] = {"task": task["id"], "model": model, "prompt": task["prompt"]}
-    result["run"] = run_claude(prompt, model, pid, out / "work", out / "stream.jsonl")
+    result["run"] = run_claude(prompt, model, pid, out / "work", out / "stream.jsonl", no_checks)
     try:
         doc, count = py(PICK_DOC, pid)
         path = out / "model.FCStd"
@@ -317,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--models", default="opus")
     ap.add_argument("--tasks", default=",".join(t["id"] for t in tasks.TASKS))
     ap.add_argument("--no-judge", action="store_true")
+    ap.add_argument("--no-checks", action="store_true", help="block the check tools (a before measurement)")
     ap.add_argument("--rescore", type=Path)
     ap.add_argument("--baseline", action="store_true", help="write the summary to tests/design/baseline.json")
     args = ap.parse_args(argv)
@@ -333,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
             for tid in args.tasks.split(","):
                 task = tasks.get(tid)
                 t0 = time.time()
-                r = run_task(task, model, pid, run_dir / model / tid, fc_cmd, not args.no_judge)
+                r = run_task(task, model, pid, run_dir / model / tid, fc_cmd, not args.no_judge, args.no_checks)
                 if r["run"].get("api_error") == "usage_limit_reached":
                     print(f"{model}: plan usage limit reached at {tid}; stopping. Run the rest later with "
                           f"--tasks.", flush=True)

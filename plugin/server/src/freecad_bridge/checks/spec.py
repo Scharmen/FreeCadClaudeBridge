@@ -140,6 +140,16 @@ def _part_checks(c: Checks, p: dict[str, Any], m: dict[str, Any] | None) -> None
         c.add(f"{name}: ≥ {want} {kind} faces", got >= want, f"{got} {kind} faces")
 
 
+def add_check(result: dict[str, Any], name: str, ok: bool, detail: str = "") -> dict[str, Any]:
+    """One more check on an evaluated result (the benchmark's print check), with the score updated."""
+    checks = [*result["checks"],
+              {"name": name, "ok": ok, "credit": 1.0 if ok else 0.0, "detail": detail, "weight": 1.0}]
+    total = sum(i["weight"] for i in checks)
+    score = 100.0 * sum(i["credit"] * i["weight"] for i in checks) / total
+    return {**result, "checks": checks, "score": round(score, 1),
+            "failed": [f"{i['name']}: {i['detail']}" for i in checks if not i["ok"]]}
+
+
 def evaluate(spec: dict[str, Any], measured: dict[str, Any]) -> dict[str, Any]:
     c = Checks()
     parts = measured.get("parts", [])

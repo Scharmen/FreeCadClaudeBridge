@@ -47,7 +47,7 @@ def test_the_same_file_scores_the_same_and_a_wrong_model_scores_lower(cmd, tmp_p
 
 def test_thread_pitch_is_measured_on_a_helical_thread_and_inside_a_nut(cmd):
     r = score.run_freecad(
-        "import FreeCAD as App, Part\nfrom design import measure\nV = App.Vector\n"
+        "import FreeCAD as App, Part\nfrom freecad_bridge.checks import measure\nV = App.Vector\n"
         "p = 1.25\n"
         "tri = Part.makePolygon([V(3.2, 0, -0.55), V(4.0, 0, -0.05), V(4.0, 0, 0.05), V(3.2, 0, 0.55),\n"
         "                        V(3.2, 0, -0.55)])\n"

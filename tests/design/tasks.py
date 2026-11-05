@@ -214,6 +214,39 @@ TASKS: list[dict[str, Any]] = [
         "look": ["natural proportions (about 7.5 heads tall)", "face with eyes, nose and mouth", "hair",
                  "arms with hands", "T-shirt with sleeves and folds", "jeans", "sneakers", "round base"],
     },
+    # Open briefs: no dimensions given; the model has to choose fits and sizes, and the spec checks function.
+    {
+        "id": "battery_box",
+        "prompt": "Design a 3D-printable holder for four AA batteries side by side with a snap-on lid, for FDM "
+                  "printing. Show the lid closed.",
+        "spec": {"parts": [{"name": "box"}, {"name": "lid"}], "solids": [2, 2], "no_interference": True,
+                 "clearance": [{"a": "box", "b": "lid", "range": [0.1, 0.5]}],
+                 "total": {"bbox": [66, 58, 22], "tol": 12}},
+        "printable": "fdm",
+        "look": ["four battery compartments", "walls between or around the batteries", "lid", "snap features",
+                 "room for contacts or wires"],
+    },
+    {
+        "id": "cable_clip",
+        "prompt": "Design a 3D-printable wall clip that holds a 6 mm round cable and is fixed with one small wood "
+                  "screw, for FDM printing.",
+        "spec": {"parts": [{"name": "clip", "holes": [{"d": [6.0, 7.0], "count": [1, 1], "open": True},
+                                                      {"d": [2.8, 5.5], "count": [1, 1]}],
+                            "surfaces_any": ["Cone"]}],
+                 "solids": [1, 1]},
+        "printable": "fdm",
+        "look": ["clip that opens so the cable snaps in", "screw hole", "countersink", "flat back for the wall"],
+    },
+    {
+        "id": "knob",
+        "prompt": "Design a 3D-printable control knob for a potentiometer with a 6 mm D-shaft, with a grip you can "
+                  "feel and an indicator mark, for FDM printing.",
+        "spec": {"parts": [{"name": "knob", "holes": [{"d": [6.0, 6.6], "count": [1, 1], "open": True}],
+                            "radii_min": {"r": [0.3, 3], "count": 2}}],
+                 "solids": [1, 1], "total": {"bbox": [25, 25, 18], "tol": 12}},
+        "printable": "fdm",
+        "look": ["round knob body", "grip ridges or knurling", "indicator mark", "D-shaped bore with a flat"],
+    },
 ]
 
 

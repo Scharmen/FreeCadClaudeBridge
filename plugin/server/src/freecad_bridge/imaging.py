@@ -230,3 +230,127 @@ def side_by_side(picture: str | Path, shot_png: bytes, label: str, height: int =
     buf = io.BytesIO()
     out.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
+
+
+# ---------- labelled views and sections
+
+def _rotate(axis: np.ndarray, angle: float, vec: np.ndarray) -> np.ndarray:
+    return (vec * math.cos(angle) + np.cross(axis, vec) * math.sin(angle)
+            + axis * (axis @ vec) * (1 - math.cos(angle)))
+
+
+def parse_camera(text: str) -> dict[str, Any]:
+    """Size of the view in mm and the world axes as seen on screen, from FreeCAD's camera description."""
+    out: dict[str, Any] = {"height": None, "right": None, "up": None}
+    for line in text.splitlines():
+        parts = line.split()
+        if parts[:1] == ["height"] and len(parts) == 2:
+            out["height"] = float(parts[1])
+        elif parts[:1] == ["orientation"] and len(parts) == 5:
+            axis = np.array([float(x) for x in parts[1:4]])
+            axis /= max(float(np.linalg.norm(axis)), 1e-12)
+            angle = float(parts[4])
+            out["right"] = _rotate(axis, angle, np.array([1.0, 0, 0]))
+            out["up"] = _rotate(axis, angle, np.array([0, 1.0, 0]))
+    return out
+
+
+def nice_length(mm: float) -> float:
+    """A round length (1, 2 or 5 × 10^n) no longer than mm."""
+    if mm <= 0:
+        return 1.0
+    base = 10 ** math.floor(math.log10(mm))
+    return next(m * base for m in (5, 2, 1) if m * base <= mm)
+
+
+def _scale_bar(draw: ImageDraw.ImageDraw, width: int, height: int, mm_per_px: float) -> None:
+    bar = nice_length(width * 0.25 * mm_per_px)
+    px = bar / mm_per_px
+    x1, y = width - 16, height - 16
+    draw.line([(x1 - px, y), (x1, y)], fill=(0, 0, 0), width=3)
+    draw.line([(x1 - px, y - 5), (x1 - px, y + 5)], fill=(0, 0, 0), width=2)
+    draw.line([(x1, y - 5), (x1, y + 5)], fill=(0, 0, 0), width=2)
+    draw.text((x1 - px, y - 20), f"{bar:g} mm", fill=(0, 0, 0))
+
+
+AXIS_COLORS = {"X": (200, 30, 30), "Y": (30, 150, 30), "Z": (30, 60, 200)}
+
+
+def _axes(draw: ImageDraw.ImageDraw, height: int, right: np.ndarray, up: np.ndarray) -> None:
+    ox, oy, size = 42, height - 42, 28
+    for i, name in enumerate("XYZ"):
+        dx, dy = float(right[i]) * size, -float(up[i]) * size
+        if abs(dx) + abs(dy) < 2:
+            draw.text((ox + 4, oy + 4 + 12 * i), f"{name} (towards you or away)", fill=AXIS_COLORS[name])
+            continue
+        draw.line([(ox, oy), (ox + dx, oy + dy)], fill=AXIS_COLORS[name], width=2)
+        draw.text((ox + dx * 1.2 - 3, oy + dy * 1.2 - 5), name, fill=AXIS_COLORS[name])
+
+
+def view_sheet(shots: list[dict[str, Any]], title: str = "", columns: int = 2) -> bytes:
+    """Screenshots in a grid, each with its name, the axes as seen and a scale bar; the size on top."""
+    images = []
+    for s in shots:
+        im = Image.open(io.BytesIO(s["png"])).convert("RGB")
+        draw = ImageDraw.Draw(im)
+        draw.text((10, 8), s["label"], fill=(0, 0, 0))
+        cam = parse_camera(s.get("camera", ""))
+        if cam["height"]:
+            _scale_bar(draw, im.width, im.height, cam["height"] / im.height)
+        if cam["right"] is not None:
+            _axes(draw, im.height, cam["right"], cam["up"])
+        draw.rectangle([0, 0, im.width - 1, im.height - 1], outline=(190, 190, 190))
+        images.append(im)
+    rows = math.ceil(len(images) / columns)
+    w, h = images[0].size
+    top = 28 if title else 0
+    sheet = Image.new("RGB", (w * columns, h * rows + top), "white")
+    if title:
+        ImageDraw.Draw(sheet).text((10, 8), title, fill=(0, 0, 0))
+    for i, im in enumerate(images):
+        sheet.paste(im, ((i % columns) * w, top + (i // columns) * h))
+    buf = io.BytesIO()
+    sheet.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def section_image(sections: list[tuple[str, np.ndarray]], axis: str, offset: float, size: int = 800) -> bytes:
+    """Cross-sections as filled shapes with a scale bar: what is material, how thick the walls are."""
+    used = [(n, s) for n, s in sections if len(s)]
+    names = [c for c in "XYZ" if c != axis.upper()]
+    im = Image.new("RGB", (size, size), "white")
+    draw = ImageDraw.Draw(im)
+    label = f"Section at {axis.upper()} = {offset:g} mm, seen with {names[0]} to the right and {names[1]} up"
+    if not used:
+        draw.text((10, 8), label + ": the plane misses the model", fill=(0, 0, 0))
+    else:
+        pts = np.vstack([s.reshape(-1, 2) for _, s in used])
+        lo, hi = pts.min(0), pts.max(0)
+        mm_per_px = max(float((hi - lo).max()) / (size - 90), 1e-6)
+        ox = (size - (hi[0] - lo[0]) / mm_per_px) / 2
+        oy = (size - (hi[1] - lo[1]) / mm_per_px) / 2
+
+        def to_px(p: np.ndarray) -> np.ndarray:
+            return np.c_[ox + (p[..., 0].ravel() - lo[0]) / mm_per_px,
+                         size - oy - (p[..., 1].ravel() - lo[1]) / mm_per_px]
+
+        fills = [(150, 175, 205), (205, 170, 140), (160, 200, 160), (200, 170, 200)]
+        for i, (_, seg) in enumerate(used):
+            px = to_px(seg).reshape(-1, 2, 2)
+            y0, y1 = px[:, :, 1].min(1), px[:, :, 1].max(1)
+            for row in range(max(0, int(y0.min())), min(size, int(y1.max()) + 1)):
+                y = row + 0.5
+                hit = (y0 <= y) & (y1 > y)
+                if not hit.any():
+                    continue
+                a, b = px[hit, 0], px[hit, 1]
+                xs = np.sort(a[:, 0] + (y - a[:, 1]) / (b[:, 1] - a[:, 1]) * (b[:, 0] - a[:, 0]))
+                for x0, x1 in zip(xs[::2], xs[1::2], strict=False):   # inside between odd and even crossings
+                    draw.line([(x0, row), (x1, row)], fill=fills[i % len(fills)])
+            for (ax, ay), (bx, by) in px:
+                draw.line([(ax, ay), (bx, by)], fill=(20, 20, 20))
+        _scale_bar(draw, size, size, mm_per_px)
+        draw.text((10, 8), label, fill=(0, 0, 0))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return buf.getvalue()

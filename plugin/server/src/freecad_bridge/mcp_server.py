@@ -1,6 +1,6 @@
 """MCP server (stdio) exposing the running FreeCAD to Claude Code.
 
-19 tools (9 read, 10 act). Every tool returns compact JSON text, kept under
+Every tool returns compact JSON text, kept under
 ~10,000 tokens; bridge errors become tool errors.
 """
 
@@ -9,7 +9,9 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 from typing import Any, Literal
 
@@ -664,6 +666,207 @@ async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | 
         out = {"computed_in_s": res["seconds"], "voxel_mm": res["voxel_mm"], "size_mm": res["size_mm"], **out,
                **({"part_warnings": warnings} if warnings else {})}
     return _dump(out)
+
+
+# ---------- checks: numbers instead of guesses; all run on a saved copy in a separate freecadcmd
+
+async def _on_copy(make_call: Any, doc: str | None, instance: int | None, after: Any = None) -> Any:
+    from .checks import runner
+
+    try:
+        return await runner.on_copy(_raw, make_call, doc, instance, after)
+    except (runner.CheckError, RuntimeError) as e:
+        raise ToolError(str(e)) from e
+
+
+@mcp.tool(annotations=READ, structured_output=False)
+async def check_design(spec: dict[str, Any] | None = None, doc: str | None = None,
+                       instance: int | None = None) -> str:
+    """Check the finished model against your numbers; size and position errors do not show in a
+    screenshot. Write the spec from the request before you build, call this after building, fix
+    every entry in `problems`, and call it again. Without a spec only validity and tree errors are
+    checked. Works on a saved copy: your document stays as it is.
+    spec = {"parts": [{"name", "bbox": [a, b, c], "tol": 0.5, "oriented": false (true: x, y, z as
+    given; otherwise any orientation), "volume": [lo, hi], "holes": [{"d": [lo, hi], "count": [lo, hi],
+    "open": false}], "teeth": n, "pitch": {"value", "tol", "band": [r_lo, r_hi]} (thread, radial band
+    of its flanks), "radii_min": {"r": [lo, hi], "count": n} (fillets), "inclined_min": n (sloped
+    faces), "surfaces_any": ["BSplineSurface", "Cone"...], "surfaces_min": {"Plane": 2}}],
+    "solids": [lo, hi], "no_interference": true, "clearance": [{"a", "b", "range": [lo, hi]}] (gap
+    between parts), "aligned_holes": {"a", "b", "d_a": [lo, hi], "d_b": [lo, hi], "count": n, "tol": 0.3},
+    "center_distance": {"a", "b", "value", "tol"}, "height": [lo, hi], "total": {"bbox": [a, b, c], "tol"},
+    "params": ["Length"...], "expressions_min": n, "sketch_dof_zero": true, "joints": ["Revolute"],
+    "requires": [{"label", "types": ["Assembly::AssemblyObject"]}]}. The solids are the visible results."""
+    from .checks import runner
+    from .checks import spec as spec_mod
+
+    spec = spec or {}
+    unknown = set(spec) - spec_mod.KNOWN
+    bad_part = {k for p in spec.get("parts", []) for k in p} - spec_mod.PART_KEYS
+    if unknown or bad_part:
+        raise ToolError(f"INVALID_ARGS: unknown spec keys {sorted(unknown | bad_part)}; known: "
+                        f"{sorted(spec_mod.KNOWN)}, per part: {sorted(spec_mod.PART_KEYS)}")
+
+    def after(measured: dict[str, Any], _tmp: str) -> dict[str, Any]:
+        return runner.design_summary(spec_mod.evaluate(spec, measured), measured)
+
+    text = runner.spec_json(spec)
+    return _dump(await _on_copy(lambda path, _tmp: f"import json\n_result = measure.measure({path!r}, "
+                                f"json.loads({text!r}))", doc, instance, after))
+
+
+@mcp.tool(annotations=READ, structured_output=False)
+async def check_print(objects: list[str] | None = None, process: Literal["fdm", "resin", "cnc"] = "fdm",
+                      min_wall_mm: float | None = None, doc: str | None = None,
+                      instance: int | None = None) -> str:
+    """Can it be printed? Checks each visible result (or the named objects, solids and meshes alike):
+    closed, wall thickness, overhangs and supports per orientation with the best one to print in,
+    bridges, base area on the bed and whether it tips over. Objects that overlap count as one print.
+    `problems` must be fixed, `warnings` depend on the printer; each says where (mm) and how to fix
+    it. Use it before you show a model meant for printing. Works on a saved copy."""
+    from .checks import printing, runner
+
+    def after(items: list[dict[str, Any]], _tmp: str) -> dict[str, Any]:
+        return printing.analyze_objects(runner.read_meshes(items), process, min_wall_mm)
+
+    names = json.dumps(objects)
+    return _dump(await _on_copy(lambda path, tmp: f"import json\n_result = measure.export_meshes({path!r}, "
+                                f"json.loads({names!r}), {tmp!r})", doc, instance, after))
+
+
+@mcp.tool(annotations=READ, structured_output=False)
+async def check_fit(a: str, b: str, kind: Literal["press", "sliding", "loose", "custom"] = "sliding",
+                    gap_mm: list[float] | None = None, process: Literal["fdm", "resin", "cnc"] = "fdm",
+                    doc: str | None = None, instance: int | None = None) -> str:
+    """Do two parts fit? Measures their smallest gap and shared volume and compares them with the fit
+    for the process: FDM press 0–0.1 mm, sliding 0.15–0.35, loose 0.3–0.7; resin 0–0.05, 0.05–0.2,
+    0.2–0.4; CNC 0–0.01, 0.01–0.06, 0.06–0.3. gap_mm=[lo, hi] sets your own range (kind custom). Parts
+    that should move or come apart need a gap; touching parts print as one. Call it for every
+    pair that meets (lid and box, pin and hole, gears, nut and bolt) in their mounted position.
+    a, b: object name or label of solids. Works on a saved copy."""
+    from .checks import printing
+
+    if kind == "custom" and not gap_mm:
+        raise ToolError("INVALID_ARGS: kind custom needs gap_mm=[lo, hi]")
+
+    def after(res: dict[str, Any], _tmp: str) -> dict[str, Any]:
+        verdict = printing.fit_verdict(res["gap"], res["overlap"], kind, process, gap_mm)
+        return {"a": res["a"], "b": res["b"], "kind": kind, "process": process, "closest_at": res["where"], **verdict}
+
+    return _dump(await _on_copy(lambda path, _tmp: f"_result = measure.fit({path!r}, {a!r}, {b!r})", doc, instance,
+                                after))
+
+
+@mcp.tool(annotations=READ, structured_output=False)
+async def flex_test(params: list[str] | None = None, factors: list[float] | None = None, doc: str | None = None,
+                    instance: int | None = None) -> str:
+    """Is the model really parametric? Changes each VarSet or Spreadsheet parameter (all of them, or
+    `params`) by the factors (default 0.8 and 1.2), rebuilds and reports what breaks or does not follow.
+    Works on a saved copy: your document stays as it is. Use it after building a parametric model."""
+    from .checks import runner
+
+    wanted = json.dumps(params)
+    steps = list(factors or [0.8, 1.2])
+
+    def after(res: dict[str, Any], _tmp: str) -> dict[str, Any]:
+        return runner.flex_summary(res)
+
+    return _dump(await _on_copy(lambda path, _tmp: f"import json\n_result = measure.flex({path!r}, "
+                                f"json.loads({wanted!r}), {steps!r})", doc, instance, after))
+
+
+VIEWS_CODE = """
+import os as _os, time as _time
+_g = Gui.getDocument(doc.Name)
+_v = _g.ActiveView
+_cam = _v.getCamera()
+_anim = _v.isAnimationEnabled() if hasattr(_v, "isAnimationEnabled") else False
+if _anim:
+    _v.setAnimationEnabled(False)
+def _settle():
+    for _i in range(6):
+        Gui.updateGui()
+        _time.sleep(0.03)
+_shots = []
+try:
+    _settle()
+    for _name in {views!r}:
+        getattr(_v, "view" + _name)()
+        _v.fitAll()
+        _settle()
+        _p = _os.path.join({out!r}, _name + ".png")
+        _v.saveImage(_p, {w}, {h}, "White")
+        _shots.append({{"label": _name, "path": _p, "camera": _v.getCamera()}})
+finally:
+    _v.setCamera(_cam)
+    if _anim:
+        _v.setAnimationEnabled(True)
+_box = None
+for _o in doc.Objects:
+    if getattr(_o, "Visibility", False) and _o.TypeId not in ("App::Part", "Assembly::AssemblyObject"):
+        _b = None
+        if _o.TypeId.startswith("Mesh::"):
+            _b = _o.Mesh.BoundBox
+        elif hasattr(_o, "Shape") and _o.Shape.Solids:
+            _b = _o.Shape.BoundBox
+        if _b is not None and not _o.TypeId.startswith("PartDesign::Feature"):
+            if _box is None:
+                _box = App.BoundBox(_b)
+            else:
+                _box.add(_b)
+_nums = (_box.XLength, _box.YLength, _box.ZLength, _box.Center.x, _box.Center.y, _box.Center.z) if _box else None
+_result = {{"shots": _shots, "box": [round(x, 2) for x in _nums] if _nums else None}}
+"""
+
+
+@mcp.tool(annotations=READ, structured_output=False)
+async def inspect_views(section: dict[str, Any] | None = None, doc: str | None = None,
+                        instance: int | None = None) -> list[Any]:
+    """Look at the whole model in one image: isometric, front, right and top, each with the axes and a
+    scale bar, plus the overall size. Your camera is put back. section={"axis": "x"|"y"|"z", "offset":
+    mm (default: the middle)} adds a cross-section with filled material, to see inside: wall
+    thickness, cavities, seats, threads. For sizes and positions trust check_design, not the picture."""
+    from .checks import printing, runner
+
+    out_dir = tempfile.mkdtemp(prefix="views-", dir=_checks_dir())
+    try:
+        code = VIEWS_CODE.format(views=["Isometric", "Front", "Right", "Top"], out=out_dir, w=640, h=480)
+        res = (await _raw("run_python", {"code": code, "doc": doc, "recompute": False, "transaction": "Views"},
+                          timeout_s=120, instance=instance))["result"]
+        shots = []
+        for s in res["shots"]:
+            with open(s["path"], "rb") as f:
+                shots.append({"label": s["label"], "png": f.read(), "camera": s["camera"]})
+        box = res["box"]
+        title = f"Size {box[0]} x {box[1]} x {box[2]} mm" if box else "Nothing visible"
+        png = await anyio.to_thread.run_sync(lambda: imaging.view_sheet(shots, title))
+        out: list[Any] = [_dump({"size_mm": box[:3] if box else None, "centre_mm": box[3:] if box else None,
+                                 "views": [s["label"] for s in shots]}), Image(data=png, format="png")]
+        if section is not None:
+            axis = str(section.get("axis", "z")).lower()
+            if axis not in ("x", "y", "z"):
+                raise ToolError("INVALID_ARGS: section axis must be x, y or z")
+            offset = section.get("offset")
+            if offset is None:
+                offset = box["xyz".index(axis) + 3] if box else 0.0
+            offset = float(offset)
+
+            def after(items: list[dict[str, Any]], _tmp: str) -> bytes:
+                cuts = [(label, printing.section_segments(v, t, axis, offset))
+                        for label, v, t in runner.read_meshes(items)]
+                return imaging.section_image(cuts, axis, offset)
+
+            sec = await _on_copy(lambda path, tmp: f"_result = measure.export_meshes({path!r}, None, {tmp!r})",
+                                 doc, instance, after)
+            out.append(Image(data=sec, format="png"))
+        return out
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+
+def _checks_dir() -> str:
+    path = os.path.join(str(platforms.bridge_dir()), "checks")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def _refresh_config() -> None:
