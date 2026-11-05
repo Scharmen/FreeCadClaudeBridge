@@ -12,7 +12,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from freecad_bridge import headless, platforms
+import numpy as np
+
+from freecad_bridge import headless, imaging, platforms
 from freecad_bridge.checks import printing, runner
 from freecad_bridge.checks import spec as spec_mod
 
@@ -61,6 +63,25 @@ def print_problems(path: Path, process: str, cmd: list[str] | None = None) -> li
                             f"_result = measure.export_meshes({str(Path(path).resolve())!r}, None, {tmp!r})\n", cmd)
         rep = printing.analyze_objects(runner.read_meshes(items), process)
     return [p["cause"] for pr in rep["prints"] for p in pr["problems"]]
+
+
+def section_shots(path: Path, out: Path, cmd: list[str] | None = None) -> list[str]:
+    """Cuts through the middle of the model along each axis, with the material filled."""
+    with tempfile.TemporaryDirectory(prefix="fcb-sect-") as tmp:
+        items = run_freecad("from freecad_bridge.checks import measure\n"
+                            f"_result = measure.export_meshes({str(Path(path).resolve())!r}, None, {tmp!r})\n", cmd)
+        meshes = runner.read_meshes(items)
+    if not meshes:
+        return []
+    points = np.vstack([v for _, v, _ in meshes])
+    middle = (points.min(0) + points.max(0)) / 2
+    shots = []
+    for k, axis in enumerate("xyz"):
+        cuts = [(label, printing.section_segments(v, t, axis, float(middle[k]))) for label, v, t in meshes]
+        shot = Path(out) / f"section_{axis}.png"
+        shot.write_bytes(imaging.section_image(cuts, axis, float(middle[k])))
+        shots.append(str(shot))
+    return shots
 
 
 def score_file(path: Path, task: dict[str, Any], cmd: list[str] | None = None) -> dict[str, Any]:

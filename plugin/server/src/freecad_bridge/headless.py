@@ -16,6 +16,8 @@ import anyio
 from . import memguard, platforms, settings
 from .client import list_instances
 
+MARKER = re.compile(r"FCB_(STATUS|RESULT)=")
+PROGRESS = re.compile(r"\(\s*\d+ %\)|Checking topology\.*|Importing project files\.*|Postprocessing\.*")
 MAX_OUTPUT = 20000
 KEEP_WORKDIRS = 20  # older headless work folders are removed
 BANNER = re.compile(r"^(FreeCAD \d+\.\d+.*Libs:.*|\(C\) \d{4}-\d{4} FreeCAD contributors|"
@@ -63,17 +65,24 @@ OCCT_NOISE = re.compile(r"^(\*{3,}.*|Step File Name.*|.*Statistics on Transfer.*
 def parse_output(stdout: str) -> dict[str, Any]:
     status, result, lines = None, None, []
     for line in ANSI.sub("", stdout).splitlines():
-        if OCCT_NOISE.match(line.strip()):
+        found = MARKER.search(line)         # progress text from C++ can sit on the same line as a marker
+        rest = ""
+        if found:
+            value = line[found.end():]
+            if found.group(1) == "STATUS":
+                status = value.split()[0] if value.split() else ""
+            else:
+                try:
+                    result, end = json.JSONDecoder().raw_decode(value)
+                    rest = value[end:]
+                except ValueError:
+                    result = value
+            line = line[:found.start()] + rest
+        cleaned = PROGRESS.sub("", line)
+        if cleaned != line and not cleaned.strip():
             continue
-        if line.startswith("FCB_STATUS="):
-            status = line.split("=", 1)[1]
-        elif line.startswith("FCB_RESULT="):
-            try:
-                result = json.loads(line.split("=", 1)[1])
-            except ValueError:
-                result = line.split("=", 1)[1]
-        elif not BANNER.match(line.strip()):
-            lines.append(line)
+        if not OCCT_NOISE.match(cleaned.strip()) and not BANNER.match(cleaned.strip()):
+            lines.append(cleaned.rstrip())
     text = "\n".join(lines).strip()
     if len(text) > MAX_OUTPUT:
         text = text[:MAX_OUTPUT] + f"\n… truncated ({len(text)} chars)"

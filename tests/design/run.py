@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,7 @@ USER_BRIDGE = platforms.bridge_dir()
 BENCH_HOME = USER_BRIDGE / "benchmark"
 BENCH_BRIDGE = BENCH_HOME / "bridge"
 TIMEOUT_S = 25 * 60
-VIEWS = ("Isometric", "Front", "Right", "Top")
+VIEWS = ("Isometric", "Front", "Right", "Top", "Bottom", "Rear")
 CHECK_TOOLS = ("check_design", "check_print", "check_fit", "flex_test", "inspect_views")
 
 
@@ -164,12 +165,19 @@ for d in App.listDocuments().values():
 _result = best
 """
 
-SAVE_AND_SHOOT = """
-import os, time
+SAVE_DOC = """
 d = App.getDocument({doc!r})
+d.saveAs({path!r})
+"""
+
+OPEN_DOC = """
+d = App.openDocument({path!r})
+"""
+
+SHOOT = """
+import os, time
 App.setActiveDocument(d.Name)
 gd = Gui.getDocument(d.Name)
-d.saveAs({path!r})
 v = gd.ActiveView
 shots = []
 def settle():   # a new view draws only after a few event loop rounds; otherwise the image is blank
@@ -239,9 +247,11 @@ def run_claude(prompt: str, model: str, pid: int, work: Path, log: Path, no_chec
 def judge(task: dict[str, Any], shots: list[str], work: Path, model: str = "opus") -> dict[str, Any]:
     """A second Claude looks at the screenshots and ticks off the features a reviewer expects."""
     feats = "\n".join(f"- {f}" for f in task["look"])
-    prompt = (f"You review a CAD model made for this request:\n\n{task['prompt']}\n\nRead these screenshots of "
-              f"the finished model (isometric, front, right, top): {', '.join(shots)}\n\nFor each feature below, "
-              "decide whether it is clearly present and looks right. Be strict: a feature that is missing, wrong "
+    prompt = (f"You review a CAD model made for this request:\n\n{task['prompt']}\n\nRead these pictures of "
+              f"the finished model: {', '.join(shots)}\n\nThe file names say what each shows: outside views from "
+              "six sides, and section_x, _y and _z, which cut through the middle with the material filled, so "
+              "you can see inside closed parts: cavities, walls, internal threads, clips.\n\nFor each feature "
+              "below, decide whether it is clearly present and looks right. Be strict: a feature that is missing, wrong "
               f"or only hinted at is false.\n{feats}\n\nAnswer with JSON only: "
               '{"features": [{"feature": "...", "present": true, "note": "..."}], "overall": "one sentence"}')
     env = platforms.clean_env()
@@ -274,8 +284,9 @@ def run_task(task: dict[str, Any], model: str, pid: int, out: Path, fc_cmd: list
         doc, count = py(PICK_DOC, pid)
         path = out / "model.FCStd"
         result["document"] = doc
-        result["shots"] = py(SAVE_AND_SHOOT.format(doc=doc, path=str(path), views=list(VIEWS), out=str(out)),
+        result["shots"] = py(SAVE_DOC.format(doc=doc, path=str(path)) + SHOOT.format(views=list(VIEWS), out=str(out)),
                              pid, timeout=300)
+        result["shots"] += score.section_shots(path, out, fc_cmd)
         scored = score.score_file(path, task, fc_cmd)
         result["score"], result["failed"], result["checks"] = scored["score"], scored["failed"], scored["checks"]
         (out / "measured.json").write_text(json.dumps(scored["measured"], indent=1), encoding="utf-8")
@@ -351,6 +362,35 @@ def rescore(run_dir: Path, fc_cmd: list[str]) -> list[dict[str, Any]]:
     return out
 
 
+def rejudge(run_dir: Path, pid: int, fc_cmd: list[str], only: set[str] | None = None) -> list[dict[str, Any]]:
+    """Take the pictures of saved models again and judge them anew, so old runs and new compare fairly."""
+    jobs = []
+    for f in sorted(run_dir.rglob("result.json")):
+        r = json.loads(f.read_text(encoding="utf-8"))
+        model = f.parent / "model.FCStd"
+        if not model.exists() or (only and r["task"] not in only):
+            continue
+        close_all(pid)
+        r["shots"] = py(OPEN_DOC.format(path=str(model.resolve())) + SHOOT.format(views=list(VIEWS), out=str(f.parent)),
+                        pid, timeout=300)
+        r["shots"] += score.section_shots(model, f.parent, fc_cmd)
+        jobs.append((f, r))
+    close_all(pid)
+
+    def one(job: tuple[Path, dict[str, Any]]) -> dict[str, Any]:
+        f, r = job
+        (f.parent / "work").mkdir(exist_ok=True)
+        r.setdefault("visual_four_views", r.get("visual"))
+        r["visual"] = judge(tasks.get(r["task"]), r["shots"], f.parent / "work")
+        f.write_text(json.dumps(r, indent=1, ensure_ascii=False), encoding="utf-8")
+        print(f"{r['model']:7} {r['task']:16} visual {(r['visual_four_views'] or {}).get('score')} -> "
+              f"{r['visual'].get('score')}", flush=True)
+        return r
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return list(pool.map(one, jobs))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--models", default="opus")
@@ -358,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-judge", action="store_true")
     ap.add_argument("--no-checks", action="store_true", help="block the check tools (a before measurement)")
     ap.add_argument("--rescore", type=Path)
+    ap.add_argument("--rejudge", type=Path, help="new pictures and a new visual judgement of a saved run")
     ap.add_argument("--parallel", action="store_true", help="each model at the same time, in its own FreeCAD")
     ap.add_argument("--run-dir", type=Path, help="write into this folder")
     ap.add_argument("--own-freecad", action="store_true", help="start a FreeCAD just for this run, close it afterwards")
@@ -372,6 +413,15 @@ def main(argv: list[str] | None = None) -> int:
         write_summary(collect(run_dir), run_dir, args.baseline)
         return code
     fc_cmd = score.freecadcmd()
+    if args.rejudge:
+        prepare_bridge()
+        only = set(args.tasks.split(",")) if args.tasks != ",".join(t["id"] for t in tasks.TASKS) else None
+        pid = start_freecad(fc_cmd, "rejudge")
+        try:
+            rejudge(args.rejudge, pid, fc_cmd, only)
+        finally:
+            os.kill(pid, signal.SIGTERM)
+        return 0
     if args.rescore:
         results = rescore(args.rescore, fc_cmd)
         run_dir = args.rescore

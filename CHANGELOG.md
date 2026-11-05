@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.17.0 – standard parts and your own library (unreleased)
+
+- `make_part(family, params, at, replace)`: tested builders for gear, gear pair, spring, bolt, nut, bolt and nut, hinge, enclosure, snap box, bracket and knob. `family="list"` shows them with their parameters. Sizes that cannot work are refused with the reason. Each object stores how it was made; call again with `replace` to change sizes (no parametric expressions in the shapes).
+- `design_library(action, query, id)`: search, show and delete what worked before. A `good` rating in `record_feedback` stores the code of that model with its words.
+- The skill and the panel start from what exists: library, then `make_part`, then a recipe.
+- Fix: `check_design`, `check_print` and `check_fit` (and `run_headless`) could fail on documents with meshes although the script had worked: FreeCAD's progress text landed on the same line as the result. It is now removed from the output as well.
+- Benchmark: the judge also sees bottom and rear views and three cross-sections, so it can tell a closed box with nothing inside from a good one; `--rejudge` applies this to saved runs.
+
+## 1.16.0 – recipes that run (unreleased)
+
+- New tested references: `shapes.md` (threads, internal threads, bottle necks, springs, twists, draft, patterns, the largest fillet that works), `mechanical.md` (ISO tables, Hole features, bearings and seats, fits, ribs), `printing.md` (limits per process, test coupon, snap box, hinges, teardrop holes), `multipart.md` (assemblies, clearances, order of work). All their code runs against FreeCAD in the tests.
+- The skill says what to read before building and to write a design spec first.
+
 ## 1.15.0 – check tools: numbers, not guesses (unreleased)
 
 - `check_design(spec)`: the model against a numeric spec (sizes in any orientation, volume, holes, holes lined up between parts, gaps, interference, thread pitch, teeth, fillets, parameters, expressions, joints); every failed check says what it found.

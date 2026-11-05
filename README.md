@@ -6,7 +6,7 @@ Control FreeCAD by chat with Claude, either in a **"Claude" chat panel inside Fr
 
 *A Maserati Ghibli (1995) built from the user's photo for printing; here Claude checks the print mesh and repairs it until it is watertight. Real screenshot of FreeCAD 1.1 on macOS.*
 
-> Status: 1.15.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
+> Status: 1.17.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 

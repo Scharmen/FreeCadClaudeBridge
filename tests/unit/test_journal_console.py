@@ -94,3 +94,16 @@ def test_headless_strips_occt_transfer_noise():
              "******        Statistics on Transfer (Write)                 ******\x1b[0m\n"
              "keep me\nFCB_STATUS=ok\nFCB_RESULT=1\n")
     assert parse_output(noisy)["output"] == "keep me"
+
+
+def test_headless_markers_survive_mesh_progress_text():
+    # Loading a document with meshes prints "Checking topology" without newlines, from C++, around Python's
+    # output; with sculpted models the check tools failed although the script had worked.
+    stdout = ("Importing project files......\nChecking topology......\t\n\t\t(100 %)\t\tFCB_STATUS=ok\n"
+              "Checking topology......\t(3 %)\tFCB_RESULT={\"volume\": 1.5, \"a\": [1, 2]}Checking topology......\n"
+              "Postprocessing......\nkeep me\n")
+    assert parse_output(stdout) == {"status": "ok", "result": {"volume": 1.5, "a": [1, 2]}, "output": "keep me"}
+
+
+def test_headless_result_that_is_not_json_stays_text():
+    assert parse_output("FCB_STATUS=ok\nFCB_RESULT=not json\n")["result"] == "not json"
