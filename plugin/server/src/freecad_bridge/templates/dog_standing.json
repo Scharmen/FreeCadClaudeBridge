@@ -816,9 +816,9 @@
     }
    ],
    "fur": {
-    "depth": 0.22,
+    "depth": 0.18,
     "length": 4,
-    "width": 0.8,
+    "width": 0.9,
     "direction": [
      0,
      1,

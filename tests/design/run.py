@@ -252,7 +252,8 @@ def judge(task: dict[str, Any], shots: list[str], work: Path, model: str = "opus
               f"the finished model: {', '.join(shots)}\n\nThe file names say what each shows: outside views from "
               "six sides, and section_x, _y and _z, which cut through the middle with the material filled, so "
               "you can see inside closed parts: cavities, walls, internal threads, clips.\n\nFor each feature "
-              "below, decide whether it is clearly present and looks right. Be strict: a feature that is missing, wrong "
+              "below, decide whether it is clearly present and looks right. Be strict: a feature that is missing, "
+              "wrong "
               f"or only hinted at is false.\n{feats}\n\nAnswer with JSON only: "
               '{"features": [{"feature": "...", "present": true, "note": "..."}], "overall": "one sentence"}')
     env = platforms.clean_env()
@@ -374,8 +375,8 @@ def rejudge(run_dir: Path, pid: int, fc_cmd: list[str], only: set[str] | None = 
         if not model.exists() or (only and r["task"] not in only):
             continue
         close_all(pid)
-        r["shots"] = py(OPEN_DOC.format(path=str(model.resolve())) + SHOOT.format(views=list(VIEWS), out=str(f.parent)),
-                        pid, timeout=300)
+        code = OPEN_DOC.format(path=str(model.resolve())) + SHOOT.format(views=list(VIEWS), out=str(f.parent))
+        r["shots"] = py(code, pid, timeout=300)
         r["shots"] += score.section_shots(model, f.parent, fc_cmd)
         jobs.append((f, r))
     close_all(pid)

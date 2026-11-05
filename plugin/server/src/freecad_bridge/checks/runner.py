@@ -52,9 +52,9 @@ class CheckCrash(CheckError):
     """freecadcmd itself died on the copy, usually inside the geometry kernel."""
 
 
-CRASH_TEXT = ("FreeCAD's geometry kernel crashed while working on a copy (exit code {code}); your document is safe. The "
-              "same operation in the open document would close FreeCAD and lose unsaved work, so do not try it there. "
-              "Usual cause: a fillet or chamfer that does not fit. Make it smaller or leave it out.")
+CRASH_TEXT = ("FreeCAD's geometry kernel crashed while working on a copy (exit code {code}); your document is safe. "
+              "The same operation in the open document would close FreeCAD and lose unsaved work, so do not try "
+              "it there. Usual cause: a fillet or chamfer that does not fit. Make it smaller or leave it out.")
 
 
 async def on_copy(raw: Raw, make_call: Callable[[str, str], str], doc: str | None, instance: int | None,

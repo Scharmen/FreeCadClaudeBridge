@@ -14,11 +14,13 @@ async def _raw(*_a, **_k):
 def _fake(monkeypatch, crash_on):
     async def run(script, _timeout):
         if crash_on(script):
-            return {"ok": False, "exit_code": -11, "output": "noise", "killed": None, "timed_out": False, "result": None}
+            return {"ok": False, "exit_code": -11, "output": "noise", "killed": None, "timed_out": False,
+                    "result": None}
         if "param_names" in script:
             return {"ok": True, "exit_code": 0, "result": ["A", "B"], "output": ""}
         return {"ok": True, "exit_code": 0, "output": "",
-                "result": {"params": [], "missing": [], "runs": [{"param": "A", "factor": 1, "ok": True, "changed": True}]}}
+                "result": {"params": [], "missing": [],
+                           "runs": [{"param": "A", "factor": 1, "ok": True, "changed": True}]}}
     monkeypatch.setattr(headless, "run_headless", run)
 
 
@@ -32,7 +34,8 @@ def test_a_crash_is_named_and_warns_about_the_open_document(monkeypatch):
 
 def test_an_ordinary_failure_is_not_called_a_crash(monkeypatch):
     async def run(_s, _t):
-        return {"ok": False, "exit_code": 0, "output": "ValueError: x", "killed": None, "timed_out": False, "result": None}
+        return {"ok": False, "exit_code": 0, "output": "ValueError: x", "killed": None, "timed_out": False,
+                "result": None}
     monkeypatch.setattr(headless, "run_headless", run)
     async def go():
         await runner.on_copy(_raw, lambda p, t: "x", None, None)
