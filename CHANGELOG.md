@@ -5,6 +5,10 @@
 - `make_part(family, params, at, replace)`: tested builders for gear, gear pair, spring, bolt, nut, bolt and nut, hinge, enclosure, snap box, bracket and knob. `family="list"` shows them with their parameters. Sizes that cannot work are refused with the reason. Each object stores how it was made; call again with `replace` to change sizes (no parametric expressions in the shapes).
 - `design_library(action, query, id)`: search, show and delete what worked before. A `good` rating in `record_feedback` stores the code of that model with its words.
 - The skill and the panel start from what exists: library, then `make_part`, then a recipe.
+- New `person_standing` template: real 7.5-head proportions (head was a third too big, neck too thin), shoulders and sleeves that fit, shirt folds, jeans with waistband, belt loops, fly, pockets and back pockets, sneakers with laces and a separate sole, eyes with pupils, fingers. `dog_standing`: broader, shorter muzzle with a clear stop and brows, eyes and nose as their own coloured parts, deeper fur, toes. Both mesh on a finer grid (`cells` in a template).
+- `flex_test` survives a crash in the geometry kernel and names the parameter values that cause it; the checks say a crash is a crash and warn against trying the same in the open document.
+- Check tools: `check_design` takes a single number for `height` and `solids`, and explains a spec it cannot read.
+- Fix: the thread check walked one line through the whole part and counted a bottle's base and shoulder as crests, so short threads failed although they were right. It now follows the helix around the axis, tells rings from a thread and takes a second instead of minutes.
 - Fix: `check_design`, `check_print` and `check_fit` (and `run_headless`) could fail on documents with meshes although the script had worked: FreeCAD's progress text landed on the same line as the result. It is now removed from the output as well.
 - Benchmark: the judge also sees bottom and rear views and three cross-sections, so it can tell a closed box with nothing inside from a good one; `--rejudge` applies this to saved runs.
 

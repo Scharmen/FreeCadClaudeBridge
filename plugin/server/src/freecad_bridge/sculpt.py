@@ -712,7 +712,7 @@ def expand_template(scene: dict[str, Any]) -> dict[str, Any]:
             else:
                 target[key] = v
     rest = {key: v for key, v in scene.items() if key not in ("template", "height", "parts")}
-    return {**rest, "parts": parts}
+    return {**({"cells": tpl["cells"]} if "cells" in tpl else {}), **rest, "parts": parts}
 
 
 def _scene_bounds(parts: list[dict[str, Any]]) -> list[tuple[float, float, float]]:
@@ -736,7 +736,10 @@ def sculpt_scene(scene: dict[str, Any], out_dir: str, voxel: float | None = None
     for part in parts:
         for p in part.get("primitives") or []:
             _sdf(p, np.zeros((1, 3)))      # explain bad input before the heavy work
-    shared = choose_voxel(_scene_bounds(parts), voxel)
+    bounds = _scene_bounds(parts)
+    if voxel is None and scene.get("cells"):       # a template with small features asks for a finer grid
+        voxel = float(max(np.subtract(bounds[1], bounds[0]))) / float(scene["cells"])
+    shared = choose_voxel(bounds, voxel)
     os.makedirs(out_dir, exist_ok=True)
     out = []
     lo_all, hi_all = None, None
