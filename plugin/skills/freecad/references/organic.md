@@ -10,6 +10,12 @@ Tested by `tests/gui/test_references.py`. FreeCAD is a CAD program, not a sculpt
 | Coins, plaques, lithophanes from a picture | `image_to_3d` mode `relief` |
 | Mechanical parts | PartDesign (see `partdesign.md`) |
 
+## Contents
+- People and animals: start from a template
+- The `sculpt` tool: rules and checks
+- Smooth CAD forms: lofts, sweeps, B-spline surfaces
+- Meshes built safely
+
 ## People and animals: start from a template
 
 Never build a person or an animal from scratch or from Part primitives. The `sculpt` tool has tested templates with correct proportions, faces and fur; scale one to the height you need and change it:

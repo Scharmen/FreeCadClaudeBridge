@@ -46,7 +46,7 @@ def fresh_doc():
 def test_every_reference_file_has_examples():
     names = {p.stem for p in REFS.glob("*.md")}
     assert names >= {"part", "partdesign", "sketcher", "assembly", "techdraw", "varset-spreadsheet", "export",
-                     "api-changes-1.1"}
+                     "api-changes-1.1", "shapes", "mechanical", "printing", "multipart"}
     assert len(blocks()) >= 15
 
 
