@@ -8,9 +8,10 @@ EXPECTED = {"status", "get_tree", "get_object", "inspect_shape", "inspect_sketch
             "api_help", "list_commands", "run_python", "run_command", "task_dialog", "selection", "document",
             "export", "import", "view", "run_headless", "snapshot", "instances",
             "select_instance", "image_to_3d", "record_feedback", "get_preferences", "sculpt", "compare_to_picture",
-            "design_notes", "check_design", "check_print", "check_fit", "flex_test", "inspect_views", "make_part",
+            "design_notes", "check_design", "check_print", "check_fit", "flex_test", "inspect_views", "check_surface",
+            "make_part",
             "design_library"}
-READ_ONLY = {"check_design", "check_print", "check_fit", "flex_test", "inspect_views",
+READ_ONLY = {"check_design", "check_print", "check_fit", "flex_test", "inspect_views", "check_surface",
              "status", "instances", "get_preferences", "get_tree", "get_object", "inspect_shape", "inspect_sketch",
              "get_changes",
              "get_console",

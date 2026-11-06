@@ -354,3 +354,99 @@ def section_image(sections: list[tuple[str, np.ndarray]], axis: str, offset: flo
     buf = io.BytesIO()
     im.save(buf, "PNG")
     return buf.getvalue()
+
+
+PAINT = np.array((60.0, 130.0, 95.0))
+SURFACE_SIDES = (("front left", 215.0), ("rear right", 35.0))
+
+
+def _rasterize(verts: np.ndarray, normals: np.ndarray, tris: np.ndarray, view: np.ndarray, up: np.ndarray,
+               size: tuple[int, int]) -> np.ndarray:
+    """Per pixel the surface normal seen along `view`, orthographic and fitted to `size`; NaN where nothing is."""
+    w, h = size
+    right = np.cross(up, view)
+    right /= np.linalg.norm(right)
+    top = np.cross(view, right)
+    x, y, depth = verts @ right, verts @ top, verts @ view
+    scale = min((w - 16) / max(float(np.ptp(x)), 1e-9), (h - 16) / max(float(np.ptp(y)), 1e-9))
+    sx = (x - (x.min() + x.max()) / 2) * scale + w / 2
+    sy = h / 2 - (y - (y.min() + y.max()) / 2) * scale
+    zbuf = np.full((h, w), -np.inf)
+    out = np.full((h, w, 3), np.nan)
+    for a, b, c in tris:
+        x0, y0, x1, y1, x2, y2 = sx[a], sy[a], sx[b], sy[b], sx[c], sy[c]
+        area2 = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+        if abs(area2) < 1e-9:
+            continue
+        left, far = max(int(min(x0, x1, x2)), 0), min(int(max(x0, x1, x2)) + 1, w - 1)
+        low, high = max(int(min(y0, y1, y2)), 0), min(int(max(y0, y1, y2)) + 1, h - 1)
+        if far < left or high < low:
+            continue
+        gx, gy = np.meshgrid(np.arange(left, far + 1), np.arange(low, high + 1))
+        w0 = ((y1 - y2) * (gx - x2) + (x2 - x1) * (gy - y2)) / area2
+        w1 = ((y2 - y0) * (gx - x2) + (x0 - x2) * (gy - y2)) / area2
+        w2 = 1 - w0 - w1
+        inside = (w0 >= -0.01) & (w1 >= -0.01) & (w2 >= -0.01)
+        if not inside.any():
+            continue
+        z = w0 * depth[a] + w1 * depth[b] + w2 * depth[c]
+        py, px = gy[inside], gx[inside]
+        front = z[inside] > zbuf[py, px]
+        if not front.any():
+            continue
+        py, px = py[front], px[front]
+        zbuf[py, px] = z[inside][front]
+        out[py, px] = (w0[inside][front, None] * normals[a] + w1[inside][front, None] * normals[b]
+                       + w2[inside][front, None] * normals[c])
+    return out
+
+
+def _shade(buffer: np.ndarray, view: np.ndarray, mode: str) -> Image.Image:
+    img = np.full((*buffer.shape[:2], 3), 250, np.uint8)
+    hit = ~np.isnan(buffer[..., 0])
+    n = buffer[hit]
+    n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-9)
+    facing = n @ view
+    bounce = 2 * facing[:, None] * n - view                   # the direction a reflection comes from
+    if mode == "zebra":
+        stripes = np.where(np.sin(bounce[:, 2] * 16 * np.pi) > 0, 235.0, 25.0)
+        color = np.repeat(stripes[:, None], 3, axis=1)
+    else:                                                     # a long light overhead, a low one, dark floor
+        sky = np.exp(-((bounce[:, 2] - 0.62) / 0.10) ** 2) + 0.5 * np.exp(-((bounce[:, 2] - 0.15) / 0.03) ** 2)
+        light = np.clip(n @ np.array((0.3, -0.4, 0.86)), 0, 1)
+        edge = (1 - np.clip(np.abs(facing), 0, 1)) ** 4
+        color = PAINT[None, :] * (0.3 + 0.7 * light[:, None]) + (sky[:, None] * 140 + edge[:, None] * 50)
+    img[hit] = np.clip(color, 0, 255).astype(np.uint8)
+    return Image.fromarray(img)
+
+
+def _side_view(azimuth: float) -> np.ndarray:
+    az, el = math.radians(azimuth), math.radians(24)
+    return np.array((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)))
+
+
+def shade_surface(verts: np.ndarray, normals: np.ndarray, tris: np.ndarray, mode: str = "zebra",
+                  size: tuple[int, int] = (700, 420), azimuth: float = 215.0) -> Image.Image:
+    view = _side_view(azimuth)
+    return _shade(_rasterize(verts, normals, tris, view, np.array((0.0, 0.0, 1.0)), size), view, mode)
+
+
+def surface_sheet(meshes: list[tuple[np.ndarray, np.ndarray, np.ndarray]], size: tuple[int, int] = (700, 420)) -> bytes:
+    """Upper row glossy paint, lower row reflection stripes, each from two sides, for the objects together."""
+    offset, parts = 0, []
+    for v, _n, t in meshes:
+        parts.append(t + offset)
+        offset += len(v)
+    verts = np.concatenate([m[0] for m in meshes])
+    normals = np.concatenate([m[1] for m in meshes])
+    tris = np.concatenate(parts)
+    w, h = size
+    sheet = Image.new("RGB", (2 * w, 2 * h), (250, 250, 250))
+    for col, (_label, azimuth) in enumerate(SURFACE_SIDES):
+        view = _side_view(azimuth)
+        buffer = _rasterize(verts, normals, tris, view, np.array((0.0, 0.0, 1.0)), size)
+        sheet.paste(_shade(buffer, view, "paint"), (col * w, 0))
+        sheet.paste(_shade(buffer, view, "zebra"), (col * w, h))
+    data = io.BytesIO()
+    sheet.save(data, format="PNG")
+    return data.getvalue()

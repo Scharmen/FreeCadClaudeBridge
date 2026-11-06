@@ -13,6 +13,12 @@ ISO_METRIC = {  # size: pitch, head across flats, head height, nut height (ISO 4
     "M8": (1.25, 13.0, 5.3, 6.8), "M10": (1.5, 16.0, 6.4, 8.4), "M12": (1.75, 18.0, 7.5, 10.8),
 }
 
+POD = (  # the default faired_body and an example of its lines: y and z of each line along x
+    [[0, 0, 22], [30, 0, 40], [100, 0, 50], [170, 0, 40], [200, 0, 22]],
+    [[0, 12, 20], [30, 26, 34], [100, 34, 42], [170, 26, 34], [200, 12, 20]],
+    [[0, 14, 14], [30, 32, 16], [100, 40, 18], [170, 32, 16], [200, 14, 14]],
+    [[0, 0, 8], [30, 0, 2], [100, 0, 0], [170, 0, 2], [200, 0, 8]],
+)
 FAMILIES: dict[str, dict[str, Any]] = {
     "gear": {"doc": "Involute spur gear, or helical with helix_deg.",
              "params": {"module": 1.0, "teeth": 20, "width": 8.0, "bore": 5.0, "pressure_deg": 20.0, "helix_deg": 0.0,
@@ -43,6 +49,12 @@ FAMILIES: dict[str, dict[str, Any]] = {
     "knob": {"doc": "Knob for a D-shaft: grip ridges, indicator mark, rounded top.",
              "params": {"diameter": 25.0, "height": 18.0, "shaft": 6.0, "flat": 1.5, "depth": 12.0, "ridges": 18,
                         "gap": 0.2}},
+    "faired_body": {"doc": "Smooth closed body (car, boat, fairing) from feature lines running front to rear. Each "
+                           "line: {points: [[x, y, z], ...], crease: true for a sharp edge}, x rising, all lines from "
+                           "the same start x to the same end x. Give one side (y >= 0), mirrored across y=0: order the "
+                           "lines around the half section, from the top centre line to the bottom centre line.",
+                    "params": {"lines": [{"points": pts, "crease": i == 2} for i, pts in enumerate(POD)],
+                               "poles": 13, "name": "Body"}},
 }
 STRAIN = {"PLA": 0.02, "PETG": 0.03, "ABS": 0.04, "NYLON": 0.05}    # allowed bending strain of a printed clip
 
@@ -90,8 +102,38 @@ def _validate(family: str, p: dict[str, Any]) -> None:
             raise ValueError("the lid must be lower than half the height")
     if family == "hinge" and p["knuckles"] % 2 == 0:
         raise ValueError("a hinge needs an odd number of knuckles, so that one leaf holds both ends of the pin")
+    if family == "faired_body":
+        _validate_lines(p)
     if family == "knob" and p["shaft"] + 4 >= p["diameter"]:
         raise ValueError("the knob needs at least 2 mm of wall around the shaft")
+
+
+def _validate_lines(p: dict[str, Any]) -> None:
+    lines = p["lines"]
+    if len(lines) < 3:
+        raise ValueError("a faired_body needs at least 3 lines: top centre, at least one between, bottom centre")
+    if p["poles"] < 4:
+        raise ValueError("a faired_body needs at least 4 poles along a line")
+    start, end = None, None
+    span = 1e-6
+    for i, line in enumerate(lines):
+        pts = line.get("points") if isinstance(line, dict) else None
+        if not pts or len(pts) < 4:
+            raise ValueError(f"line {i} needs at least 4 points")
+        if any(not isinstance(q, (list, tuple)) or len(q) != 3 for q in pts):
+            raise ValueError(f"line {i}: every point is x, y, z")
+        xs = [float(q[0]) for q in pts]
+        if any(b <= a for a, b in zip(xs, xs[1:], strict=False)):
+            raise ValueError(f"line {i}: x must rise from front to rear, at every point")
+        start, end = xs[0] if start is None else start, xs[-1] if end is None else end
+        span = max(span, end - start)
+        if abs(xs[0] - start) > 1e-3 * span or abs(xs[-1] - end) > 1e-3 * span:
+            raise ValueError(f"line {i} must start and end at the same x as line 0 ({start:g} to {end:g})")
+        if any(float(q[1]) < 0 for q in pts):
+            raise ValueError(f"line {i}: negative y; give one side only, y >= 0, it gets mirrored")
+    for index, what in ((0, "first line"), (-1, "last line")):
+        if any(abs(float(q[1])) > 1e-3 * span for q in lines[index]["points"]):
+            raise ValueError(f"the {what} must lie on the centre, y = 0")
 
 
 def describe() -> dict[str, Any]:

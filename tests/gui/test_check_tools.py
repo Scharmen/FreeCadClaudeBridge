@@ -133,3 +133,24 @@ tight.Shape = Part.makeBox(40, 30, 3, Vector(0, 200, 20)).fuse(Part.makeBox(36, 
     assert ok["ok"] and ok["gap_mm"] == 0 and ok["side_gap_mm"] == pytest.approx(0.2, abs=0.01)
     snug = tool(mcp_server.check_fit, a="Box", b="TightLid", kind="snap")
     assert not snug["ok"] and snug["side_gap_mm"] == 0
+
+
+def test_check_surface_shows_paint_and_stripes_and_counts_ripples():
+    call("run_python", code="""
+b = doc.addObject("Part::Feature", "Egg")
+b.Shape = Part.makeSphere(40)
+doc.recompute()
+""", doc=DOC)
+    out = anyio.run(lambda: mcp_server.check_surface(objects=["Egg"], doc=DOC))
+    data = json.loads(out[0])
+    assert data["objects"] == ["Egg"] and data["ripples"]
+    assert all(r["inflections"] == 0 for r in data["ripples"])
+    assert out[1].data[:4] == b"\x89PNG"
+
+
+def test_a_faired_body_from_make_part_says_how_close_it_stayed_and_passes_check_surface():
+    made = json.loads(anyio.run(lambda: mcp_server.make_part("faired_body", {"name": "Pod"}, doc=DOC)))
+    part = made["parts"][0]
+    assert part["valid"] and part["solids"] == 1 and part["max_distance_to_points_mm"] < 3
+    out = anyio.run(lambda: mcp_server.check_surface(objects=[part["object"]], doc=DOC))
+    assert json.loads(out[0])["objects"] == [part["object"]] and out[1].data[:4] == b"\x89PNG"

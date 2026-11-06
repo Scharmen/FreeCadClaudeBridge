@@ -512,6 +512,73 @@ def export_meshes(path: str, names: list[str] | None, out_dir: str) -> list[dict
         App.closeDocument(doc.Name)
 
 
+def _surface_mesh(s: Any) -> tuple[list[Any], list[Any], list[Any]]:
+    """Triangles with the true normals of the surface: mesh normals would show the triangles, not the shape."""
+    points, normals, tris = [], [], []
+    deflection = max(0.01, s.BoundBox.DiagonalLength / 4000)
+    for face in s.Faces:
+        pts, corners = face.tessellate(deflection)
+        base, surface, flip = len(points), face.Surface, -1 if face.Orientation == "Reversed" else 1
+        for p in pts:
+            n = surface.normal(*surface.parameter(p))
+            points.append(p)
+            normals.append(n * flip)
+        tris += [(a + base, b + base, c + base) for a, b, c in corners]
+    return points, normals, tris
+
+
+def _ripples(s: Any, label: str) -> list[dict[str, Any]]:
+    """Changes of bending along lengthwise cuts: each one is a hollow or bump a reflection will show."""
+    bb = s.BoundBox
+    out = []
+    along_x = bb.XLength >= bb.YLength
+    normal = App.Vector(0, 1, 0) if along_x else App.Vector(1, 0, 0)
+    low, length = (bb.YMin, bb.YLength) if along_x else (bb.XMin, bb.XLength)
+    for share in (0.5, 0.65, 0.8):
+        wires = s.slice(normal, low + length * share)
+        if not wires:
+            continue
+        wire = max(wires, key=lambda w: w.Length)
+        pts = [(p.x if along_x else p.y, p.z) for p in wire.discretize(Number=400)]
+        turns = [math.atan2(b[1] - a[1], b[0] - a[0]) for a, b in zip(pts, pts[1:], strict=False)
+                 if abs(b[0] - a[0]) + abs(b[1] - a[1]) > 1e-9]
+        bends, last = 0, 0
+        for a, b in zip(turns, turns[1:], strict=False):
+            d = (b - a + math.pi) % (2 * math.pi) - math.pi
+            if abs(d) > 0.002 and abs(d) < 0.3:    # above that: an edge between faces, not a ripple
+                sign = 1 if d > 0 else -1
+                bends += sign != last and last != 0
+                last = sign
+        out.append({"object": label, "cut_at": round(low + length * share, 2), "inflections": int(bends)})
+    return out
+
+
+def export_surfaces(path: str, names: list[str] | None, out_dir: str) -> dict[str, Any]:
+    """Each object as triangles with surface normals (.pts, .nrm, .tris), and its ripple count."""
+    doc = App.openDocument(path)
+    try:
+        items, ripples = [], []
+        for i, o in enumerate(_pick(doc, names)):
+            if o.TypeId.startswith("Mesh::") or not hasattr(o, "Shape"):
+                continue
+            s = _global_shape(o)
+            points, normals, tris = _surface_mesh(s)
+            base = os.path.join(out_dir, f"surface{i}")
+            for ext, code, values in ((".pts", "d", [c for p in points for c in (p.x, p.y, p.z)]),
+                                      (".nrm", "d", [c for n in normals for c in (n.x, n.y, n.z)]),
+                                      (".tris", "i", [c for t in tris for c in t])):
+                data = array(code, values)
+                if sys.byteorder != "little":
+                    data.byteswap()
+                with open(base + ext, "wb") as f:
+                    data.tofile(f)
+            items.append({"label": o.Label, "base": base})
+            ripples += _ripples(s, o.Label)
+        return {"items": items, "ripples": ripples}
+    finally:
+        App.closeDocument(doc.Name)
+
+
 def seat(sa: Any, sb: Any, touch: float = 1e-3, reach: float = 2.0, max_pairs: int = 20000) -> dict[str, Any] | None:
     """Two touching solids: do they touch only on flat faces of one direction (a seat), and how much room is
     left on the faces around it? None when they touch in other ways, or are too complex to tell."""

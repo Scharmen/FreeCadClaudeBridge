@@ -3,6 +3,7 @@
 Set FREECAD_TARGET (see test_real_freecad.py).
 """
 
+import json
 import os
 
 import pytest
@@ -108,3 +109,76 @@ def test_the_volume_of_a_spring_is_right_even_where_the_kernel_gets_it_wrong(cmd
     r = score.run_freecad(
         HEAD + "from freecad_bridge.checks import measure\n" + SPRING + "_result = measure.volume_of(s)\n", cmd)
     assert 800 < r < 1250, r
+
+
+BODY = """
+from freecad_bridge.parts import builders as bb
+xs = [0, 60, 200, 500, 1000, 1500, 2000, 2500, 3000, 3500, 3800, 3940, 4000]
+def z(x, top, drop): return top - drop * ((x - 2000) / 2000) ** 2
+lines = [{"points": [[x, 0, z(x, 1000, 180)] for x in xs]},
+         {"points": [[x, 450, z(x, 960, 170)] for x in xs]},
+         {"points": [[x, 800 - 200 * ((x - 2000) / 2000) ** 2, z(x, 800, 150)] for x in xs], "crease": True},
+         {"points": [[x, 860 - 200 * ((x - 2000) / 2000) ** 2, z(x, 500, 100)] for x in xs]},
+         {"points": [[x, 700 - 200 * ((x - 2000) / 2000) ** 2, 200] for x in xs], "crease": True},
+         {"points": [[x, 0, 180] for x in xs]}]
+"""
+
+
+def test_a_faired_body_is_one_valid_solid_with_a_sharp_crease(cmd):
+    code = HEAD + BODY + """
+s = bb.faired_body({"lines": lines, "poles": 9, "name": "Lower"})["Lower"]
+bb_ = s.optimalBoundingBox(True, False)
+p = App.Vector(2000, 800, 800)
+near = [f for f in s.Faces if f.distToShape(Part.Vertex(p))[0] < 1]
+ns = []
+for f in near:
+    u, v = f.Surface.parameter(f.distToShape(Part.Vertex(p))[1][0][0])
+    ns.append(f.normalAt(u, v))
+angle = math.degrees(ns[0].getAngle(ns[1]))
+_result = {"valid": s.isValid(), "solids": len(s.Solids), "w": bb_.YLength, "l": bb_.XLength,
+           "near": len(near), "angle": angle, "vol": s.Volume}
+"""
+    res = score.run_freecad(code, cmd)
+    assert res["valid"] and res["solids"] == 1 and res["vol"] > 0
+    assert abs(res["l"] - 4000) < 1 and abs(res["w"] - 2 * 860) < 40
+    assert res["near"] == 2 and res["angle"] > 15          # the crease stays a real edge
+
+
+def test_a_faired_body_ripples_less_than_a_loft_through_the_same_noisy_points(cmd):
+    code = HEAD + BODY + """
+import random
+import surface_math as sm
+import numpy as np
+random.seed(4)
+noisy = [{**ln, "points": [[x, max(0, y + random.uniform(-4, 4)) if y else 0, zz + random.uniform(-4, 4)]
+                           for x, y, zz in ln["points"]]} for ln in lines]
+new = bb.faired_body({"lines": noisy, "poles": 9, "name": "B"})["B"]
+secs = []
+for i, x in enumerate(xs):
+    pts = [App.Vector(*ln["points"][i]) for ln in noisy]
+    pts.append(pts[0])
+    secs.append(Part.makePolygon(pts))
+old = Part.makeLoft(secs, True, False)
+def count(shape):
+    out = 0
+    for y in (200.0, 450.0):
+        w = max(shape.slice(App.Vector(0, 1, 0), y), key=lambda q: q.Length)
+        p = np.array([[v.x, v.z] for v in w.discretize(Number=400)])
+        out += sm.inflections(p)
+    return out
+_result = {"new": count(new), "old": count(old)}
+"""
+    res = score.run_freecad(code, cmd)
+    assert res["new"] < res["old"]
+
+
+def test_the_default_faired_body_builds_and_reports_its_fit(cmd, tmp_path):
+    from freecad_bridge.parts import catalog
+
+    params = catalog.resolve("faired_body")
+    code = HEAD + "import json\nfrom freecad_bridge.parts import builders as bb\n" + (
+        f"_result = bb.export('faired_body', json.loads({json.dumps(json.dumps(params))}), {{}}, {{}}, "
+        f"{str(tmp_path)!r})\n")
+    made = score.run_freecad(code, cmd)[0]
+    assert made["valid"] and made["solids"] == 1 and made["max_distance_to_points_mm"] < 3
+    assert abs(made["size_mm"][0] - 200) < 1 and abs(made["size_mm"][1] - 80) < 8

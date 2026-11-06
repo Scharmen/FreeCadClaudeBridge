@@ -6,10 +6,16 @@ Each builder returns {part name: shape}, in place and in position, so that fits 
 from __future__ import annotations
 
 import math
+import sys
+from pathlib import Path
 from typing import Any
 
 import FreeCAD as App
+import numpy as np
 import Part
+
+sys.path.insert(0, str(Path(__file__).parent))     # this file is loaded by its path, away from its package
+import surface_math  # noqa: E402
 
 V = App.Vector
 THREAD_DEPTH = 0.6134
@@ -345,6 +351,48 @@ def knob(p: dict[str, Any]) -> dict[str, Any]:
     return {"Knob": body.cut(mark).removeSplitter()}
 
 
+def _patch_face(patch: dict[str, Any]) -> Any:
+    surface = Part.BSplineSurface()
+    uk, um = surface_math.knots_and_mults(patch["u_knots"])
+    vk, vm = surface_math.knots_and_mults(patch["v_knots"])
+    grid = [[V(*(float(c) for c in pole)) for pole in row] for row in patch["poles"]]
+    surface.buildFromPolesMultsKnots(poles=grid, umults=um, vmults=vm, uknots=uk, vknots=vk, uperiodic=False,
+                                     vperiodic=False, udegree=patch["u_degree"], vdegree=patch["v_degree"])
+    return surface.toShape()
+
+
+def _close(faces: list[Any], tolerance: float) -> Any:
+    """Sew the faces into a shell, put flat caps on the open ends, return the solid."""
+    sewn = Part.makeCompound(faces)
+    sewn.sewShape(tolerance)
+    if len(sewn.Shells) != 1:
+        raise ValueError(f"the surfaces do not join into one skin ({len(sewn.Shells)} pieces): "
+                         "neighbouring lines must start and end at the same x")
+    shell = sewn.Shells[0]
+    free = [e for e in shell.Edges if len(shell.ancestorsOfType(e, Part.Face)) == 1]
+    caps = [Part.Face(Part.Wire(w)) for w in Part.sortEdges(free)]
+    closed = Part.makeCompound([*shell.Faces, *caps])
+    closed.sewShape(tolerance)
+    solid = Part.Solid(closed.Shells[0])
+    if solid.Volume < 0:
+        solid.reverse()
+    return solid
+
+
+def faired_body(p: dict[str, Any]) -> dict[str, Any]:
+    """A smooth closed body from feature lines running front to rear, with sharp edges only at creases."""
+    lines = [{**line, "points": np.asarray(line["points"], float)} for line in p["lines"]]
+    faces = [_patch_face(patch) for patch in surface_math.patches(lines, p["poles"])]
+    faces += [f.mirror(V(0, 0, 0), V(0, 1, 0)) for f in faces]
+    size = float(np.ptp(np.concatenate([line["points"] for line in lines]), axis=0).max())
+    return {p["name"]: _close(faces, size * 2e-5)}
+
+
+def fit_error(shape: Any, lines: list[dict[str, Any]]) -> float:
+    """How far the given points lie from the finished surface, at most."""
+    return max(shape.distToShape(Part.Vertex(V(*pt)))[0] for line in lines for pt in line["points"])
+
+
 def build(family: str, p: dict[str, Any], iso: dict[str, Any], strain: dict[str, float]) -> dict[str, Any]:
     if family == "gear":
         return {"Gear": gear(p["module"], p["teeth"], p["width"], p["bore"], p["pressure_deg"], p["helix_deg"],
@@ -353,6 +401,8 @@ def build(family: str, p: dict[str, Any], iso: dict[str, Any], strain: dict[str,
         return {"bolt": bolt, "nut": nut, "bolt_nut": bolt_nut}[family](p, iso)
     if family == "snap_box":
         return snap_box(p, strain)
+    if family == "faired_body":
+        return faired_body(p)
     return {"gear_pair": gear_pair, "spring": spring, "hinge": hinge, "enclosure": enclosure, "bracket": bracket,
             "knob": knob}[family](p)
 
@@ -366,5 +416,7 @@ def export(family: str, p: dict[str, Any], iso: dict[str, Any], strain: dict[str
         bb = shape.optimalBoundingBox(True, False)
         made.append({"name": name, "path": path, "valid": bool(shape.isValid()), "solids": len(shape.Solids),
                      "size_mm": [round(bb.XLength, 2), round(bb.YLength, 2), round(bb.ZLength, 2)],
-                     "volume_mm3": round(shape.Volume, 1)})
+                     "volume_mm3": round(shape.Volume, 1),
+                     **({"max_distance_to_points_mm": round(fit_error(shape, p["lines"]), 2)}
+                        if family == "faired_body" else {})})
     return made

@@ -46,6 +46,7 @@ Size, position and fit errors do not show in a screenshot, and they are the most
 - [ ] check_print if it will be printed (also tells the best orientation)
 - [ ] flex_test if it is parametric
 - [ ] inspect_views: the whole model, and a section to see inside
+- [ ] check_surface for a body judged by its reflections: calm stripes before any detail
 - [ ] Every problem fixed, then checked again
 ```
 
@@ -100,7 +101,7 @@ A picture in the chat without a file path: look at it, take screenshots from the
 
 ## References
 
-Before a model the user will judge by its look, read `references/quality.md`; for figures, animals, hair, plants and other organic forms read `references/organic.md` and use the `sculpt` tool. **People and animals always start from a `sculpt` template** (`person_standing`, `dog_standing`, `cat_sitting`, or the closest one changed into the animal you need); stacked Part primitives look like a snowman. Read before you build: `references/mechanical.md` for anything with screws, bearings or fits; `printing.md` for anything to print, above all lids, clips and hinges; `shapes.md` for threads, springs, twists, patterns and fillet trouble; `multipart.md` for parts that mate. Tested patterns per area: `part.md`, `partdesign.md`, `sketcher.md`, `assembly.md`, `techdraw.md`, `varset-spreadsheet.md`, `export.md`, and `api-changes-1.1.md` for pitfalls.
+Before a model the user will judge by its look, read `references/quality.md`; for figures, animals, hair, plants and other organic forms read `references/organic.md` and use the `sculpt` tool. **People and animals always start from a `sculpt` template** (`person_standing`, `dog_standing`, `cat_sitting`, or the closest one changed into the animal you need); stacked Part primitives look like a snowman. **Cars, boats and fairings start from feature lines:** read `references/surfaces.md`, build with `make_part` family `faired_body`, check with `check_surface` before adding detail. Read before you build: `references/mechanical.md` for anything with screws, bearings or fits; `printing.md` for anything to print, above all lids, clips and hinges; `shapes.md` for threads, springs, twists, patterns and fillet trouble; `multipart.md` for parts that mate. Tested patterns per area: `part.md`, `partdesign.md`, `sketcher.md`, `assembly.md`, `techdraw.md`, `varset-spreadsheet.md`, `export.md`, and `api-changes-1.1.md` for pitfalls.
 
 ## Snippets (FreeCAD 1.1)
 

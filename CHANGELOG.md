@@ -2,6 +2,9 @@
 
 ## 1.18.0 (unreleased)
 
+- `make_part` family `faired_body`: a smooth closed body from a few feature lines, fitted instead of interpolated, with sharp edges only at creases. It reports how far the surface stays from the given points.
+- `check_surface`: glossy paint and reflection stripes from two sides, plus a count of ripples along lengthwise cuts, to find bumps the normal view hides.
+- Skill: `references/surfaces.md`, how to build car and boat bodies.
 - `make_part` springs: end coils ground over about 3/4 of a turn, pitch opens gradually over one turn. Gears: filleted tooth roots, no waist at 18 to 30 teeth.
 - Measuring: a bore split into quarter faces counts as a hole; the volume is checked on triangles where the kernel is far off on long B-spline faces (a spring read 62 instead of 930 mm³).
 - Skill: leave only what was asked for visible; a holder gets one seat for each item.
