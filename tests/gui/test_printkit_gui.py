@@ -154,7 +154,7 @@ d.show()
 d.adjustSize()
 FreeCADGui_ = __import__("FreeCADGui")
 FreeCADGui_.updateGui()
-ok = d.grab().save({"'/private/tmp/claude-501/-Users-kevin-StudioProjects-FreeCadClaudeBridge/84ab89a9-5ebb-45d4-ba6a-619392c88397/scratchpad/v2/dialog.png'"})
+ok = d.grab().save({str(tmp_path / 'dialog.png')!r})
 d.close()
 d.deleteLater()
 _result = ok
