@@ -33,3 +33,6 @@ A body is judged by its reflections. Hand-typed tables of sections, each interpo
 - `Shape.BoundBox` of a B-spline body can show its control points and read much too big (2128 mm for a 1895 mm wide car). Use `shape.optimalBoundingBox(True, False)` or `check_design`.
 - Booleans between surfaces that nearly touch can fail with an empty error. Keep them clearly apart, or pass a tolerance: `a.cut(b, 0.5)`.
 - A wall from one line table moved inwards is not an exact offset. Measure wall thickness with `check_print` before printing.
+- `removeSplitter()` can break a body with B-spline faces while it looks fine. Work on a copy and keep the result only if `isValid()` still holds.
+- Moving lines inwards for a wall: drop the stations the wall passes at nose and tail, or x stops rising and the build fails with "U Poles and degree mismatch".
+- After the last cut, mesh the body and check `Mesh.isSolid()` before you call it printable. A valid solid can still give a mesh with open spots.
