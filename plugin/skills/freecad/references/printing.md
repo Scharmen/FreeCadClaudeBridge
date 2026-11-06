@@ -121,3 +121,7 @@ assert block.isValid() and len(block.Solids) == 1
 assert abs(tool.BoundBox.ZMax - 6 / 2 * 2 ** 0.5) < 1e-6
 doc.addObject("Part::Feature", "Teardrop").Shape = block
 ```
+
+## Exporting for the printer
+
+When the user wants print files, an assembly kit or an assembly guide, point them to the **3D print export** button (File menu, or `3D print…` in the chat panel). It asks for the printer and the assembly method itself, so do not ask for them while modelling. It reads each object's colour and visibility, so give every part the colour it should print in and hide helpers. Name wheels, knobs and rollers as such, keep them round about one axis and separate from their host: the button offers them as moving parts, with axles instead of glue.

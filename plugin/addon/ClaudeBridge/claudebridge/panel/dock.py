@@ -499,6 +499,10 @@ class ChatPanel(QtWidgets.QDockWidget):
         self.status = QtWidgets.QLabel("")
         self.status.setStyleSheet("color: gray")
         row.addWidget(self.status, 1)
+        self.print_btn = QtWidgets.QPushButton("3D print…")
+        self.print_btn.setToolTip("Export the model for a 3D printer")
+        self.print_btn.clicked.connect(self._print_export)
+        row.addWidget(self.print_btn)
         self.stop_btn = QtWidgets.QPushButton("Stop")
         self.stop_btn.clicked.connect(self.stop)
         self.stop_btn.setEnabled(False)
@@ -1176,6 +1180,11 @@ class ChatPanel(QtWidgets.QDockWidget):
                 box.setCurrentIndex(i)
                 return
         self._note(f"Unknown value '{value}'.", error=True)
+
+    def _print_export(self) -> None:
+        from ..printkit import dialog
+
+        dialog.show()
 
     def stop(self) -> None:
         if self._working():

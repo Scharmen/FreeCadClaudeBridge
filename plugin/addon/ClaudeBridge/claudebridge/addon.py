@@ -14,7 +14,7 @@ from . import __version__
 
 PARAMS = "User parameter:BaseApp/Preferences/Mod/ClaudeBridge"
 COMMANDS = ["ClaudeBridge_TogglePanel", "ClaudeBridge_Status", "ClaudeBridge_Restart", "ClaudeBridge_RotateToken",
-            "ClaudeBridge_OpenLog", "ClaudeBridge_Settings"]
+            "ClaudeBridge_OpenLog", "ClaudeBridge_Settings", "ClaudeBridge_PrintExport"]
 _state: dict[str, Any] = {}
 
 
@@ -167,13 +167,15 @@ def status_text() -> str:
 
 
 class _Command:
-    def __init__(self, menu: str, tip: str, fn: Any, accel: str = "") -> None:
-        self.menu, self.tip, self.fn, self.accel = menu, tip, fn, accel
+    def __init__(self, menu: str, tip: str, fn: Any, accel: str = "", icon: str = "") -> None:
+        self.menu, self.tip, self.fn, self.accel, self.icon = menu, tip, fn, accel, icon
 
     def GetResources(self) -> dict[str, str]:  # noqa: N802 (FreeCAD API)
         res = {"MenuText": self.menu, "ToolTip": self.tip}
         if self.accel:
             res["Accel"] = self.accel
+        if self.icon:
+            res["Pixmap"] = self.icon
         return res
 
     def Activated(self) -> None:  # noqa: N802
@@ -220,9 +222,32 @@ def _show_settings() -> None:
     prefs.show()
 
 
+def _print_export() -> None:
+    from .printkit import dialog
+
+    dialog.show()
+
+
+class _PrintButton:
+    """Puts the print export into every workbench: File menu and File toolbar."""
+
+    def modifyMenuBar(self) -> list[dict[str, str]]:  # noqa: N802 (FreeCAD API)
+        return [{"insert": COMMANDS[6], "menuItem": "Std_Export", "after": ""}]
+
+    def modifyToolBars(self) -> list[dict[str, str]]:  # noqa: N802
+        return [{"append": COMMANDS[6], "toolBar": "File"}]
+
+
 def _register_commands() -> None:
     if _state.get("commands"):
         return
+    icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "printkit", "print.svg")
+    Gui.addCommand(COMMANDS[6], _Command("3D print export…", "Export the model for a 3D printer: as one print, or "
+                                         "split by colour with connectors and an assembly guide", _print_export,
+                                         icon=icon))
+    if hasattr(Gui, "addWorkbenchManipulator"):
+        _state["print_button"] = _PrintButton()
+        Gui.addWorkbenchManipulator(_state["print_button"])
     Gui.addCommand(COMMANDS[0], _Command("Claude chat panel", "Show or hide the Claude chat panel",
                                          _toggle_panel, "Ctrl+Alt+K"))
     Gui.addCommand(COMMANDS[1], _Command("Bridge status", "Show the Claude bridge status", _show_status))

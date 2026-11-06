@@ -50,7 +50,7 @@ def test_mcp_server_named_freecad():
 
 def test_addon_has_no_third_party_imports():
     allowed = {"FreeCAD", "FreeCADGui", "PySide", "Part", "Sketcher", "Import", "ImportGui", "Mesh", "importDXF",
-               "importSVG", "claudebridge"}
+               "importSVG", "claudebridge", "MeshPart"}
     import sys
 
     stdlib = set(sys.stdlib_module_names)
