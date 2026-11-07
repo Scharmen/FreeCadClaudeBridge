@@ -2,11 +2,15 @@
 
 Control FreeCAD by chat with Claude, either in a **"Claude" chat panel inside FreeCAD** or from **Claude Code**. Claude works on your open document through FreeCAD's Python API: it creates and changes geometry, reads the model tree and properties, and exports files. Every Claude step is exactly one undo step, and failed code leaves nothing behind.
 
-![FreeCAD with the Claude panel: a Maserati Ghibli (1995) built from a photo for 3D printing](docs/images/freecad-maserati.png)
+![FreeCAD with the Claude panel next to an Audi RS5 at 1:24 that Claude built from photos](docs/images/freecad-rs5.png)
 
-*A Maserati Ghibli (1995) built from the user's photo for printing; here Claude checks the print mesh and repairs it until it is watertight. Real screenshot of FreeCAD 1.1 on macOS.*
+*FreeCAD 1.1 with the Claude panel and an Audi RS5 (1:24, 68 parts) that Claude built from photos for 3D printing. The **3D print…** button in the panel starts the print export (see [Printing](#printing)). The text in the input box is an example and was not sent. Real screenshot of FreeCAD 1.1 on macOS.*
 
-> Status: 1.18.0, not yet tagged. Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
+> **Status: 1.18.0, not yet tagged.** Tested by hand on macOS; Linux (AppImage) and Windows (portable build) are tested in CI against FreeCAD 1.1.4, including the GUI on Linux. The release is tagged after the [manual acceptance](docs/manual-testing.md) on Windows 11 and Ubuntu. See [CHANGELOG.md](CHANGELOG.md).
+>
+> **New in 1.18.0:** the 3D print export button (whole model or split by colour, connectors, axles, PDF guide); `make_part` family `faired_body` and the `check_surface` tool for smooth car and boat bodies; standard parts (gears, springs, bolts, hinges, boxes and more) from tested builders; better person and dog templates for `sculpt`.
+>
+> **Not verified yet:** nothing from the print export has been printed or assembled, so the fit of pins and axles is untested. On the RS5 most joints of the hollow model are glued, because 1.5 mm walls have no room for pin holes. Models of people and animals are still the weakest area (fur and clothing folds often fail the benchmark's visual check), and cars still miss fine detail such as lamp internals and wheel designs.
 
 ## Install
 
@@ -74,9 +78,26 @@ Check everything with `/freecad:status`.
 - **Usage:** the header shows your plan's usage (5-hour and weekly limit, orange from 80 %, reset times on hover) as Claude reports it with every answer; after each answer the status line shows the tokens Claude wrote (thinking included) and how full the context is. `/usage` shows it in the chat. The model menu says which model "Default" currently is.
 - **Login:** the panel uses your Claude subscription (Claude Code's login) by default. Switch to pay-as-you-go with **⚙ → Use API key**; the key is stored in the macOS Keychain, Windows Credential Manager or Linux Secret Service, never in FreeCAD's settings.
 
+## Printing
+
+![The 3D print dialog next to three pages of the generated assembly guide](docs/images/print-export.png)
+
+*The print export dialog and pages of the assembly guide it wrote for the RS5 (English guide; German is selectable).*
+
+- **One button:** **3D print…** in the Claude panel, or **3D print export…** in the File menu and the File toolbar of every workbench. Only when you press it does it ask for your printer (presets or your own bed size, nozzle and number of colours) and for the assembly: **plug together** (holes and printed pins, where both sides have room) or **glue** (no pins).
+- **What it writes** (into a folder you choose, from a saved copy, so your document stays as it is): the whole model as one coloured 3MF and STL; one set of plates per colour with each part laid down for printing; connector pins; axles; and a **PDF assembly guide** with a picture for every step, the parts list and what to paint.
+- **Moving parts:** wheels, knobs and rollers (round parts that share an axis) are offered as moving. They get axle holes and axles instead of glue, so wheels turn freely; only a tyre and its rim are glued to each other.
+- **Thin parts:** a part too thin to print alone is merged into its neighbour and named in the guide for painting. Parts that need supports and parts larger than the bed are flagged.
+- **For Claude:** give every part the colour it should print in and hide helpers; the button reads colours and visibility. The skill's `printing.md` says how.
+- **Smooth bodies:** `make_part` family `faired_body` builds a car or boat body from a few feature lines (fitted, not interpolated, with sharp edges only where you ask for them), and `check_surface` shows paint and reflection stripes from two sides, so bumps show before any detail is added. See `plugin/skills/freecad/references/surfaces.md`.
+
+![The same RS5 body built two ways: sections lofted through a table (left) and faired_body from feature lines (right), each as paint and as reflection stripes](docs/images/faired-body.png)
+
+*Left: the first RS5 body, sections lofted through a table of points. Right: the same car with `faired_body`. Below each, reflection stripes: long calm stripes mean a fair surface.*
+
 ## Tools
 
-34 tools; in Claude Code they are named `mcp__plugin_freecad_freecad__<tool>`.
+35 tools; in Claude Code they are named `mcp__plugin_freecad_freecad__<tool>`.
 
 - **Read:** `status`, `instances`, `get_preferences`, `get_tree`, `get_object`, `inspect_shape` (faces/edges with geometry), `inspect_sketch` (constraints, degrees of freedom, conflicts), `get_changes` (what you did in the GUI meanwhile), `get_console` (Report view), `api_help` (API of the installed FreeCAD), `list_commands`.
 - **Build:** `make_part` (gears, springs, bolts and nuts with real threads, hinges, enclosures, snap boxes, brackets, knobs), `sculpt`, `image_to_3d`; `design_library` keeps the designs you rated good, on this machine only.
@@ -112,7 +133,7 @@ make validate # claude plugin validate .
 make bench    # design benchmark through Claude Code in a separate FreeCAD, scored headless; PARALLEL=1: one FreeCAD per model
 ```
 
-The design benchmark ([tests/design/](tests/design/)) measures how good the models are, not only whether the tools work: each task has a numeric spec (sizes, holes, fits, tooth counts, interference, parameters that survive changes, overlap with a reference model) and a list of features a second Claude checks on the screenshots. It runs in its own FreeCAD instance with its own settings and bridge directory, so your documents and learned preferences stay untouched. `tests/design/baseline.json` holds the current scores.
+The design benchmark ([tests/design/](tests/design/)) measures how good the models are, not only whether the tools work: each task has a numeric spec (sizes, holes, fits, tooth counts, interference, parameters that survive changes, overlap with a reference model) and a list of features a second Claude checks on the screenshots. It runs in its own FreeCAD instance with its own settings and bridge directory, so your documents and learned preferences stay untouched. `tests/design/baseline.json` holds the scores of the last committed baseline run (2026-11-04); on 2026-11-05 the first twelve tasks scored about 92 (Haiku), 95 (Sonnet) and 99 (Opus) out of 100 on the visual check, from mixed runs, with a judge that is itself noisy.
 
 Layout: `plugin/` is the Claude Code plugin (`server/` = Python package `freecad-bridge`, `addon/ClaudeBridge/` = FreeCAD addon, `skills/`, `commands/`, `hooks/`). `uvx --from plugin/server` rebuilds automatically after code changes (sources are uv cache keys). Restart FreeCAD to load a changed addon. Conventions are in [CLAUDE.md](CLAUDE.md).
 
