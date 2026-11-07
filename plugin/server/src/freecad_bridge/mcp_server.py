@@ -1,7 +1,8 @@
 """MCP server (stdio) exposing the running FreeCAD to Claude Code.
 
-Every tool returns compact JSON text, kept under
-~10,000 tokens; bridge errors become tool errors.
+Every tool returns compact JSON text, kept under ~4,000 tokens; bridge errors become tool
+errors. Argument mistakes the models made in the benchmark are accepted where the meaning is clear
+(a view name as action, notes as text, a pair as a list), because every error costs a whole turn.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from . import __version__, client, headless, imaging, installer, learning, libra
 from . import notes as notes_mod
 from .client import NOT_RUNNING, BridgeError, call, fix_for
 
-MAX_CHARS = 38000  # ~10k tokens; Claude Code warns above that
+MAX_CHARS = 16000  # ~4k tokens: enough for any answer, and the model narrows with limit/filter past it
 _recent_code: list[str] = []     # what built the current model: goes to the design library when the user likes it
 MAX_RECENT_CODE = 40
 
@@ -48,8 +49,8 @@ build them by hand. Car and boat bodies: `make_part` family faired_body, checked
 mcp = MCPServer("freecad", instructions=INSTRUCTIONS, version=__version__)
 # All tools return compact JSON text. structured_output=False matters: with the default, the SDK wraps a
 # `str` return as {"result": "<escaped JSON>"}, doubling escapes and tokens.
-READ = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
-WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
+READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
 
 
 def _dump(value: Any) -> str:
@@ -83,15 +84,40 @@ async def _call(op: str, args: dict[str, Any], timeout_s: float = 60, instance: 
 
 
 @mcp.tool(annotations=READ, structured_output=False)
-async def status(instance: int | None = None) -> str:
-    """Overall state: connection, FreeCAD/addon versions, active workbench, open documents,
-    active document, selection, busy flag, undo limit. Works even when FreeCAD is busy."""
+async def status(select: str | None = None, instance: int | None = None) -> str:
+    """Overall state: connection, versions, workbench, documents, active document, selection, busy
+    flag, undo limit, the user's learned preferences, and every running FreeCAD when there are
+    several. select = pid or document name chooses the FreeCAD all further calls go to ("auto": the
+    newest). Works even when FreeCAD is busy."""
+    extra: dict[str, Any] = {}
+    if select is not None:
+        infos = await _instance_infos()
+        if select.strip().lower() in ("", "auto", "none"):
+            client.select_instance(None)
+            extra["selected"] = None
+        else:
+            if select.strip().isdigit():
+                pid = int(select)
+                target = next((i for i in infos if i["pid"] == pid), None)
+                if target is None:
+                    raise ToolError(f"no FreeCAD with pid {pid}; running: "
+                                    f"{', '.join(str(i['pid']) for i in infos) or 'none'}")
+            else:
+                target = _match_document(infos, select)
+            client.select_instance(target["pid"])
+            extra["selected"] = {**target, "selected": True}
+    elif len(await anyio.to_thread.run_sync(client.list_instances)) > 1:
+        extra["instances"] = await _instance_infos()
+    bd = platforms.bridge_dir()
+    extra["preferences"] = {"ask_for_feedback": bool(settings.load(bd)["learning.ask_for_feedback"]),
+                            "lessons": learning.lessons(bd)[-30:]}
     try:
-        return await _call("status", {}, timeout_s=10, instance=instance)
+        text = await _call("status", {}, timeout_s=10, instance=instance)
     except ToolError as e:
         if str(e).startswith(NOT_RUNNING):
-            return _dump({"connected": False, "server_version": __version__, "hint": str(e)})
+            return _dump({"connected": False, "server_version": __version__, "hint": str(e), **extra})
         raise
+    return _dump({**json.loads(text), **extra})
 
 
 async def _instance_infos() -> list[dict[str, Any]]:
@@ -137,36 +163,6 @@ def _match_document(infos: list[dict[str, Any]], document: str) -> dict[str, Any
 
 
 @mcp.tool(annotations=READ, structured_output=False)
-async def instances() -> str:
-    """All running FreeCAD instances with pid, versions, start time, open documents and which
-    one is selected. Use it when status warns that several FreeCADs are running."""
-    infos = await _instance_infos()
-    if not infos:
-        return _dump({"instances": [], "hint": f"{NOT_RUNNING}: {fix_for(NOT_RUNNING)}"})
-    return _dump({"instances": infos, "automatic": client.default_instance() is None})
-
-
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True,
-                                      openWorldHint=False), structured_output=False)
-async def select_instance(pid: int | None = None, document: str | None = None) -> str:
-    """Choose which FreeCAD all further calls go to: by `pid`, or by the name or label of a
-    document open in it. Without arguments, go back to the automatic choice (the newest).
-    The choice lasts for this Claude Code session."""
-    infos = await _instance_infos()
-    if pid is None and document is None:
-        client.select_instance(None)
-        return _dump({"selected": None, "note": "automatic: calls go to the newest FreeCAD", "running": len(infos)})
-    if document is not None:
-        target = _match_document(infos, document)
-    else:
-        target = next((i for i in infos if i["pid"] == pid), None)
-        if target is None:
-            raise ToolError(f"no FreeCAD with pid {pid}; running: {', '.join(str(i['pid']) for i in infos) or 'none'}")
-    client.select_instance(target["pid"])
-    return _dump({"selected": {**target, "selected": True}})
-
-
-@mcp.tool(annotations=READ, structured_output=False)
 async def get_tree(doc: str | None = None, depth: int = 2, filter: str | None = None,
                    limit: int = 200, offset: int = 0, instance: int | None = None) -> str:
     """Object tree of a document (default: active): name, label, TypeId, parent, depth,
@@ -176,29 +172,20 @@ async def get_tree(doc: str | None = None, depth: int = 2, filter: str | None = 
 
 
 @mcp.tool(annotations=READ, structured_output=False)
-async def get_object(name: str, doc: str | None = None, props: list[str] | None = None,
+async def get_object(name: str, level: Literal["summary", "faces", "edges", "vertices", "sketch"] = "summary",
+                     doc: str | None = None, props: list[str] | None = None, limit: int = 100, offset: int = 0,
                      instance: int | None = None) -> str:
-    """Properties of one object (by Name or Label) with units, expressions and a shape
-    summary (volume, area, bounding box, validity, solid/face/edge counts).
-    `props` limits the property list; default is all."""
+    """One object by Name or Label. summary: properties with units and expressions, shape summary
+    (volume, area, bounding box, validity, counts); `props` limits the list. faces/edges/vertices:
+    the topology for references (Face1, Edge3: type, area or length, centre, normal or axis, radius),
+    paged with limit/offset. sketch: geometry with indices, constraints, degrees of freedom,
+    conflicts."""
+    if level == "sketch":
+        return await _call("inspect_sketch", {"name": name, "doc": doc}, instance=instance)
+    if level != "summary":
+        return await _call("inspect_shape", {"name": name, "level": level, "doc": doc, "limit": limit,
+                                             "offset": offset}, instance=instance)
     return await _call("get_object", {"name": name, "doc": doc, "props": props}, instance=instance)
-
-
-@mcp.tool(annotations=READ, structured_output=False)
-async def inspect_shape(name: str, level: Literal["faces", "edges", "vertices"] = "faces",
-                        doc: str | None = None, limit: int = 100, offset: int = 0,
-                        instance: int | None = None) -> str:
-    """Topology of an object's shape for references: Face1/Edge3/Vertex2 with surface or
-    curve type, area/length, center, normal or axis, radius. Page with limit/offset."""
-    return await _call("inspect_shape", {"name": name, "level": level, "doc": doc, "limit": limit,
-                                         "offset": offset}, instance=instance)
-
-
-@mcp.tool(annotations=READ, structured_output=False)
-async def inspect_sketch(name: str, doc: str | None = None, instance: int | None = None) -> str:
-    """Sketch analysis: geometry with indices, constraints with values, degrees of freedom,
-    conflicting/redundant/malformed constraints."""
-    return await _call("inspect_sketch", {"name": name, "doc": doc}, instance=instance)
 
 
 @mcp.tool(annotations=READ, structured_output=False)
@@ -223,16 +210,12 @@ async def api_help(target: str, instance: int | None = None) -> str:
     """API of the installed FreeCAD: a Python path (`Part.makeBox`, `Sketcher.Constraint`),
     a type (`PartDesign::Pad`: properties with type and description) or an object name in
     the active document. Use instead of guessing; FreeCAD 1.1 changed some APIs."""
+    name = target.strip().removeprefix("mcp__plugin_freecad_freecad__")
+    for t in await mcp.list_tools():
+        if t.name == name:
+            return _dump({"target": name, "kind": "mcp tool", "doc": t.description,
+                          "note": "an MCP tool, not a FreeCAD API: call it directly"})
     return await _call("api_help", {"target": target}, instance=instance)
-
-
-@mcp.tool(annotations=READ, structured_output=False)
-async def list_commands(filter: str | None = None, workbench: str | None = None, limit: int = 100,
-                        instance: int | None = None) -> str:
-    """Find GUI commands (name, menu text, tooltip, active) by text or workbench toolbar,
-    for use with run_command. Prefer the Python API where it exists."""
-    return await _call("list_commands", {"filter": filter, "workbench": workbench, "limit": limit},
-                       instance=instance)
 
 
 @mcp.tool(annotations=WRITE, structured_output=False)
@@ -252,20 +235,20 @@ async def run_python(code: str, doc: str | None = None, transaction: str | None 
 
 
 @mcp.tool(annotations=WRITE, structured_output=False)
-async def run_command(name: str, selection: list[Any] | None = None, workbench: str | None = None,
-                      instance: int | None = None) -> str:
-    """Run a GUI command (e.g. `Std_ViewFitAll`, `PartDesign_Pad`), optionally after
-    switching workbench and setting the selection (items "Object" or "Object.Face6" or
-    {"object", "sub": [...]}). If it opens a task dialog, finish it with task_dialog."""
-    return await _call("run_command", {"name": name, "selection": selection, "workbench": workbench},
+async def run_command(name: str | None = None, selection: list[Any] | None = None, workbench: str | None = None,
+                      dialog: Literal["status", "accept", "reject", "close"] | None = None,
+                      filter: str | None = None, limit: int = 50, instance: int | None = None) -> str:
+    """GUI commands. name: run one (`Std_ViewFitAll`, `PartDesign_Pad`), optionally after switching
+    workbench and setting the selection (items "Object", "Object.Face6" or {"object", "sub"}).
+    dialog: handle the task dialog a command opened (status, accept = OK, reject = Cancel, close).
+    Neither: list commands matching `filter` or a workbench's toolbars. Prefer the Python API."""
+    if name:
+        return await _call("run_command", {"name": name, "selection": selection, "workbench": workbench},
+                           instance=instance)
+    if dialog:
+        return await _call("task_dialog", {"action": dialog}, instance=instance)
+    return await _call("list_commands", {"filter": filter, "workbench": workbench, "limit": limit},
                        instance=instance)
-
-
-@mcp.tool(annotations=WRITE, structured_output=False)
-async def task_dialog(action: Literal["status", "accept", "reject", "close"] = "status",
-                      instance: int | None = None) -> str:
-    """Handle an open task dialog: status, accept (OK), reject (Cancel) or close."""
-    return await _call("task_dialog", {"action": action}, instance=instance)
 
 
 @mcp.tool(annotations=WRITE, structured_output=False)
@@ -277,12 +260,16 @@ async def selection(action: Literal["get", "set", "add", "clear"] = "get", items
 
 
 @mcp.tool(annotations=WRITE, structured_output=False)
-async def document(action: Literal["new", "open", "save", "save_as", "close", "activate",
-                                   "recompute", "undo", "redo", "list"],
+async def document(action: Literal["new", "open", "save", "save_as", "close", "activate", "recompute", "undo",
+                                   "redo", "list", "snapshot", "snapshots", "restore"],
                    name: str | None = None, path: str | None = None, force: bool = False,
                    instance: int | None = None) -> str:
-    """Document lifecycle. `close` refuses unsaved changes unless force=true.
-    `undo`/`redo` step through the user's undo history."""
+    """Document lifecycle. `close` refuses unsaved changes unless force=true; `undo`/`redo` step
+    through the user's history. snapshot: a backup copy of the document `name` (20 kept);
+    snapshots: list them; restore: open the snapshot `path` (file name) as a separate copy."""
+    if action in ("snapshot", "snapshots", "restore"):
+        op = {"snapshot": "create", "snapshots": "list", "restore": "restore"}[action]
+        return await _call("snapshot", {"action": op, "doc": name, "name": path}, instance=instance)
     return await _call("document", {"action": action, "name": name, "path": path, "force": force},
                        instance=instance)
 
@@ -305,17 +292,25 @@ async def import_(path: str, doc: str | None = None, instance: int | None = None
                        instance=instance)
 
 
+VIEW_NAMES = ("iso", "isometric", "front", "rear", "top", "bottom", "left", "right", "dimetric", "trimetric")
+
+
 @mcp.tool(annotations=WRITE, structured_output=False)
-async def view(action: Literal["fit", "set_view", "show", "hide", "isolate"] = "fit",
+async def view(action: Literal["fit", "set_view", "show", "hide", "isolate", "iso", "isometric", "front", "rear",
+                               "top", "bottom", "left", "right", "dimetric", "trimetric"] = "fit",
                view: Literal["iso", "front", "rear", "top", "bottom", "left", "right", "dimetric",
                              "trimetric"] | None = None,
-               objects: list[str] | None = None, screenshot: bool = False, width: int = 800, height: int = 600,
+               objects: list[str] | None = None, look_at: list[str] | None = None, zoom: float = 1.0,
+               screenshot: bool = False, width: int = 640, height: int = 480,
                instance: int | None = None) -> list[Any]:
-    """Control the 3D view: fit, set_view (iso/front/top…), show/hide/isolate objects.
-    screenshot=true returns a PNG of the view; only use it when the user wants to see the
-    model or text checks are not enough."""
-    res = await _raw("view", {"action": action, "view": view, "objects": objects, "screenshot": screenshot,
-                              "width": width, "height": height}, instance=instance)
+    """The 3D view: fit, a view name (front, iso…, fitted), show/hide/isolate objects. look_at =
+    objects to frame (a close-up of the head, one lamp), zoom > 1 closer still. screenshot=true
+    returns a PNG; look once per change, a picture does not change unless the model did."""
+    if action in VIEW_NAMES:
+        view, action = ("iso" if action == "isometric" else action), "fit"
+    res = await _raw("view", {"action": action, "view": view, "objects": objects, "look_at": look_at,
+                              "zoom": zoom, "screenshot": screenshot, "width": width, "height": height},
+                     instance=instance)
     image = res.pop("image_png_base64", None) if isinstance(res, dict) else None
     out: list[Any] = [_dump(res)]
     if image:
@@ -323,23 +318,13 @@ async def view(action: Literal["fit", "set_view", "show", "hide", "isolate"] = "
     return out
 
 
-@mcp.tool(annotations=WRITE, structured_output=False)
-async def snapshot(action: Literal["create", "list", "restore"] = "list", doc: str | None = None,
-                   name: str | None = None, instance: int | None = None) -> str:
-    """Backups of a document (max 20 kept). restore opens a snapshot as a separate copy;
-    the original stays unchanged."""
-    return await _call("snapshot", {"action": action, "doc": doc, "name": name}, instance=instance)
-
-
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+@mcp.tool(annotations=WRITE,
           structured_output=False)
 async def run_headless(script: str, timeout_s: float | None = None) -> str:
-    """Run a Python script in a separate freecadcmd process (no GUI, no open documents):
-    for heavy booleans, fillets on big models, batch conversions. A crash or a long run
-    never blocks the user's FreeCAD. `WORKDIR` is a scratch folder for files; set `_result`
-    to return a value. Open/save documents by path inside the script. A job that would exhaust
-    memory (budget derived from this machine's RAM) is stopped and reported in `killed`.
-    Without timeout_s the user's default applies (setting headless.timeout_s, 600 s)."""
+    """Run a Python script in a separate freecadcmd (no GUI, no open documents): heavy booleans,
+    fillets on big models, batch work; a crash or a long run never touches the user's FreeCAD.
+    `WORKDIR` is a scratch folder; set `_result` to return a value; open and save documents by
+    path. A job that would exhaust memory is stopped (`killed`). Default timeout 600 s."""
     try:
         return _dump(await headless.run_headless(script, timeout_s))
     except RuntimeError as e:
@@ -438,14 +423,12 @@ async def image_to_3d(path: str, mode: Literal["show", "outline", "relief", "ref
                       threshold: float | None = None, detail: float = 0.7, max_height_mm: float = 3.0,
                       base_mm: float = 1.0, resolution: int = 200, name: str | None = None,
                       doc: str | None = None, instance: int | None = None) -> list[Any]:
-    """Turn a picture (PNG/JPG/... path on this computer) into 3D, locally, no upload.
-    show: return the picture so you can look at it and model it yourself in detail.
-    outline: the picture's shapes (with holes) as a profile size_mm wide (fit=height: high),
-      extruded depth_mm, or revolved around the vertical centre line (revolve=true, for vases
-      and figures from a side silhouette). Dark object on light background, or transparency.
-    relief: brightness as height (dark = high; invert flips), base_mm + up to max_height_mm,
-      as a printable mesh. reference: the picture as an image plane size_mm wide to trace.
-    plane=XZ stands the result upright. Each call is one undo step."""
+    """A picture file into 3D, locally. show: return it to look at and model from. outline: its
+    shapes (with holes) as a profile size_mm wide (fit=height), extruded depth_mm or revolved
+    around the vertical centre (revolve=true: vases, figures from a side silhouette); dark on light
+    or transparent works best. relief: brightness as height (dark = high, invert flips), base_mm
+    plus up to max_height_mm, a printable mesh. reference: an image plane size_mm wide to trace.
+    plane=XZ stands the result upright. One undo step."""
     def fail(e: Exception) -> ToolError:
         return ToolError(f"INVALID_ARGS: {e}")
 
@@ -511,8 +494,8 @@ async def compare_to_picture(path: str, views: list[Literal["current", "iso", "f
             w_px, h_px = im.size
     except (OSError, ValueError) as e:
         raise ToolError(f"INVALID_ARGS: cannot read the picture {path}: {e}") from e
-    height = 600
-    width = max(200, min(1600, round(height * w_px / h_px)))
+    height = 480
+    width = max(200, min(1200, round(height * w_px / h_px)))
     out: list[Any] = []
     shown = []
     camera = None
@@ -552,22 +535,39 @@ if _t is not None and _add:
 """
 
 
+def _notes_list(notes: list[Any] | None, text: str | None = None) -> list[dict[str, Any]]:
+    """Notes as dicts; a plain sentence is split into decision and reason at "because" or "Why:"."""
+    out: list[dict[str, Any]] = []
+    for n in [*(notes or []), *([text] if text else [])]:
+        if isinstance(n, dict):
+            out.append(n)
+            continue
+        sentence = str(n).strip()
+        decision, reason = sentence, ""
+        low = sentence.lower()
+        for sep in (" because ", ". why: ", " why: ", ", why: "):
+            i = low.find(sep)
+            if i > 0:
+                decision, reason = sentence[:i].strip(), sentence[i + len(sep):].strip()
+                break
+        out.append({"decision": decision.rstrip("."), "reason": reason or "no reason given"})
+    return out
+
+
 @mcp.tool(annotations=WRITE, structured_output=False)
 async def design_notes(action: Literal["add", "list"] = "add", topic: str = "",
-                       notes: list[dict[str, Any]] | None = None, doc: str | None = None,
+                       notes: list[Any] | None = None, text: str | None = None, doc: str | None = None,
                        instance: int | None = None) -> str:
-    """Record why the model looks the way it does, in the document ("Design notes" text object,
-    saved with the file, readable by the user). Call it with your key decisions whenever you
-    build or substantially change a model, and tell the user the same in your answer.
-    notes = [{"part": "Legs", "decision": "what you did, with numbers",
-    "reason": "why: proportion, fact, what you saw", "source": "request|picture|reference|
-    printability|assumption|feedback"}]; mark guesses as "assumption" so the user can correct
-    them. topic: what this round was (e.g. "Labrador, 8 cm long, first version").
-    list: returns all notes so far (read them before changing a model someone designed)."""
+    """Why the model looks the way it does, kept in the document ("Design notes" text, saved with
+    the file). Add your key decisions whenever you build or substantially change a model.
+    notes = [{"part", "decision" (with numbers), "reason", "source": request|picture|reference|
+    printability|assumption|feedback}] or plain sentences "… because …"; mark guesses as
+    assumption. topic: this round, e.g. "Labrador, 8 cm, first version". list: all notes so far
+    (read them before changing a model someone designed)."""
     section = ""
     if action == "add":
         try:
-            section = notes_mod.render(topic, notes or [])
+            section = notes_mod.render(topic, _notes_list(notes, text))
         except ValueError as e:
             raise ToolError(f"INVALID_ARGS: {e}") from e
     code = NOTES_CODE.format(section=section, header=notes_mod.HEADER)
@@ -575,18 +575,7 @@ async def design_notes(action: Literal["add", "list"] = "add", topic: str = "",
                                       "transaction": "Design notes" if section else None}, instance=instance)
 
 
-@mcp.tool(annotations=READ, structured_output=False)
-async def get_preferences() -> str:
-    """What this user prefers, learned from their feedback on earlier models, plus whether
-    they want to be asked for feedback. Follow the lessons unless the request says otherwise."""
-    bd = platforms.bridge_dir()
-    recent = [{k: r.get(k) for k in ("rating", "comment", "request")} for r in learning.recent_feedback(bd)]
-    return _dump({"ask_for_feedback": bool(settings.load(bd)["learning.ask_for_feedback"]),
-                  "lessons": learning.lessons(bd), "recent_feedback": recent,
-                  "file": os.path.join(str(bd), learning.PREFERENCES)})
-
-
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+@mcp.tool(annotations=WRITE,
           structured_output=False)
 async def record_feedback(rating: Literal["good", "partly", "bad"], comment: str | None = None,
                           request: str | None = None, result: str | None = None,
@@ -665,18 +654,19 @@ _result = _b.export({family!r}, _j.loads({params!r}), _j.loads({iso!r}), _j.load
 
 @mcp.tool(annotations=WRITE, structured_output=False)
 async def make_part(family: str = "list", params: dict[str, Any] | None = None, at: list[float] | None = None,
-                    replace: list[str] | None = None, doc: str | None = None, instance: int | None = None) -> str:
+                    replace: list[str] | None = None, preview: bool = True, doc: str | None = None,
+                    instance: int | None = None) -> list[Any]:
     """Standard parts, right the first time: gear, gear_pair, spring, bolt, nut, bolt_nut, hinge,
     enclosure, snap_box, bracket, knob; faired_body for a smooth car or boat body from feature lines.
-    family="list" shows every family and its parameters with
-    defaults. Use it instead of building these by hand; then change or add to the result. Each part
-    is a solid in one undo step, in its mounted position; at=[x, y, z] moves the group. The shape does
-    not follow parameters by itself: to change sizes call it again with replace=["ObjectName"]; the
-    object's Family and Parameters properties say how it was made."""
+    family="list" shows every family with its parameters and defaults. Use it instead of building
+    these by hand, then change or add to the result. Each part is a solid in one undo step, in its
+    mounted position; at=[x, y, z] moves the group. To change sizes call it again with
+    replace=["ObjectName"]; the object's Family and Parameters properties say how it was made. The
+    answer carries a front and side preview: look at it, do not take another picture."""
     from .parts import builders_path, catalog
 
     if family == "list":
-        return _dump({"families": catalog.describe()})
+        return [_dump({"families": catalog.describe()})]
     try:
         full = catalog.resolve(family, params)
     except ValueError as e:
@@ -700,8 +690,68 @@ async def make_part(family: str = "list", params: dict[str, Any] | None = None, 
     shown = ("valid", "solids", "size_mm", "volume_mm3", "max_distance_to_points_mm")
     parts = [{"object": n, **{k: m[k] for k in shown if k in m}}
              for n, m in zip(names, made, strict=True)]
-    return _dump({"family": family, "parameters": full, "parts": parts,
-                  "next": "check the parts that meet with check_fit, then add what the request needs"})
+    return [_dump({"family": family, "parameters": full, "parts": parts,
+                   "next": "check the parts that meet with check_fit, then add what the request needs"}),
+            *(await _preview(names, doc, instance, family) if preview and names else [])]
+
+
+PREVIEW_CODE = """
+import os as _os, time as _time
+_g = Gui.getDocument(doc.Name)
+_v = _g.ActiveView
+_cam = _v.getCamera()
+_anim = _v.isAnimationEnabled() if hasattr(_v, "isAnimationEnabled") else False
+if _anim:
+    _v.setAnimationEnabled(False)
+_sel = [(s.DocumentName, s.ObjectName, list(s.SubElementNames)) for s in Gui.Selection.getSelectionEx("", 0)]
+def _settle():
+    for _i in range(4):
+        Gui.updateGui()
+        _time.sleep(0.03)
+_shots = []
+try:
+    Gui.Selection.clearSelection()
+    for _n in {names!r}:
+        if doc.getObject(_n) is not None:
+            Gui.Selection.addSelection(doc.Name, _n)
+    for _name in ("Front", "Right"):
+        getattr(_v, "view" + _name)()
+        Gui.SendMsgToActiveView("ViewSelection")
+        _settle()
+        _p = _os.path.join({out!r}, _name + ".png")
+        _v.saveImage(_p, {w}, {h}, "White")
+        _shots.append({{"label": _name, "path": _p, "camera": _v.getCamera()}})
+finally:
+    Gui.Selection.clearSelection()
+    for _d, _n, _subs in _sel:
+        for _s in (_subs or [""]):
+            Gui.Selection.addSelection(_d, _n, _s)
+    _v.setCamera(_cam)
+    if _anim:
+        _v.setAnimationEnabled(True)
+_result = _shots
+"""
+
+
+async def _preview(names: list[str], doc: str | None, instance: int | None, title: str) -> list[Any]:
+    """A small front and side picture of the named objects, so the model need not ask for one."""
+    out_dir = tempfile.mkdtemp(prefix="preview-", dir=_checks_dir())
+    try:
+        code = PREVIEW_CODE.format(names=list(names), out=out_dir, w=400, h=300)
+        res = await _raw("run_python", {"code": code, "doc": doc, "recompute": False, "transaction": "Preview"},
+                         timeout_s=60, instance=instance)
+        shots = []
+        for shot in (res.get("result") or []) if isinstance(res, dict) else []:
+            with open(shot["path"], "rb") as f:
+                shots.append({"label": shot["label"], "png": f.read(), "camera": shot["camera"]})
+        if not shots:
+            return []
+        png = await anyio.to_thread.run_sync(lambda: imaging.view_sheet(shots, f"{title}: front and right"))
+        return [Image(data=png, format="png")]
+    except (ToolError, OSError, KeyError, TypeError):
+        return []
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
 
 
 SCULPT_CODE = """
@@ -740,28 +790,16 @@ _result = {{"group": _grp.Name, "parts": _made}}
 
 @mcp.tool(annotations=WRITE, structured_output=False)
 async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | None = None, smooth: int = 4,
-                 doc: str | None = None, instance: int | None = None) -> str:
-    """Sculpt organic shapes (people, animals, figures, faces, hair, plants, rocks, terrain) from
-    smoothly blended primitives, like clay: they melt into each other instead of meeting at hard seams.
-    Use it for every person or animal; Part boxes and cylinders look like a snowman.
-    Start people and animals from a template: {"template": "person_standing" | "dog_standing" |
-    "cat_sitting", "height": mm, "parts": [...]} scales a tested figure (base on z=0, facing -Y)
-    to the height; a part with a template part's name (Skin, Shirt, Jeans, Shoes_L, Shoes_R, Hair,
-    Dog, Cat, Base) changes its keys and adds its primitives (in final mm), other parts are added.
-    scene = {"blend": 1.5, "detail": {...}, "fur": {...}, "parts": [{"name", "color": [r,g,b] 0..1,
-    "blend", "detail", "fur", "shininess": 0..1 (default 0, matte), "primitives": [...]}, ...]} (or a
-    single part's keys at the top level).
-    Primitives (mm): sphere {center, radius}; ellipsoid {center, radii, rotate:[rx,ry,rz] deg};
-    capsule {a, b, radius, radius_b} (tapered limb/finger); strand {points:[[x,y,z]...], radius,
-    radius_end} (hair lock, tail, beard, vine); box {center, size, round, rotate}; torus {center,
-    radius, thickness, rotate}; cylinder {a, b, radius}. Each may set "op": add|subtract|intersect
-    and its own "blend" (mm, 0 = hard edge). "detail": {"amplitude": mm, "scale": mm, "seed"}
-    adds skin/stone texture; "fur": {"depth": mm, "length": mm, "width": mm, "direction": [x,y,z]
-    or "from": [x,y,z], "seed"} carves grooves that run along the flow, like locks of fur or hair
-    (depth up to 0.3 × width; "fur": null switches a scene-wide fur off for a part). voxel_mm sets
-    the resolution (default: automatic, 1/300 of the scene, the same for every part); smooth =
-    Taubin passes (2 with fur). The meshes are computed outside FreeCAD and imported as
-    Mesh objects in a group (one undo step); export them as STL/3MF for printing."""
+                 preview: bool = True, doc: str | None = None, instance: int | None = None) -> list[Any]:
+    """Organic shapes (people, animals, faces, hair, plants, rocks) from primitives that melt into
+    each other like clay; every person or animal starts from a template: scene = {"template":
+    "person_standing" | "dog_standing" | "cat_sitting", "height": mm, "parts": [{"name", "color",
+    "fur", "primitives": [...]}]}, a part with a template part's name changes it. Primitives (mm):
+    sphere, ellipsoid, capsule, strand, box, torus, cylinder, each with op add|subtract and its own
+    blend; "detail" adds skin texture, "fur" carves grooves along the flow. The grammar and the rules
+    that make it look real are in references/organic.md of the freecad skill. The meshes are computed
+    outside FreeCAD and imported as Mesh objects in a group (one undo step). The answer carries a
+    front and side preview: look at it, do not take another picture."""
     from . import sculpt as sculpt_mod
 
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name) or "Sculpt"
@@ -774,11 +812,13 @@ async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | 
     code = SCULPT_CODE.format(parts=json.dumps(res["parts"]), name=safe)
     out = await _raw("run_python", {"code": code, "doc": doc, "transaction": f"Sculpt {safe}"}, timeout_s=300,
                      instance=instance)
+    made = out["result"] if isinstance(out, dict) else {}
     if isinstance(out, dict):
         warnings = {p["name"]: p["warning"] for p in res["parts"] if p.get("warning")}
         out = {"computed_in_s": res["seconds"], "voxel_mm": res["voxel_mm"], "size_mm": res["size_mm"], **out,
                **({"part_warnings": warnings} if warnings else {})}
-    return _dump(out)
+    names = [p["object"] for p in (made or {}).get("parts", [])]
+    return [_dump(out), *(await _preview(names, doc, instance, safe) if preview and names else [])]
 
 
 # ---------- checks: numbers instead of guesses; all run on a saved copy in a separate freecadcmd
@@ -790,41 +830,44 @@ async def _on_copy(make_call: Any, doc: str | None, instance: int | None, after:
         return await runner.on_copy(_raw, make_call, doc, instance, after)
     except (runner.CheckError, RuntimeError) as e:
         raise ToolError(str(e)) from e
+    except ToolError:
+        raise
+    except Exception as e:  # noqa: BLE001 - a bare "Error executing tool" costs the model a whole turn
+        raise ToolError(f"CHECK_FAILED: {type(e).__name__}: {e}") from e
 
 
-@mcp.tool(annotations=READ, structured_output=False)
-async def check_design(spec: dict[str, Any] | None = None, doc: str | None = None,
-                       instance: int | None = None) -> str:
-    """Check the finished model against your numbers; size and position errors do not show in a
-    screenshot. Write the spec from the request before you build, call this after building, fix
-    every entry in `problems`, and call it again. Without a spec only validity and tree errors are
-    checked. Works on a saved copy: your document stays as it is.
-    spec = {"parts": [{"name", "bbox": [a, b, c], "tol": 0.5, "oriented": false (true: x, y, z as
-    given; otherwise any orientation), "volume": [lo, hi], "holes": [{"d": [lo, hi], "count": [lo, hi],
-    "open": false}], "teeth": n, "pitch": {"value", "tol", "band": [r_lo, r_hi]} (thread, radial band
-    of its flanks), "radii_min": {"r": [lo, hi], "count": n} (fillets), "inclined_min": n (sloped
-    faces), "surfaces_any": ["BSplineSurface", "Cone"...], "surfaces_min": {"Plane": 2}}],
-    "solids": [lo, hi], "no_interference": true, "clearance": [{"a", "b", "range": [lo, hi]}] (gap
-    between parts), "aligned_holes": {"a", "b", "d_a": [lo, hi], "d_b": [lo, hi], "count": n, "tol": 0.3},
-    "center_distance": {"a", "b", "value", "tol"}, "height": [lo, hi], "total": {"bbox": [a, b, c], "tol"},
-    "params": ["Length"...], "expressions_min": n, "sketch_dof_zero": true, "joints": ["Revolute"],
-    "requires": [{"label", "types": ["Assembly::AssemblyObject"]}]}. The solids are the visible results."""
-    from .checks import runner
+def _prepare_spec(spec: dict[str, Any] | None) -> dict[str, Any]:
     from .checks import spec as spec_mod
 
     spec = spec or {}
     unknown = set(spec) - spec_mod.KNOWN
-    bad_part = {k for p in spec.get("parts", []) for k in p} - spec_mod.PART_KEYS
+    bad_part = {k for p in spec.get("parts", []) if isinstance(p, dict) for k in p} - spec_mod.PART_KEYS
     if unknown or bad_part:
         raise ToolError(f"INVALID_ARGS: unknown spec keys {sorted(unknown | bad_part)}; known: "
-                        f"{sorted(spec_mod.KNOWN)}, per part: {sorted(spec_mod.PART_KEYS)}")
-
+                        f"{sorted(spec_mod.KNOWN)}, per part: {sorted(spec_mod.PART_KEYS)}; the grammar is in "
+                        "references/checks.md of the freecad skill")
     try:
         spec = spec_mod.normalize(spec)
         spec_mod.evaluate(spec, {"parts": []})
     except (TypeError, ValueError, KeyError, AttributeError) as e:
         raise ToolError(f"INVALID_ARGS: this spec cannot be read ({type(e).__name__}: {e}). Ranges are "
-                        "[lo, hi], see the tool description.") from e
+                        "[lo, hi]; the grammar is in references/checks.md of the freecad skill") from e
+    return spec
+
+
+@mcp.tool(annotations=READ, structured_output=False)
+async def check_design(spec: dict[str, Any] | None = None, doc: str | None = None,
+                       instance: int | None = None) -> str:
+    """Measure the model against your numbers (size and position errors do not show in a picture).
+    spec = {"parts": [{"name", "bbox": [a, b, c], "tol", "volume": [lo, hi], "holes": [{"d": [lo, hi],
+    "count": [lo, hi]}], "teeth", "pitch", "radii_min", "surfaces_any"}], "solids": [lo, hi],
+    "no_interference", "clearance", "aligned_holes", "center_distance", "height", "total", "params",
+    "expressions_min"}; full grammar in references/checks.md of the freecad skill. Without a spec only
+    validity and tree errors. Prefer check_all, which runs this with the other checks in one go."""
+    from .checks import runner
+    from .checks import spec as spec_mod
+
+    spec = _prepare_spec(spec)
 
     def after(measured: dict[str, Any], _tmp: str) -> dict[str, Any]:
         return runner.design_summary(spec_mod.evaluate(spec, measured), measured)
@@ -838,12 +881,10 @@ async def check_design(spec: dict[str, Any] | None = None, doc: str | None = Non
 async def check_print(objects: list[str] | None = None, process: Literal["fdm", "resin", "cnc"] = "fdm",
                       min_wall_mm: float | None = None, doc: str | None = None,
                       instance: int | None = None) -> str:
-    """Can it be printed? Checks each visible result (or the named objects, solids and meshes alike):
-    closed, wall thickness, overhangs and supports per orientation with the best one to print in,
-    bridges, base area on the bed and whether it tips over. Objects that overlap count as one print;
-    name one object to check it alone (a closed lid and box printed apart).
-    `problems` must be fixed, `warnings` depend on the printer; each says where (mm) and how to fix
-    it. Use it before you show a model meant for printing. Works on a saved copy."""
+    """Can it be printed? Each visible result (or the named objects; solids and meshes): closed, wall
+    thickness, overhangs with the best orientation, bridges, base area and tipping. Overlapping
+    objects count as one print; name one to check it alone. `problems` must be fixed, `warnings`
+    depend on the printer; each says where (mm) and how. Works on a saved copy; check_all includes it."""
     from .checks import printing, runner
 
     def after(items: list[dict[str, Any]], _tmp: str) -> dict[str, Any]:
@@ -854,20 +895,27 @@ async def check_print(objects: list[str] | None = None, process: Literal["fdm", 
                                 f"json.loads({names!r}), {tmp!r})", doc, instance, after))
 
 
+def _pair(a: str | None, b: str | None, parts: list[str] | None) -> tuple[str, str]:
+    if parts and len(parts) == 2 and not (a or b):
+        return str(parts[0]), str(parts[1])
+    if a and b:
+        return a, b
+    raise ToolError("INVALID_ARGS: name both parts: a=..., b=... (or parts=[a, b])")
+
+
 @mcp.tool(annotations=READ, structured_output=False)
-async def check_fit(a: str, b: str, kind: Literal["press", "sliding", "loose", "seated", "snap", "custom"] = "sliding",
+async def check_fit(a: str | None = None, b: str | None = None, parts: list[str] | None = None,
+                    kind: Literal["press", "sliding", "loose", "seated", "snap", "custom"] = "sliding",
                     gap_mm: list[float] | None = None, process: Literal["fdm", "resin", "cnc"] = "fdm",
                     doc: str | None = None, instance: int | None = None) -> str:
-    """Do two parts fit? Measures their smallest gap and shared volume and compares them with the fit
-    for the process: FDM press 0–0.1 mm, sliding 0.15–0.35, loose 0.3–0.7; resin 0–0.05, 0.05–0.2,
-    0.2–0.4; CNC 0–0.01, 0.01–0.06, 0.06–0.3. gap_mm=[lo, hi] sets your own range (kind custom). Parts
-    that should move or come apart need a gap. kind seated or snap: a part that rests on a seat (lid
-    on a rim, snap lid, bearing on its shoulder) may touch on flat faces of one direction; the room
-    around it must then be a sliding gap. Press allows only up to 0.2 mm of overlap depth. Call it for
-    every pair that meets (lid and box, pin and hole, gears, nut and bolt) in their mounted position.
-    a, b: object name or label of solids. Works on a saved copy."""
+    """Do two parts fit? Smallest gap and shared volume against the fit for the process (FDM: press
+    0–0.1 mm, sliding 0.15–0.35, loose 0.3–0.7; resin and CNC tighter; gap_mm=[lo, hi] with kind
+    custom). seated/snap: a part on a seat (lid on a rim, bearing on a shoulder) may touch on flat
+    faces of one direction; the room around it is then measured. Call it for every pair that meets,
+    in the mounted position. a, b: names or labels of solids. Works on a saved copy."""
     from .checks import printing
 
+    a, b = _pair(a, b, parts)
     if kind == "custom" and not gap_mm:
         raise ToolError("INVALID_ARGS: kind custom needs gap_mm=[lo, hi]")
 
@@ -958,7 +1006,7 @@ async def inspect_views(section: dict[str, Any] | None = None, doc: str | None =
 
     out_dir = tempfile.mkdtemp(prefix="views-", dir=_checks_dir())
     try:
-        code = VIEWS_CODE.format(views=["Isometric", "Front", "Right", "Top"], out=out_dir, w=640, h=480)
+        code = VIEWS_CODE.format(views=["Isometric", "Front", "Right", "Top"], out=out_dir, w=480, h=360)
         res = (await _raw("run_python", {"code": code, "doc": doc, "recompute": False, "transaction": "Views"},
                           timeout_s=120, instance=instance))["result"]
         shots = []
@@ -993,14 +1041,99 @@ async def inspect_views(section: dict[str, Any] | None = None, doc: str | None =
 
 
 @mcp.tool(annotations=READ, structured_output=False)
+async def check_all(spec: dict[str, Any] | None = None, fits: list[dict[str, Any]] | None = None,
+                    process: Literal["fdm", "resin", "cnc"] = "fdm", printable: bool = True, views: bool = True,
+                    section: dict[str, Any] | None = None, doc: str | None = None,
+                    instance: int | None = None) -> list[Any]:
+    """Every check in one call, on one saved copy: check_design with `spec`, check_print of all visible
+    results (printable=false skips it), check_fit for each of fits = [{"a", "b", "kind", "gap_mm"}], the
+    view sheet of inspect_views (views=false skips it) and a section {"axis": "x|y|z", "offset": mm}.
+    The answer lists problems first, each with the check that found it, then warnings, then the numbers.
+    Call it once after building and once after the fixes; what did not change needs no new look."""
+    from .checks import printing, runner
+    from .checks import spec as spec_mod
+
+    spec = _prepare_spec(spec)
+    pairs = []
+    for f in fits or []:
+        if not isinstance(f, dict):
+            raise ToolError('INVALID_ARGS: fits = [{"a": ..., "b": ..., "kind": "sliding"}]')
+        a, b = _pair(f.get("a"), f.get("b"), f.get("parts"))
+        pairs.append({"a": a, "b": b, "kind": str(f.get("kind", "sliding")), "gap_mm": f.get("gap_mm")})
+    if section is not None and str(section.get("axis", "z")).lower() not in ("x", "y", "z"):
+        raise ToolError("INVALID_ARGS: section axis must be x, y or z")
+
+    def after(res: dict[str, Any], _tmp: str) -> tuple[dict[str, Any], bytes | None]:
+        design = runner.design_summary(spec_mod.evaluate(spec, res["design"]), res["design"])
+        meshes = runner.read_meshes(res["meshes"])
+        prints = printing.analyze_objects(meshes, process) if printable and meshes else None
+        verdicts = []
+        for f in res["fits"]:
+            if f.get("error"):
+                verdicts.append(f)
+                continue
+            try:
+                v = printing.fit_verdict(f["gap"], f["overlap"], f["kind"], process, f.get("gap_mm"),
+                                         (f.get("seat") or {}).get("side_gap"), f.get("depth", 0.0))
+            except ValueError as e:
+                verdicts.append({**f, "error": str(e)})
+                continue
+            verdicts.append({"a": f["a"], "b": f["b"], "kind": f["kind"], "closest_at": f["where"], **v})
+        report = runner.all_summary(design, prints, verdicts)
+        cut = None
+        if section is not None and meshes:
+            axis = str(section.get("axis", "z")).lower()
+            offset = section.get("offset")
+            if offset is None:
+                box = res["design"].get("total")
+                centre = [p["center"] for p in res["design"].get("parts", [])]
+                offset = sum(c["xyz".index(axis)] for c in centre) / len(centre) if centre and box else 0.0
+            cut = imaging.section_image([(label, printing.section_segments(v, t, axis, float(offset)))
+                                         for label, v, t in meshes], axis, float(offset))
+        return report, cut
+
+    text = runner.spec_json(spec)
+    pairs_text = json.dumps(pairs)
+    report, cut = await _on_copy(lambda path, tmp: f"import json\n_result = measure.check_all({path!r}, "
+                                 f"json.loads({text!r}), json.loads({pairs_text!r}), {tmp!r})", doc, instance, after)
+    out: list[Any] = [_dump(report)]
+    if views:
+        sheet = await _view_sheet(doc, instance)
+        if sheet is not None:
+            out.append(Image(data=sheet, format="png"))
+    if cut is not None:
+        out.append(Image(data=cut, format="png"))
+    return out
+
+
+async def _view_sheet(doc: str | None, instance: int | None) -> bytes | None:
+    """Isometric, front, right and top of the model in one picture, the camera put back."""
+    out_dir = tempfile.mkdtemp(prefix="views-", dir=_checks_dir())
+    try:
+        code = VIEWS_CODE.format(views=["Isometric", "Front", "Right", "Top"], out=out_dir, w=480, h=360)
+        res = (await _raw("run_python", {"code": code, "doc": doc, "recompute": False, "transaction": "Views"},
+                          timeout_s=120, instance=instance))["result"]
+        shots = []
+        for s in res["shots"]:
+            with open(s["path"], "rb") as f:
+                shots.append({"label": s["label"], "png": f.read(), "camera": s["camera"]})
+        box = res["box"]
+        title = f"Size {box[0]} x {box[1]} x {box[2]} mm" if box else "Nothing visible"
+        return await anyio.to_thread.run_sync(lambda: imaging.view_sheet(shots, title))
+    except (ToolError, OSError, KeyError, TypeError):
+        return None
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+
+@mcp.tool(annotations=READ, structured_output=False)
 async def check_surface(objects: list[str] | None = None, doc: str | None = None,
                         instance: int | None = None) -> list[Any]:
-    """Is a body surface really smooth? For cars, boats, housings, anything judged by its reflections.
-    Works on a saved copy. The image shows the shape from two sides: upper row glossy paint, lower row
-    reflection stripes. Long, calm stripes mean a fair surface; zigzag, islands and sudden bends are
-    hollows and bumps the normal view hides. `ripples` counts the changes of bending along lengthwise
-    cuts: compare before and after a change, fewer is calmer. Fix them in the lines the body is built
-    from (see references/surfaces.md), not with added detail."""
+    """Is a body surface really smooth? For cars, boats, anything judged by its reflections. The
+    picture shows two sides as glossy paint (top) and reflection stripes (bottom): long calm stripes
+    are fair, zigzag and islands are bumps the normal view hides. `ripples` counts bends along
+    lengthwise cuts, fewer is calmer. Fix them in the feature lines (references/surfaces.md), not with
+    added detail. Works on a saved copy."""
     from .checks import runner
 
     wanted = json.dumps(objects)

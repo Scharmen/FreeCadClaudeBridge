@@ -41,7 +41,8 @@ def _open(path: str | Path) -> Image.Image:
 def _fit(img: Image.Image, max_side: int) -> Image.Image:
     scale = max_side / max(img.size)
     if scale < 1:
-        img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))), Image.LANCZOS)
+        size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
+        img = img.resize(size, Image.Resampling.LANCZOS)
     return img
 
 
@@ -197,7 +198,7 @@ def height_grid(path: str | Path, width_mm: float, max_height_mm: float = 3.0, b
     img = _open(path)
     res = max(8, min(int(resolution), MAX_SIDE_RELIEF))
     img = img.resize((res, max(2, round(res * img.height / img.width))) if img.width >= img.height
-                     else (max(2, round(res * img.width / img.height)), res), Image.LANCZOS)
+                     else (max(2, round(res * img.width / img.height)), res), Image.Resampling.LANCZOS)
     gray = _gray(img)
     rel = gray if invert else 1.0 - gray
     heights = base_mm + rel * max_height_mm

@@ -107,10 +107,9 @@ def _mac_candidates() -> list[Path]:
 
 
 def _windows_registry_locations() -> list[Path]:
-    try:
-        import winreg  # type: ignore[import-not-found]
-    except ImportError:
+    if sys.platform != "win32":
         return []
+    import winreg
     out: list[Path] = []
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
     for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):

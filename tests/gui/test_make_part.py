@@ -27,17 +27,21 @@ def fresh_doc():
 
 
 def tool(fn, **kw):
-    return json.loads(anyio.run(lambda: fn(doc=DOC, **kw)))
+    out = anyio.run(lambda: fn(doc=DOC, **kw))
+    return json.loads(out[0] if isinstance(out, list) else out)
 
 
 def test_listing_needs_no_document():
-    out = json.loads(anyio.run(lambda: mcp_server.make_part(family="list")))
+    out = json.loads(anyio.run(lambda: mcp_server.make_part(family="list"))[0])
     assert "gear_pair" in out["families"] and out["families"]["bolt"]["params"]["size"] == "M8"
 
 
 def test_a_gear_pair_arrives_in_one_undo_step_and_passes_its_checks():
-    out = tool(mcp_server.make_part, family="gear_pair", params={"teeth_a": 18, "teeth_b": 36}, at=[0, 0, 5])
+    full = anyio.run(lambda: mcp_server.make_part(family="gear_pair", params={"teeth_a": 18, "teeth_b": 36},
+                                                 at=[0, 0, 5], doc=DOC))
+    out = json.loads(full[0])
     assert [p["object"] for p in out["parts"]] == ["GearA", "GearB"] and all(p["valid"] for p in out["parts"])
+    assert len(full) == 2 and full[1].data[:4] == b"\x89PNG", "a front and side preview comes with the answer"
     z = call("run_python", doc=DOC, recompute=False, code=f'''
 d = App.getDocument("{DOC}")
 a = d.getObject("GearA")

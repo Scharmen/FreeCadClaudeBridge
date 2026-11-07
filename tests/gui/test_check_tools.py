@@ -149,8 +149,38 @@ doc.recompute()
 
 
 def test_a_faired_body_from_make_part_says_how_close_it_stayed_and_passes_check_surface():
-    made = json.loads(anyio.run(lambda: mcp_server.make_part("faired_body", {"name": "Pod"}, doc=DOC)))
+    made = json.loads(anyio.run(lambda: mcp_server.make_part("faired_body", {"name": "Pod"}, doc=DOC))[0])
     part = made["parts"][0]
     assert part["valid"] and part["solids"] == 1 and part["max_distance_to_points_mm"] < 3
     out = anyio.run(lambda: mcp_server.check_surface(objects=[part["object"]], doc=DOC))
     assert json.loads(out[0])["objects"] == [part["object"]] and out[1].data[:4] == b"\x89PNG"
+
+
+def test_check_all_runs_every_check_on_one_copy_and_answers_with_problems_first():
+    before = state()
+    out = anyio.run(lambda: mcp_server.check_all(
+        doc=DOC, spec={"parts": [{"name": "plate", "bbox": [50, 30, 10], "tol": 0.2}]},
+        fits=[{"a": "Pin", "b": "Sleeve", "kind": "sliding"}, {"parts": ["Pin", "Nothing"]}],
+        section={"axis": "x", "offset": 100}))
+    rep = json.loads(out[0])
+    assert rep["ok"] is False
+    sources = [p["from"] for p in rep["problems"]]
+    assert sources[0] == "design" and "50" in rep["problems"][0]["cause"]
+    assert "print" in sources, "the thin plate is a print problem"
+    assert any(p["from"] == "fit" and p.get("pair") == ["Pin", "Nothing"] for p in rep["problems"])
+    assert rep["fits"][0]["ok"] is True and rep["print"]
+    assert len(out) == 3, "the report, the four-view sheet and the section"
+    assert state() == before, "no undo step, no new object, no file name"
+    quick = json.loads(anyio.run(lambda: mcp_server.check_all(doc=DOC, views=False, printable=False))[0])
+    assert quick["ok"] is True and "print" not in quick
+
+
+def test_a_view_name_as_action_and_a_close_up_with_look_at():
+    r = call("view", action="fit", view="front", look_at=["Pin"], zoom=2.0, screenshot=True, width=320, height=240)
+    assert r["image_png_base64"] and r["action"] == "fit"
+    cam = call("run_python", code=f'_result = Gui.getDocument("{DOC}").ActiveView.getCamera()', doc=DOC,
+               recompute=False)["result"]
+    height = [float(ln.split()[1]) for ln in cam.splitlines() if ln.strip().startswith("height ")]
+    assert height and height[0] < 30, "framed on the 6 mm pin, not on the 200 mm scene"
+    sel = call("selection")
+    assert not sel.get("items") and not sel.get("selection"), "the user's selection is left as it was"

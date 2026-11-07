@@ -61,6 +61,20 @@ Describe the form as primitives that melt into each other with a blend radius, l
      "radius": 1.2, "radius_end": 0.35}]}]}
 ```
 
+Grammar (mm; every primitive may set `"op": "add" | "subtract" | "intersect"` and its own `"blend"`, 0 = hard edge):
+
+| Primitive | Keys |
+| --- | --- |
+| `sphere` | `center`, `radius` |
+| `ellipsoid` | `center`, `radii: [rx, ry, rz]`, `rotate: [rx, ry, rz]` degrees |
+| `capsule` | `a`, `b`, `radius`, `radius_b` (tapered limb, finger) |
+| `strand` | `points: [[x, y, z], ...]`, `radius`, `radius_end` (hair lock, tail, beard, vine) |
+| `box` | `center`, `size`, `round`, `rotate` |
+| `torus` | `center`, `radius`, `thickness`, `rotate` |
+| `cylinder` | `a`, `b`, `radius` |
+
+Scene and part keys: `blend` (mm), `color: [r, g, b]` 0..1, `shininess` 0..1 (default 0, matte; only metal or wet parts get 0.3–0.6), `detail: {"amplitude": mm, "scale": mm, "seed"}` skin or stone texture, `fur: {"depth": mm, "length": mm, "width": mm, "direction": [x, y, z] or "from": [x, y, z], "seed"}` grooves along the flow (depth up to 0.3 × width; `"fur": null` switches a scene-wide fur off for one part). Tool arguments: `voxel_mm` (default 1/300 of the scene, the same for every part), `smooth` Taubin passes (default 4, 2 with fur), `preview` (default true: a front and side picture comes with the answer).
+
 Rules that make it look real instead of plastic:
 
 - **Proportions first.** Adult figure 7.5–8 heads tall (heroic 8–8.5, child 5–6); shoulders about 2 head widths; the eyes sit halfway down the head; the hand reaches mid-thigh; the elbow is at the waist. Animals: work from the skeleton masses (skull, rib cage, pelvis) outwards.

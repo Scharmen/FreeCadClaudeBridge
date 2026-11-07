@@ -219,6 +219,24 @@ def _view(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         raise OpError(protocol.INVALID_ARGS, "action must be fit, set_view, show, hide or isolate")
     if action in ("fit", "isolate") or args.get("fit"):
         v.fitAll()
+    look = [_obj(doc, n) for n in args.get("look_at") or []]
+    if look:                               # frame only these: a close-up without exporting pictures
+        kept = [(s.DocumentName, s.ObjectName, list(s.SubElementNames)) for s in Gui.Selection.getSelectionEx("", 0)]
+        Gui.Selection.clearSelection()
+        for o in look:
+            Gui.Selection.addSelection(doc.Name, o.Name)
+        Gui.SendMsgToActiveView("ViewSelection")
+        Gui.Selection.clearSelection()
+        for d, n, subs in kept:
+            for sub in subs or [""]:
+                Gui.Selection.addSelection(d, n, sub)
+    zoom = float(args.get("zoom") or 1.0)
+    if zoom > 0 and zoom != 1.0:
+        cam = v.getCameraNode()
+        for field in ("height", "heightAngle"):
+            if hasattr(cam, field):
+                getattr(cam, field).setValue(getattr(cam, field).getValue() / zoom)
+                break
     out: dict[str, Any] = {"action": action, "visible": [o.Name for o in doc.Objects if _visible(o)][:200]}
     if args.get("return_camera"):
         out["camera"] = camera             # as it was before this call

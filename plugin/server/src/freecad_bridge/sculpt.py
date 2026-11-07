@@ -521,6 +521,7 @@ def mesh_part(part: dict[str, Any], voxel: float | None = None, smooth: int = 4)
             best = (bad, verts, tris, wanted, used)
         if bad == 0:
             break
+    assert best is not None
     bad, verts, tris, wanted, used = best
     if bad:
         verts, tris = _carve_bad_edges(part, wanted, verts, tris)

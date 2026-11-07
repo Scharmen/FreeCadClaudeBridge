@@ -143,7 +143,7 @@ def test_several_instances_use_newest_and_warn(bridge):
     older, newer = _two_instances(bridge)
     res = client.call("get_tree")
     assert res.result["pid"] == newer
-    assert any("2 FreeCAD instances" in w and "select_instance" in w for w in res.warnings)
+    assert any("2 FreeCAD instances" in w and "status(select=" in w for w in res.warnings)
 
 
 def test_selection_sticks_and_silences_warning(bridge):

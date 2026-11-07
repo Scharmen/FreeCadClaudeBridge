@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.19.0 – leaner sessions (unreleased)
+
+Measured on the benchmark logs: the same model, built by Opus in 96 tool calls for $2.87, by Sonnet in 12 for $0.25, with the same score. Most of the difference was check loops, pictures that stay in the context, and errors that cost a turn each. This release cuts all three.
+
+- `check_all(spec, fits, section)`: design, print, fits and the four-view sheet on one saved copy in one `freecadcmd`, problems first with the check that found them. The skill says: once after building, once after the fixes.
+- `sculpt` and `make_part` answer with a small front and side preview (two 400 × 300 views), so no `view` call follows them. `view` takes a view name as action, `look_at=[objects]` and `zoom` for close-ups, and its default picture is 640 × 480; `inspect_views` and `compare_to_picture` are smaller too.
+- Errors that used to cost a turn: a check that failed with any exception came back as a bare "Error executing tool" (98 times over the benchmark runs); it now says the type and the message. `design_notes` accepts plain sentences ("… because …") and `text=`; `check_fit` accepts `parts=[a, b]`; `api_help` on a tool name answers from the tool.
+- 35 tools become 28: `instances` and `select_instance` are `status(select=...)`, which also carries the learned preferences (`get_preferences` is gone); `inspect_shape` and `inspect_sketch` are `get_object(level=...)`; `snapshot` is `document(action="snapshot"|"snapshots"|"restore")`; `list_commands` and `task_dialog` are `run_command(filter=...)` and `run_command(dialog=...)`. Tool descriptions shrink from 17 000 to 11 000 characters; the sculpt and spec grammars live in `references/organic.md` and the new `references/checks.md`.
+- One source of rules: the panel prompts shrink to what the panel needs and point to the skill instead of repeating it. The skill asks for two checks, not ten, and one look per change.
+- Shorter answers: results are cut at 16 000 characters (was 38 000), `changes.changed` at 50 names plus a count, the preferences at 30 lessons.
+- Benchmark: records requests, final context size, pictures and input tokens per task and their means per model; `Read` and `Skill` are allowed, as in the panel (215 denied reads over the earlier runs were wasted turns).
+- CI runs pyright (basic) on the server; the errors it found are fixed (a wizard that could pass `None` on, a memory probe without a match, a seat gap of `None`).
+
 ## 1.18.0 (unreleased)
 
 - **3D print export button** (File menu and toolbar in every workbench, and in the chat panel). It asks for the printer and the assembly method only when used, then writes on a saved copy: the whole model as one coloured 3MF and STL; one plate set per colour with each part laid down for printing; holes and printed connector pins, or gluing; axles for parts that turn, such as wheels, so that they need no glue; and a PDF assembly guide with a picture for each step. Parts too thin to print alone go into a neighbour and are named for painting.

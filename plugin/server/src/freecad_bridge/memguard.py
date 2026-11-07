@@ -76,7 +76,10 @@ def available_memory() -> int | None:
     try:
         if sys.platform == "darwin":
             out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=2).stdout
-            page = int(re.search(r"page size of (\d+)", out)[1])
+            found = re.search(r"page size of (\d+)", out)
+            if not found:
+                return None
+            page = int(found[1])
             pages = {m[1]: int(m[2]) for m in re.finditer(r"^Pages (\w+)[^:]*:\s+(\d+)", out, re.M)}
             return page * sum(pages.get(k, 0) for k in ("free", "inactive", "speculative", "purgeable"))
         if sys.platform == "win32":

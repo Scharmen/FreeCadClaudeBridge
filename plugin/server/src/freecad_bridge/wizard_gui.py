@@ -275,11 +275,12 @@ class App:  # pragma: no cover - the window itself is checked by hand (see docs/
             self._paint(row)
         self.main_btn.configure(state="disabled")
         self.status.configure(text="Checking what is needed …")
-        self.system = GuiSystem(self.events, self._ask_from_worker)
+        system = GuiSystem(self.events, self._ask_from_worker)
+        self.system = system
 
         def work() -> None:
             try:
-                rc = wizard.run_wizard(self.system, freecad=self.freecad)
+                rc = wizard.run_wizard(system, freecad=self.freecad)
             except Exception as e:          # show it instead of a silent, stuck window
                 self.events.put(("log", f"Error: {e!r}"))
                 rc = 2
@@ -321,8 +322,10 @@ class App:  # pragma: no cover - the window itself is checked by hand (see docs/
             done.set()
         elif kind == "input":
             if payload:
-                self.input_row.pack(fill="x", pady=(6, 0), before=self.details if self.show_details.get()
-                                    else None)
+                if self.show_details.get():
+                    self.input_row.pack(fill="x", pady=(6, 0), before=self.details)
+                else:
+                    self.input_row.pack(fill="x", pady=(6, 0))
                 if not self.show_details.get():
                     self.show_details.set(True)
                     self._toggle_details()

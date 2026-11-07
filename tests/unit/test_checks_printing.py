@@ -193,3 +193,26 @@ def test_a_press_fit_does_not_excuse_parts_that_run_into_each_other():
     assert pr.fit_verdict(0.0, 30.0, "press", "fdm", overlap_depth=0.08)["ok"]
     deep = pr.fit_verdict(0.0, 20.8, "press", "fdm", overlap_depth=1.5)
     assert not deep["ok"] and "1.5" in deep["problem"]["cause"]
+
+
+def test_check_all_report_puts_every_problem_first_with_its_source():
+    from freecad_bridge.checks import runner
+
+    design = {"score": 80.0, "passed": 4, "matched": {}, "parts": [], "gaps": [],
+              "problems": [{"check": "bbox", "found": "50 × 50 × 13 mm"}], "tree_errors": ["Pad: broken"]}
+    prints = {"ok": False, "prints": [{"objects": ["Lid"], "ok": False, "values": {"closed": True, "wall_mm": 0.8,
+                                                                                   "best_up": "+Z"},
+                                       "problems": [{"cause": "walls about 0.8 mm", "where": [0, 0, 1],
+                                                     "fix": "thicken"}],
+                                       "warnings": [{"cause": "a bridge of 12 mm", "where": [0, 0, 5], "fix": "rib"}]}]}
+    fits = [{"a": "Lid", "b": "Box", "kind": "snap", "ok": False, "gap_mm": 0.0, "overlap_mm3": 0.0,
+             "problem": {"cause": "the side gap is 0 mm", "fix": "widen it"}},
+            {"a": "Pin", "b": "Hole", "kind": "sliding", "ok": True, "gap_mm": 0.2, "overlap_mm3": 0.0},
+            {"a": "Ghost", "b": "Box", "error": "ValueError: 'Ghost' is not a solid"}]
+    rep = runner.all_summary(design, prints, fits)
+    assert rep["ok"] is False
+    assert [p["from"] for p in rep["problems"]] == ["design", "design", "print", "fit", "fit"]
+    assert "bbox" in rep["problems"][0]["cause"] and rep["problems"][2]["objects"] == ["Lid"]
+    assert rep["warnings"][0]["cause"].startswith("a bridge")
+    assert rep["print"][0]["wall_mm"] == 0.8 and rep["fits"][1]["ok"] is True
+    assert runner.all_summary(None, None, [])["ok"] is True

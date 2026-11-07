@@ -235,3 +235,32 @@ def test_a_single_number_is_accepted_where_a_range_belongs():
     s = spec.normalize({"height": 50, "solids": 1})
     assert s["solids"] == [1, 1] and s["height"] == [49, 51]
     assert spec.normalize({"height": [1, 2]}) == {"height": [1, 2]}
+
+
+def test_stream_stats_count_requests_pictures_and_the_final_context():
+    import json
+
+    from design.run import stream_stats
+
+    def ev(kind, **k):
+        return json.dumps({"type": kind, **k})
+    usage1 = {"input_tokens": 10, "cache_read_input_tokens": 20000, "cache_creation_input_tokens": 500,
+              "output_tokens": 50}
+    usage2 = {"input_tokens": 10, "cache_read_input_tokens": 31000, "cache_creation_input_tokens": 0,
+              "output_tokens": 80}
+    lines = [
+        ev("system", subtype="init", model="x"),
+        ev("assistant", message={"id": "m1", "usage": usage1, "content": [
+            {"type": "tool_use", "id": "t1", "name": "mcp__plugin_freecad_freecad__view",
+             "input": {"screenshot": True}}]}),
+        ev("assistant", message={"id": "m1", "usage": usage1, "content": []}),   # a partial message, same id
+        ev("user", message={"content": [{"type": "tool_result", "tool_use_id": "t1", "content": [
+            {"type": "text", "text": "{}"}, {"type": "image", "source": {"data": "AAAA"}}]}]}),
+        ev("assistant", message={"id": "m2", "usage": usage2, "content": [{"type": "text", "text": "done"}]}),
+        ev("result", subtype="success", duration_ms=1000, num_turns=3, total_cost_usd=0.1,
+           usage={"output_tokens": 130, "cache_read_input_tokens": 51000, "input_tokens": 20,
+                  "cache_creation_input_tokens": 500}),
+    ]
+    st = stream_stats(lines)
+    assert st["requests"] == 2 and st["images"] == 1 and st["context_tokens"] == 31010
+    assert st["screenshots"] == 1 and st["input_tokens"] == 51520

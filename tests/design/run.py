@@ -58,6 +58,9 @@ def stream_stats(lines: Iterable[str]) -> dict[str, Any]:
     errors: list[str] = []
     shots = 0
     max_chars = 0
+    images = 0
+    requests: set[str] = set()
+    context = 0
     out: dict[str, Any] = {"model": None, "answer": "", "ok": False, "seconds": None, "turns": None, "api_error": None,
                            "cost_usd": None, "output_tokens": None, "input_tokens": None}
     for line in lines:
@@ -69,7 +72,13 @@ def stream_stats(lines: Iterable[str]) -> dict[str, Any]:
         if kind == "system" and ev.get("subtype") == "init":
             out["model"] = ev.get("model")
         elif kind == "assistant":
-            for block in ev.get("message", {}).get("content", []):
+            msg = ev.get("message", {})
+            usage = msg.get("usage") or {}
+            if usage.get("output_tokens") is not None:
+                requests.add(str(msg.get("id") or len(requests)))     # partial messages repeat the id
+                context = max(context, sum(usage.get(k) or 0 for k in ("input_tokens", "cache_read_input_tokens",
+                                                                        "cache_creation_input_tokens")))
+            for block in msg.get("content", []):
                 if block.get("type") == "tool_use":
                     name = block["name"].removeprefix(FREECAD_TOOL_PREFIX)
                     names[block["id"]] = name
@@ -87,6 +96,8 @@ def stream_stats(lines: Iterable[str]) -> dict[str, Any]:
                 body = block.get("content")
                 text = body if isinstance(body, str) else "".join(
                     b.get("text", "") for b in body or [] if isinstance(b, dict))
+                images += sum(1 for b in body or [] if isinstance(b, dict) and b.get("type") == "image") \
+                    if isinstance(body, list) else 0
                 max_chars = max(max_chars, len(text))
         elif kind == "result":
             usage = ev.get("usage") or {}
@@ -96,7 +107,8 @@ def stream_stats(lines: Iterable[str]) -> dict[str, Any]:
                        input_tokens=sum(usage.get(k) or 0 for k in ("input_tokens", "cache_read_input_tokens",
                                                                       "cache_creation_input_tokens")),
                        answer=(ev.get("result") or "")[:4000], api_error=ev.get("api_error"))
-    out.update(tools=tools, tool_errors=errors, screenshots=shots, max_result_chars=max_chars)
+    out.update(tools=tools, tool_errors=errors, screenshots=shots, max_result_chars=max_chars, images=images,
+               requests=len(requests), context_tokens=context)
     return out
 
 
@@ -210,7 +222,9 @@ def claude_path() -> str:
 
 
 def run_claude(prompt: str, model: str, pid: int, work: Path, log: Path, no_checks: bool = False) -> dict[str, Any]:
-    args = [claude_path(), *build_args(prompt), "--model", model, "--append-system-prompt", SYSTEM_PROMPT]
+    allowed = [FREECAD_TOOL_PREFIX + "*", "Read", "Skill", "ToolSearch"]   # its pictures and the skill, as in the panel
+    args = [claude_path(), *build_args(prompt, allowed_tools=allowed), "--model", model,
+            "--append-system-prompt", SYSTEM_PROMPT]
     if no_checks:     # a "before" measurement: as if the check tools did not exist
         args += ["--disallowedTools", ",".join(FREECAD_TOOL_PREFIX + t for t in CHECK_TOOLS)]
     env = platforms.clean_env()
@@ -313,13 +327,18 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         m["tasks"][r["task"]] = {"score": r.get("score"), "visual": (r.get("visual") or {}).get("score"),
                                  "seconds": run.get("seconds"), "tools": len(run.get("tools", [])),
                                  "tool_errors": len(run.get("tool_errors", [])), "cost_usd": run.get("cost_usd"),
-                                 "output_tokens": run.get("output_tokens"), "failed": r.get("failed", [])[:12]}
+                                 "output_tokens": run.get("output_tokens"), "input_tokens": run.get("input_tokens"),
+                                 "requests": run.get("requests"), "context_tokens": run.get("context_tokens"),
+                                 "images": run.get("images"), "failed": r.get("failed", [])[:12]}
     for m in by_model.values():
         scores = [t["score"] or 0 for t in m["tasks"].values()]
         visual = [t["visual"] for t in m["tasks"].values() if t["visual"] is not None]
         m["mean_score"] = round(sum(scores) / len(scores), 1) if scores else None
         m["mean_visual"] = round(sum(visual) / len(visual), 1) if visual else None
         m["cost_usd"] = round(sum(t["cost_usd"] or 0 for t in m["tasks"].values()), 2)
+        for key in ("tools", "requests", "context_tokens", "images", "input_tokens"):   # the token KPIs of a run
+            values = [t[key] for t in m["tasks"].values() if t.get(key) is not None]
+            m["mean_" + key] = round(sum(values) / len(values)) if values else None
     return by_model
 
 

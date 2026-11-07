@@ -259,6 +259,8 @@ def run_wizard(system: System, discover: Callable[..., list[installer.FreeCADIns
 
     # 5. + 6. Install
     system.say("")
+    if claude is None or newest is None:   # the steps above returned 1; this keeps the types honest
+        return 1
     if not confirm("Everything is ready. Install the FreeCAD plugin into Claude and the Claude panel into "
                    "FreeCAD?", True, True):
         system.say("Cancelled; nothing was changed.")

@@ -20,7 +20,7 @@ from typing import Any
 FEEDBACK = "feedback.jsonl"
 PREFERENCES = "preferences.md"
 RATINGS = ("good", "partly", "bad")
-MAX_LESSONS = 60
+MAX_LESSONS = 30   # about 1,500 characters at the start of every session
 MAX_FIELD = 2000
 HEADER = ("# What Claude learned about how you model in FreeCAD\n\n"
           "One lesson per line, starting with \"- \". Edit or delete lines freely; "
@@ -68,7 +68,8 @@ def record_feedback(bridge_dir: Any, rating: str, comment: str = "", request: st
                     doc: str = "", source: str = "", lesson: str = "") -> dict[str, Any]:
     if rating not in RATINGS:
         raise ValueError(f"rating must be one of {', '.join(RATINGS)}")
-    entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rating": rating, "comment": _norm(comment)[:MAX_FIELD],
+    entry: dict[str, Any] = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rating": rating, "comment": _norm(comment)[:MAX_FIELD],
              "request": _norm(request)[:MAX_FIELD], "result": _norm(result)[:MAX_FIELD], "doc": doc,
              "source": source, "lesson": _norm(lesson)[:300]}
     os.makedirs(str(bridge_dir), mode=0o700, exist_ok=True)
@@ -94,7 +95,7 @@ def recent_feedback(bridge_dir: Any, n: int = 5) -> list[dict[str, Any]]:
     return out
 
 
-def context_text(bridge_dir: Any, max_lessons: int = 40) -> str:
+def context_text(bridge_dir: Any, max_lessons: int = 30) -> str:
     """Text for Claude at session start; empty if nothing was learned yet."""
     items = lessons(bridge_dir)[-max_lessons:]
     if not items:

@@ -678,3 +678,14 @@ def flex(path: str, params: list[str] | None, factors: list[float]) -> dict[str,
                 "objects": [o.Label for o in parts]}
     finally:
         App.closeDocument(doc.Name)
+
+
+def check_all(path: str, spec: dict[str, Any], fits: list[dict[str, Any]], out_dir: str) -> dict[str, Any]:
+    """Everything the check tools measure, from one copy in one process: the spec, the meshes, each pair."""
+    out: dict[str, Any] = {"design": measure(path, spec), "meshes": export_meshes(path, None, out_dir), "fits": []}
+    for f in fits:
+        try:
+            out["fits"].append({**f, **fit(path, str(f.get("a", "")), str(f.get("b", "")))})
+        except Exception as e:  # noqa: BLE001 - one bad pair must not hide the other results
+            out["fits"].append({**f, "error": f"{type(e).__name__}: {e}"})
+    return out

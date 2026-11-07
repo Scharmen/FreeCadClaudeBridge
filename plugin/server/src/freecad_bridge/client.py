@@ -16,7 +16,7 @@ NOT_RUNNING = "NOT_RUNNING"
 FREECAD_CRASHED = "FREECAD_CRASHED"
 INSTANCE_ENV = "FREECAD_BRIDGE_INSTANCE"  # set by the chat panel: the FreeCAD it runs in
 _ids = itertools.count(1)
-_selected: int | None = None  # chosen with select_instance, for the lifetime of this MCP server
+_selected: int | None = None  # chosen with status(select=...), for the lifetime of this MCP server
 
 # What to do about errors that come from setup or the connection rather than from FreeCAD code.
 FIXES = {
@@ -138,8 +138,8 @@ def choose_instance(pid: int | None = None) -> tuple[Instance, list[Instance]]:
         for inst in instances:
             if inst.pid == wanted:
                 return inst, []
-        raise BridgeError(NOT_RUNNING, f"the selected FreeCAD (pid {wanted}) is not running; call `instances` and "
-                          "`select_instance` to pick another one.")
+        raise BridgeError(NOT_RUNNING, f"the selected FreeCAD (pid {wanted}) is not running; call `status` and "
+                          "`status(select=...)` to pick another one.")
     if not instances:
         raise BridgeError(NOT_RUNNING, "FreeCAD with the ClaudeBridge addon is not running.")
     return instances[0], instances[1:]
@@ -179,7 +179,7 @@ class CallResult:
         out = []
         if self.others:
             out.append(f"{len(self.others) + 1} FreeCAD instances are running; this went to the newest (pid "
-                       f"{self.instance.pid}). Call `instances` and `select_instance` to choose another.")
+                       f"{self.instance.pid}). Call `status(select=\"<document>\")` to choose another.")
         addon = self.hello.get("addon_version")
         if not addon or addon == __version__:
             return out

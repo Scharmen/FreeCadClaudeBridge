@@ -189,7 +189,7 @@ def evaluate(spec: dict[str, Any], measured: dict[str, Any]) -> dict[str, Any]:
                      and {g["a"], g["b"]} == {pa["label"], pb["label"]}), None)
         got = pair["d"] if pair else None
         side = ""
-        if pair and cl.get("seated") and got < 1e-3:      # touching at the seat is right: the sides count
+        if pair and cl.get("seated") and got is not None and got < 1e-3:   # touching at the seat is right
             got = pair.get("side_gap")
             side = "at the sides" if got is not None else "they touch, and not only at one flat seat"
         ok = got is not None and lo <= got <= hi

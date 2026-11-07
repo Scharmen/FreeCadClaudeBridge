@@ -37,8 +37,11 @@ def test_sculpt_imports_watertight_matte_parts_as_one_undo_step():
          "primitives": [{"type": "torus", "center": [0, 0, 21], "radius": 3.6, "thickness": 0.8}]},
         {"name": "Loose", "primitives": [{"type": "sphere", "center": [0, 0, 0], "radius": 2},
                                          {"type": "sphere", "center": [12, 0, 0], "radius": 2}]}]}
-    res = json.loads(anyio.run(lambda: mcp_server.sculpt(scene, name="Figure", voxel_mm=0.3, doc=DOC)))
+    full = anyio.run(lambda: mcp_server.sculpt(scene, name="Figure", voxel_mm=0.3, doc=DOC))
+    res = json.loads(full[0])
     assert not res.get("errors"), res
+    assert len(full) == 2 and full[1].data[:4] == b"\x89PNG", "a front and side preview comes with the answer"
+    assert len(full[1].data) < 120_000, "a small picture: two views of 400 x 300"
     parts = {p["object"]: p for p in res["result"]["parts"]}
     assert set(parts) == {"Body", "Hat", "Loose"}
     assert all(p["watertight"] for p in parts.values())

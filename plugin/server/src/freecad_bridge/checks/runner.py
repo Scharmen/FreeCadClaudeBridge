@@ -124,7 +124,8 @@ def flex_summary(res: dict[str, Any]) -> dict[str, Any]:
 async def flex_each(raw: Raw, names: list[str] | None, steps: list[float], doc: str | None,
                     instance: int | None) -> dict[str, Any]:
     """After a crash: every parameter and factor in its own process, to find the values that crash."""
-    names = names or await on_copy(raw, lambda path, _t: f"_result = measure.param_names({path!r})", doc, instance)
+    names = list(names or await on_copy(raw, lambda path, _t: f"_result = measure.param_names({path!r})", doc,
+                                        instance))
     merged: dict[str, Any] = {"params": names, "missing": [], "runs": []}
     for name in names:
         for step in steps:
@@ -141,3 +142,33 @@ async def flex_each(raw: Raw, names: list[str] | None, steps: list[float], doc: 
 
 def spec_json(spec: dict[str, Any]) -> str:
     return json.dumps(spec)
+
+
+def all_summary(design: dict[str, Any] | None, prints: dict[str, Any] | None,
+                fits: list[dict[str, Any]]) -> dict[str, Any]:
+    """One report for check_all: every problem first, each saying which check found it, then the warnings."""
+    problems: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    if design:
+        problems += [{"from": "design", "cause": f"{p['check']}: {p['found']}"} for p in design["problems"]]
+        problems += [{"from": "design", "cause": f"tree error: {e}"} for e in design.get("tree_errors", [])]
+    for pr in (prints or {}).get("prints", []):
+        problems += [{"from": "print", "objects": pr["objects"], **p} for p in pr["problems"]]
+        warnings += [{"from": "print", "objects": pr["objects"], **w} for w in pr["warnings"]]
+    for f in fits:
+        pair = [f.get("a"), f.get("b")]
+        if f.get("error"):
+            problems.append({"from": "fit", "pair": pair, "cause": f["error"], "fix": "name two solids"})
+        elif f.get("problem"):
+            problems.append({"from": "fit", "pair": pair, **f["problem"]})
+    out: dict[str, Any] = {"ok": not problems, "problems": problems, "warnings": warnings}
+    if design:
+        out["design"] = {k: design[k] for k in ("score", "passed", "matched", "parts", "gaps") if k in design}
+    if prints:
+        out["print"] = [{"objects": p["objects"], "ok": p["ok"], **{k: p["values"][k] for k in
+                         ("closed", "wall_mm", "best_up", "base_mm2", "stable") if k in p.get("values", {})}}
+                        for p in prints["prints"]]
+    if fits:
+        out["fits"] = [{k: f[k] for k in ("a", "b", "kind", "ok", "gap_mm", "overlap_mm3", "side_gap_mm",
+                                          "wanted_gap_mm") if k in f} for f in fits]
+    return out

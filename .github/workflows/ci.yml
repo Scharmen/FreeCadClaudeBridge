@@ -24,6 +24,8 @@ jobs:
         run: uv run --project plugin/server pytest tests -q
       - name: Lint
         run: uv run --project plugin/server ruff check plugin tests
+      - name: Types (server)
+        run: uv run --project plugin/server --with pyright==1.1.414 pyright --project plugin/server
 
   plugin:
     runs-on: ubuntu-latest
