@@ -287,13 +287,15 @@ def wheel(p: dict[str, Any]) -> dict[str, Any]:
         y0 = -rw / 2 - 2.5
         brake = Part.makeCylinder(p["disc"] / 2, 4.0, V(0, y0, 0), y_axis).cut(
             Part.makeCylinder(p["bore"] / 2 + 2, 6, V(0, y0 - 1, 0), y_axis))
-        cal_w = 0.3 * p["disc"]
-        caliper = Part.makeBox(cal_w, 8.0, 10.0, V(p["disc"] / 2 - cal_w + 2, y0 - 2, -5)).cut(
-            Part.makeBox(cal_w + 2, 4.4, 12, V(p["disc"] / 2 - cal_w + 1, y0 - 0.2, -6)))
-        caliper = caliper.cut(Part.makeCylinder(p["disc"] / 2 - 0.3, 10, V(0, y0 - 3, 0), y_axis).cut(
-            Part.makeCylinder(p["disc"] / 2 - 10, 10, V(0, y0 - 3, 0), y_axis)))
-        caliper = Part.makeBox(cal_w, 8.0, 10.0, V(p["disc"] / 2 - cal_w + 2, y0 - 2, -5)).cut(
-            Part.makeCylinder(p["disc"] / 2 + 0.3, 4.4, V(0, y0 - 0.2, 0), y_axis))
+        cal_w, cal_len, cal_h = 0.3 * p["disc"], min(8.0, 0.5 * p["disc"]), min(10.0, 0.6 * p["disc"])
+        y1 = y0 - (cal_len - 4) / 2
+        caliper = Part.makeBox(cal_w, cal_len, cal_h, V(p["disc"] / 2 - cal_w + 0.12 * p["disc"], y1, -cal_h / 2))
+        slot = Part.makeCylinder(p["disc"] / 2 + 0.3, cal_len + 2, V(0, y1 - 1, 0), y_axis).cut(
+            Part.makeCylinder(p["disc"] / 2 - 0.4 * cal_w, cal_len + 2, V(0, y1 - 1, 0), y_axis))
+        caliper = caliper.cut(slot)
+        if p.get("brake_side", "-y") == "+y":    # the brake sits on the car's side of the wheel
+            for shape in (brake, caliper):
+                shape.rotate(V(0, 0, 0), V(0, 0, 1), 180)
         out["Disc"] = brake
         out["Caliper"] = caliper
     return out

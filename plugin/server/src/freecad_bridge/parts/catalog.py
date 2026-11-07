@@ -41,11 +41,12 @@ FAMILIES: dict[str, dict[str, Any]] = {
                "params": {"major": 32.0, "pitch": 3.0, "length": 9.0, "kind": "external", "core": 0.0,
                           "clearance": 0.3}},
     "wheel": {"doc": "Car or model wheel on the y axis at the origin: a tyre with rounded shoulders and tread grooves, "
-                     "a spoked rim with a hub and an axle bore; disc > 0 adds a brake disc and a caliper inside the "
-                     "rim. Parts Tyre, Rim (Disc, Caliper); printable apart, the print export treats them as moving.",
+                     "a spoked rim with a hub and an axle bore; disc > 0 adds a brake disc and a caliper on the inner "
+                     "side (brake_side -y or +y: the side the car is on). Parts Tyre, Rim (Disc, "
+                     "Caliper); printable apart, the print export treats them as moving.",
               "params": {"diameter": 60.0, "width": 24.0, "rim": 40.0, "rim_width": 0.0, "spokes": 5,
                          "spoke_width": 0.0, "hub": 0.0, "bore": 3.0, "grooves": 4, "groove_depth": 1.0,
-                         "disc": 0.0}},
+                         "disc": 0.0, "brake_side": "-y"}},
     "lamp": {"doc": "Head or tail lamp looking towards -Y from y = 0: a housing with an open front, a reflector bowl "
                     "inside, a clear lens closing the front and an LED strip under the top edge. shape rect or round "
                     "(round: width is the diameter). Colour the parts afterwards (lens transparent).",
@@ -137,6 +138,8 @@ def _validate(family: str, p: dict[str, Any]) -> None:
         if p["core"] and p["core"] >= p["major"]:
             raise ValueError("core must be smaller than major")
     if family == "wheel":
+        if p["brake_side"] not in ("-y", "+y"):
+            raise ValueError("brake_side must be -y or +y")
         if p["rim"] >= p["diameter"]:
             raise ValueError("the rim must be smaller than the tyre's diameter")
         if p["spokes"] < 2:

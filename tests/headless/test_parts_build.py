@@ -155,10 +155,14 @@ def test_a_wheel_has_a_tyre_with_tread_a_spoked_rim_and_an_axle_bore(cmd):
 
 
 def test_a_wheel_with_brake_adds_disc_and_caliper_inside_the_rim(cmd):
-    r = run("_result = [sorted(parts), box(parts['Disc']), parts['Caliper'].BoundBox.XMax, parts['Rim'].BoundBox.XMax]",
-            cmd, "wheel", diameter=60.0, rim=40.0, disc=30.0)
+    r = run("_result = [sorted(parts), box(parts['Disc']), parts['Caliper'].BoundBox.XMax, parts['Rim'].BoundBox.XMax,"
+            " parts['Disc'].BoundBox.YMax]", cmd, "wheel", diameter=60.0, rim=40.0, disc=30.0)
     assert r[0] == ["Caliper", "Disc", "Rim", "Tyre"]
     assert r[1][1] == pytest.approx(30, abs=0.3) and r[2] < r[3], "the caliper stays inside the rim"
+    assert r[4] < 0, "the brake is on the -y side by default"
+    other = run("_result = parts['Disc'].BoundBox.YMin", cmd, "wheel", diameter=60.0, rim=40.0, disc=30.0,
+                brake_side="+y")
+    assert other > 0, "brake_side +y puts it on the +y side"
 
 
 def test_a_lamp_has_housing_reflector_lens_and_strip_that_fit_together(cmd):
