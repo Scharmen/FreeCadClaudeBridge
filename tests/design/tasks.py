@@ -247,6 +247,27 @@ TASKS: list[dict[str, Any]] = [
         "printable": "fdm",
         "look": ["round knob body", "grip ridges or knurling", "indicator mark", "D-shaped bore with a flat"],
     },
+    {
+        "id": "waving_person",
+        "prompt": "Model a figurine of a standing adult waving with the raised right arm, 80 mm tall, for 3D printing "
+                  "in one piece on a round base: a T-shirt, jeans, sneakers, short hair, a friendly face. Make it "
+                  "look like a real person, not a mannequin.",
+        "spec": {"height": [77, 83], "solids": [1, 2]},
+        "look": ["one raised arm, the other relaxed", "7 to 8 heads tall", "hair as locks, not a cap",
+                 "face with eyes, nose and mouth", "shirt with folds and sleeves", "jeans with seams or pockets",
+                 "sneakers with soles", "round base"],
+    },
+    {
+        "id": "toy_car",
+        "prompt": "Model a toy sports car 120 mm long for 3D printing: a smooth body with a roof and windows, four "
+                  "wheels with spoked rims and treaded tyres that can turn on axles, two headlamps with lenses, "
+                  "two tail lamps, a honeycomb grille in the front and a rear diffuser. Give every part the "
+                  "colour it should print in.",
+        "spec": {"parts": [{"name": "body", "bbox": [120, 50, 36], "tol": 12, "surfaces_any": ["BSplineSurface"]}],
+                 "solids": [6, 40], "total": {"bbox": [120, 54, 40], "tol": 12}},
+        "look": ["smooth car body with a roof", "four wheels with spoked rims", "treaded tyres",
+                 "headlamps with lenses", "tail lamps", "honeycomb grille", "rear diffuser", "windows"],
+    },
 ]
 
 

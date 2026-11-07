@@ -40,6 +40,22 @@ FAMILIES: dict[str, dict[str, Any]] = {
                       "diameter of the neck under an external thread (0: the thread's minor diameter).",
                "params": {"major": 32.0, "pitch": 3.0, "length": 9.0, "kind": "external", "core": 0.0,
                           "clearance": 0.3}},
+    "wheel": {"doc": "Car or model wheel on the y axis at the origin: a tyre with rounded shoulders and tread grooves, "
+                     "a spoked rim with a hub and an axle bore; disc > 0 adds a brake disc and a caliper inside the "
+                     "rim. Parts Tyre, Rim (Disc, Caliper); printable apart, the print export treats them as moving.",
+              "params": {"diameter": 60.0, "width": 24.0, "rim": 40.0, "rim_width": 0.0, "spokes": 5,
+                         "spoke_width": 0.0, "hub": 0.0, "bore": 3.0, "grooves": 4, "groove_depth": 1.0,
+                         "disc": 0.0}},
+    "lamp": {"doc": "Head or tail lamp looking towards -Y from y = 0: a housing with an open front, a reflector bowl "
+                    "inside, a clear lens closing the front and an LED strip under the top edge. shape rect or round "
+                    "(round: width is the diameter). Colour the parts afterwards (lens transparent).",
+             "params": {"width": 30.0, "height": 12.0, "depth": 15.0, "shape": "rect", "wall": 1.2, "lens": 1.0}},
+    "pattern": {"doc": "A panel of repeated openings for grilles, vents and diffusers, standing in the XZ plane from "
+                       "z = 0 up, centred on x, thickness along +y: cells honeycomb, slats, mesh or holes, cell = "
+                       "spacing, bar = material between openings, frame = solid border. kind panel gives the bars to "
+                       "fuse into an opening, kind holes gives the openings as cutters to subtract from a surface.",
+                "params": {"width": 40.0, "height": 20.0, "thickness": 1.2, "cells": "honeycomb", "cell": 4.0,
+                           "bar": 0.8, "frame": 1.5, "kind": "panel"}},
     "hinge": {"doc": "Pin hinge opened flat: two leaves, knuckles, a separate pin, countersunk screw holes.",
               "params": {"length": 40.0, "leaf_width": 20.0, "thickness": 3.0, "pin": 3.0, "gap": 0.3, "knuckles": 5,
                          "screw": 4.0}},
@@ -120,6 +136,27 @@ def _validate(family: str, p: dict[str, Any]) -> None:
                              "eat the core (major must be at least 4 × pitch)")
         if p["core"] and p["core"] >= p["major"]:
             raise ValueError("core must be smaller than major")
+    if family == "wheel":
+        if p["rim"] >= p["diameter"]:
+            raise ValueError("the rim must be smaller than the tyre's diameter")
+        if p["spokes"] < 2:
+            raise ValueError("a rim needs at least 2 spokes")
+        if p["bore"] >= p["rim"] / 3:
+            raise ValueError("the bore does not fit the hub")
+        if p["disc"] and p["disc"] >= p["rim"] - 4:
+            raise ValueError("the disc must fit inside the rim")
+    if family == "lamp":
+        if p["shape"] not in ("rect", "round"):
+            raise ValueError("shape must be rect or round")
+        if 2 * p["wall"] + p["lens"] >= min(p["width"], p["height"], p["depth"]):
+            raise ValueError("the walls and the lens leave no room inside")
+    if family == "pattern":
+        if p["cells"] not in ("honeycomb", "slats", "mesh", "holes"):
+            raise ValueError("cells must be honeycomb, slats, mesh or holes")
+        if p["kind"] not in ("panel", "holes"):
+            raise ValueError("kind must be panel or holes")
+        if p["bar"] >= p["cell"]:
+            raise ValueError("bar must be smaller than cell, or nothing is open")
     if family == "knob" and p["shaft"] + 4 >= p["diameter"]:
         raise ValueError("the knob needs at least 2 mm of wall around the shaft")
 

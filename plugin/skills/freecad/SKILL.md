@@ -29,7 +29,7 @@ You control the user's running FreeCAD through the `freecad` MCP tools. The user
 
 ## Start from what exists
 
-- **Standard parts:** `make_part` builds gears and gear pairs, springs, bolts and nuts with real threads, hinges, enclosures, snap boxes, brackets and knobs, tested so that they fit (`make_part()` lists them). Use it, then change or add what the request needs; do not model these by hand.
+- **Standard parts:** `make_part` builds gears and gear pairs, springs, bolts and nuts with real threads, a `thread` on any diameter (bottle necks, caps), hinges, enclosures, snap boxes, brackets and knobs, and for vehicles `wheel` (tyre, spoked rim, brake disc), `lamp` (housing, reflector, lens, LED strip) and `pattern` (honeycomb, slats, mesh, holes for grilles and vents), tested so that they fit (`make_part()` lists them). Use it, then change or add what the request needs; do not model these by hand.
 - **Good past designs:** `design_library(action="search", query=...)` finds what this user liked before, with the code that built it. Reuse it as an example. A model the user rates "good" with `record_feedback` is stored there, on this machine only.
 
 ## Check with numbers
@@ -79,7 +79,7 @@ When the user gave a picture (attached in the chat, a file path, or one you used
 
 1. Before building, describe what the picture shows part by part, including the small details, and model from that list.
 2. When the model is built, call `compare_to_picture(path, views=[...])` with each picture and the matching view: turn the camera to the picture's angle and use `current`, or use `front`/`left`/`top` for drawings. It shows the picture next to the model.
-3. Go through it part by part: silhouette and proportions, every feature and its position, counts, colors, surface. List every difference, fix it, and compare again. Stop when nothing is missing, then say what you checked.
+3. Go through it part by part: silhouette and proportions, every feature and its position, counts, colors, surface. For a small detail (a lamp, a grille, a face) use `crop=[x0, y0, x1, y1]` (fractions of the picture) with `look_at=[the objects that are that detail]`: the crop is shown enlarged next to a close-up of the model. List every difference, fix it, and compare again. Stop when nothing is missing, then say what you checked.
 
 A picture in the chat without a file path: look at it, take screenshots from the same angle with `view` and compare them with the picture the same way.
 

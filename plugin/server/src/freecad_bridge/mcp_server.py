@@ -478,22 +478,38 @@ COMPARE_NOTE = ("Go through the picture part by part and compare: overall silhou
                 "difference, fix it, then call compare_to_picture again. Done only when nothing is missing.")
 
 
+def _crop(crop: list[Any] | None) -> list[float] | None:
+    if crop is None:
+        return None
+    try:
+        box = [float(c) for c in crop]
+    except (TypeError, ValueError) as e:
+        raise ToolError("INVALID_ARGS: crop = [x0, y0, x1, y1], fractions of the picture") from e
+    if len(box) != 4 or not (0 <= box[0] < box[2] <= 1 and 0 <= box[1] < box[3] <= 1):
+        raise ToolError("INVALID_ARGS: crop = [x0, y0, x1, y1] as fractions 0..1, left to right and top to bottom")
+    return box
+
+
 @mcp.tool(annotations=WRITE, structured_output=False)
 async def compare_to_picture(path: str, views: list[Literal["current", "iso", "front", "rear", "top", "bottom",
                                                             "left", "right"]] | None = None,
+                             crop: list[float] | None = None, look_at: list[str] | None = None, zoom: float = 1.0,
                              instance: int | None = None) -> list[Any]:
-    """After modelling from a picture: show the user's picture next to the model, so you can find
-    what is missing or wrong. One side-by-side image per view; "current" keeps the camera as it
-    is (turn it to the picture's angle first), other views fit the model; the camera is put
-    back afterwards. Works on the active document. Compare everything, fix the differences,
-    and call it again until the model matches."""
+    """After modelling from a picture: the user's picture next to the model, one image per view;
+    "current" keeps the camera (turn it to the picture's angle first), other views fit the model; the
+    camera is put back. For a detail: crop = [x0, y0, x1, y1] (fractions of the picture, top left to
+    bottom right) shows that part of the picture enlarged, look_at = the objects that are that detail
+    frames them (zoom > 1 closer). Compare part by part, fix the differences, compare once more."""
     from PIL import Image as PILImage
 
+    box = _crop(crop)
     try:
         with PILImage.open(os.path.expanduser(path)) as im:
             w_px, h_px = im.size
     except (OSError, ValueError) as e:
         raise ToolError(f"INVALID_ARGS: cannot read the picture {path}: {e}") from e
+    if box:
+        w_px, h_px = max(1.0, (box[2] - box[0]) * w_px), max(1.0, (box[3] - box[1]) * h_px)
     height = 480
     width = max(200, min(1200, round(height * w_px / h_px)))
     out: list[Any] = []
@@ -501,7 +517,7 @@ async def compare_to_picture(path: str, views: list[Literal["current", "iso", "f
     camera = None
     for v in views or ["current"]:
         args: dict[str, Any] = {"action": "set_view", "screenshot": True, "width": width, "height": height,
-                                "return_camera": camera is None}
+                                "return_camera": camera is None, "look_at": look_at, "zoom": zoom}
         if v != "current":
             args.update(action="fit", view=v)
         res = await _raw("view", args, instance=instance)
@@ -511,10 +527,10 @@ async def compare_to_picture(path: str, views: list[Literal["current", "iso", "f
         if not image:
             raise ToolError(f"NO_SCREENSHOT: FreeCAD returned no picture of the view ({_dump(res)[:300]})")
         png = await anyio.to_thread.run_sync(
-            lambda image=image, v=v: imaging.side_by_side(path, base64.b64decode(image), f"Model ({v})"))
+            lambda image=image, v=v: imaging.side_by_side(path, base64.b64decode(image), f"Model ({v})", 480, box))
         out.append(Image(data=png, format="png"))
         shown.append(v)
-    if camera and shown != ["current"]:
+    if camera and (shown != ["current"] or look_at or zoom != 1.0):
         await _raw("view", {"action": "set_view", "camera": camera}, instance=instance)   # the user's camera back
     return [_dump({"picture": path, "views": shown, "check": COMPARE_NOTE}), *out]
 
@@ -656,8 +672,10 @@ _result = _b.export({family!r}, _j.loads({params!r}), _j.loads({iso!r}), _j.load
 async def make_part(family: str = "list", params: dict[str, Any] | None = None, at: list[float] | None = None,
                     replace: list[str] | None = None, preview: bool = True, doc: str | None = None,
                     instance: int | None = None) -> list[Any]:
-    """Standard parts, right the first time: gear, gear_pair, spring, bolt, nut, bolt_nut, hinge,
-    enclosure, snap_box, bracket, knob; faired_body for a smooth car or boat body from feature lines.
+    """Standard parts, right the first time: gear, gear_pair, spring, bolt, nut, bolt_nut, thread (any
+    diameter: bottle necks, caps), hinge, enclosure, snap_box, bracket, knob; for vehicles wheel (tyre,
+    spoked rim, brake), lamp (housing, reflector, lens, strip) and pattern (honeycomb, slats, mesh, holes
+    for grilles and vents); faired_body for a smooth car or boat body from feature lines.
     family="list" shows every family with its parameters and defaults. Use it instead of building
     these by hand, then change or add to the result. Each part is a solid in one undo step, in its
     mounted position; at=[x, y, z] moves the group. To change sizes call it again with

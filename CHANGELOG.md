@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.21.0 – detail that reads (unreleased)
+
+- `make_part` families for vehicles: `wheel` (tyre with rounded shoulders and tread grooves, spoked rim with hub and axle bore, brake disc and caliper), `lamp` (housing with an open front, reflector bowl, lens, LED strip; rect or round) and `pattern` (honeycomb, slats, mesh or round holes as a panel to fuse or as cutters to subtract, for grilles, vents and diffusers).
+- `compare_to_picture(crop=[x0, y0, x1, y1], look_at=[...], zoom)`: a part of the picture enlarged next to a close-up of the matching objects, so a lamp or a grille can be checked at the size it is seen.
+- `sculpt`: the `hair` preset places 20–80 tapered strands on a scalp (short locks along the head, long, bob, beard, fur) with one key; templates take a `pose` (person: head, arm_r, arm_l; dog: head, tail) that turns everything in the joint's region, sleeve and fur included.
+- Benchmark tasks `waving_person` and `toy_car` for figures with a pose and vehicles with wheels, lamps and a grille.
+
 ## 1.20.0 – models that pass their own checks (unreleased)
 
 - `make_part` family `thread`: an external thread on any diameter (bottle neck, lid, plug) as a solid to fuse onto the neck, with a lead-in chamfer and an optional thicker core, or an internal thread as a cutter for a cap, clearance wider for printing. Every model in the benchmark had cut the bottle's thread by hand and got the pitch wrong (9.6 to 130 mm instead of 3).

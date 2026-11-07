@@ -245,6 +245,136 @@ def thread(p: dict[str, Any]) -> dict[str, Any]:
     return {"Thread": solid.removeSplitter()}
 
 
+def _try_fillet(shape: Any, radius: float, edges: list[Any]) -> Any:
+    try:
+        out = shape.makeFillet(radius, edges)
+        return out if out.isValid() and out.Solids else shape
+    except Part.OCCError:
+        return shape
+
+
+def wheel(p: dict[str, Any]) -> dict[str, Any]:
+    """Tyre, spoked rim and bore on the y axis, the wheel centred at the origin."""
+    d, w, rim = p["diameter"], p["width"], p["rim"]
+    rw = p["rim_width"] or 0.9 * w
+    hub = p["hub"] or max(0.3 * rim, p["bore"] + 6)
+    sw = p["spoke_width"] or max(2.0, 0.09 * rim)
+    y_axis = V(0, 1, 0)
+    tyre = Part.makeCylinder(d / 2, w, V(0, -w / 2, 0), y_axis).cut(Part.makeCylinder(rim / 2 - 0.5, w + 2,
+                                                                                     V(0, -w / 2 - 1, 0), y_axis))
+    shoulder = [e for e in tyre.Edges if type(e.Curve).__name__ == "Circle" and abs(e.Curve.Radius - d / 2) < 1e-6]
+    tyre = _try_fillet(tyre, min(0.18 * w, 0.12 * d), shoulder)
+    n_groove, deep = int(p["grooves"]), p["groove_depth"]
+    if n_groove and deep > 0:
+        tread = w - 2 * max(0.18 * w, 1.0)
+        for i in range(n_groove):
+            y = -tread / 2 + tread * (i + 0.5) / n_groove
+            ring = Part.makeCylinder(d / 2 + 1, 1.0, V(0, y - 0.5, 0), y_axis).cut(
+                Part.makeCylinder(d / 2 - deep, 1.0, V(0, y - 0.5, 0), y_axis))
+            tyre = tyre.cut(ring)
+    disc_rim = Part.makeCylinder(rim / 2, rw, V(0, -rw / 2, 0), y_axis)
+    inner = Part.makeCylinder(rim / 2 - 3.0, rw + 2, V(0, -rw / 2 - 1, 0), y_axis).cut(
+        Part.makeCylinder(hub / 2, rw + 2, V(0, -rw / 2 - 1, 0), y_axis))
+    spokes = None
+    for i in range(int(p["spokes"])):
+        bar = Part.makeBox(rim, rw + 2, sw, V(0, -rw / 2 - 1, -sw / 2))
+        bar.rotate(V(0, 0, 0), y_axis, 360.0 * i / int(p["spokes"]))
+        spokes = bar if spokes is None else spokes.fuse(bar)
+    windows = inner.cut(spokes) if spokes is not None else inner
+    the_rim = disc_rim.cut(windows).cut(Part.makeCylinder(p["bore"] / 2, rw + 2, V(0, -rw / 2 - 1, 0), y_axis))
+    out = {"Tyre": tyre.removeSplitter(), "Rim": the_rim.removeSplitter()}
+    if p["disc"] > 0:
+        y0 = -rw / 2 - 2.5
+        brake = Part.makeCylinder(p["disc"] / 2, 4.0, V(0, y0, 0), y_axis).cut(
+            Part.makeCylinder(p["bore"] / 2 + 2, 6, V(0, y0 - 1, 0), y_axis))
+        cal_w = 0.3 * p["disc"]
+        caliper = Part.makeBox(cal_w, 8.0, 10.0, V(p["disc"] / 2 - cal_w + 2, y0 - 2, -5)).cut(
+            Part.makeBox(cal_w + 2, 4.4, 12, V(p["disc"] / 2 - cal_w + 1, y0 - 0.2, -6)))
+        caliper = caliper.cut(Part.makeCylinder(p["disc"] / 2 - 0.3, 10, V(0, y0 - 3, 0), y_axis).cut(
+            Part.makeCylinder(p["disc"] / 2 - 10, 10, V(0, y0 - 3, 0), y_axis)))
+        caliper = Part.makeBox(cal_w, 8.0, 10.0, V(p["disc"] / 2 - cal_w + 2, y0 - 2, -5)).cut(
+            Part.makeCylinder(p["disc"] / 2 + 0.3, 4.4, V(0, y0 - 0.2, 0), y_axis))
+        out["Disc"] = brake
+        out["Caliper"] = caliper
+    return out
+
+
+def lamp(p: dict[str, Any]) -> dict[str, Any]:
+    """Housing open towards -Y with a reflector bowl, a lens in the opening and a strip under the top edge."""
+    w, h, d, wall, lens = p["width"], p["height"], p["depth"], p["wall"], p["lens"]
+    gap = 0.15
+    if p["shape"] == "round":
+        h = w
+        y_axis = V(0, 1, 0)
+        housing = Part.makeCylinder(w / 2, d, V(0, 0, 0), y_axis)
+        cavity = Part.makeCylinder(w / 2 - wall, d - wall, V(0, -1, 0), y_axis)
+        cavity = Part.makeCylinder(w / 2 - wall, d - wall + 1, V(0, -1, 0), y_axis)
+        lens_solid = Part.makeCylinder(w / 2 - wall - gap, lens, V(0, 0, 0), y_axis)
+        block = Part.makeCylinder(w / 2 - wall - gap, d - wall - lens - 0.8, V(0, lens + 0.4, 0), y_axis)
+    else:
+        housing = Part.makeBox(w, d, h, V(-w / 2, 0, -h / 2))
+        cavity = Part.makeBox(w - 2 * wall, d - wall + 1, h - 2 * wall, V(-w / 2 + wall, -1, -h / 2 + wall))
+        lens_solid = Part.makeBox(w - 2 * wall - 2 * gap, lens, h - 2 * wall - 2 * gap,
+                                  V(-w / 2 + wall + gap, 0, -h / 2 + wall + gap))
+        block = Part.makeBox(w - 2 * wall - 2 * gap, d - wall - lens - 0.8, h - 2 * wall - 2 * gap,
+                             V(-w / 2 + wall + gap, lens + 0.4, -h / 2 + wall + gap))
+    housing = housing.cut(cavity)
+    bowl_r = max(w, h)
+    bowl = Part.makeSphere(bowl_r)
+    m = App.Matrix()
+    m.scale((w / 2 - wall - gap - 0.2) / bowl_r, (d - wall - lens - 1.0) / bowl_r, (h / 2 - wall - gap - 0.2) / bowl_r)
+    bowl = bowl.transformGeometry(m)
+    bowl.translate(V(0, lens + 0.4, 0))
+    reflector = block.cut(bowl)
+    strip = Part.makeBox(w - 2 * wall - 3.0, 2.0, 1.2, V(-w / 2 + wall + 1.5, lens + 0.5, h / 2 - wall - gap - 1.4))
+    reflector = reflector.cut(Part.makeBox(w - 2 * wall - 2.0, 3.0, 2.0, V(-w / 2 + wall + 1.0, lens + 0.2,
+                                                                          h / 2 - wall - gap - 1.8)))
+    return {"Housing": housing.removeSplitter(), "Reflector": reflector, "Lens": lens_solid, "Strip": strip}
+
+
+def pattern(p: dict[str, Any]) -> dict[str, Any]:
+    """Bars of a repeated pattern (kind panel) or its openings as cutters (kind holes)."""
+    w, h, t, cell, bar, frame = p["width"], p["height"], p["thickness"], p["cell"], p["bar"], p["frame"]
+    panel = Part.makeBox(w, t, h, V(-w / 2, 0, 0))
+    x0, x1, z0, z1 = -w / 2 + frame, w / 2 - frame, frame, h - frame
+    opening = cell - bar
+    tools = []
+    y_dir = V(0, 1, 0)
+    if p["cells"] == "slats":
+        z = z0 + bar / 2
+        while z + opening <= z1 + 1e-6:
+            tools.append(Part.makeBox(x1 - x0, t + 2, opening, V(x0, -1, z)))
+            z += cell
+    else:
+        rows = int((z1 - z0) / (cell * (0.866 if p["cells"] == "honeycomb" else 1.0))) + 2
+        cols = int((x1 - x0) / cell) + 2
+        for j in range(rows):
+            for i in range(cols):
+                if p["cells"] == "honeycomb":
+                    cx = x0 + (i + 0.5 * (j % 2)) * cell
+                    cz = z0 + j * cell * 0.866
+                    rc = opening / math.sqrt(3)
+                    pts = [V(cx + rc * math.cos(math.radians(60 * k + 30)), -1,
+                             cz + rc * math.sin(math.radians(60 * k + 30))) for k in range(7)]
+                    tool = Part.Face(Part.makePolygon(pts)).extrude(V(0, t + 2, 0))
+                elif p["cells"] == "holes":
+                    cx, cz = x0 + i * cell, z0 + j * cell
+                    tool = Part.makeCylinder(opening / 2, t + 2, V(cx, -1, cz), y_dir)
+                else:
+                    cx, cz = x0 + i * cell, z0 + j * cell
+                    tool = Part.makeBox(opening, t + 2, opening, V(cx - opening / 2, -1, cz - opening / 2))
+                bb = tool.BoundBox
+                if bb.XMin < x0 - 1e-6 or bb.XMax > x1 + 1e-6 or bb.ZMin < z0 - 1e-6 or bb.ZMax > z1 + 1e-6:
+                    continue
+                tools.append(tool)
+    if not tools:
+        raise ValueError("no opening fits: make the panel bigger or the cell smaller")
+    if p["kind"] == "holes":
+        return {"Pattern": Part.makeCompound(tools)}
+    holes = tools[0].fuse(tools[1:]) if len(tools) > 1 else tools[0]
+    return {"Pattern": panel.cut(holes).removeSplitter()}
+
+
 def _countersunk(screw: float, depth: float, x: float, y: float, top: float, up: bool = True) -> Any:
     """Through hole with a 90° countersink opening at z = top."""
     head = screw * 2
@@ -422,6 +552,8 @@ def build(family: str, p: dict[str, Any], iso: dict[str, Any], strain: dict[str,
         return faired_body(p)
     if family == "thread":
         return thread(p)
+    if family in ("wheel", "lamp", "pattern"):
+        return {"wheel": wheel, "lamp": lamp, "pattern": pattern}[family](p)
     return {"gear_pair": gear_pair, "spring": spring, "hinge": hinge, "enclosure": enclosure, "bracket": bracket,
             "knob": knob}[family](p)
 
@@ -432,7 +564,7 @@ def export(family: str, p: dict[str, Any], iso: dict[str, Any], strain: dict[str
     for name, shape in build(family, p, iso, strain).items():
         path = f"{out_dir}/{name}.brep"
         shape.exportBrep(path)
-        bb = shape.optimalBoundingBox(True, False)
+        bb = shape.optimalBoundingBox(True, False) if shape.Solids and family != "pattern" else shape.BoundBox
         made.append({"name": name, "path": path, "valid": bool(shape.isValid()), "solids": len(shape.Solids),
                      "size_mm": [round(bb.XLength, 2), round(bb.YLength, 2), round(bb.ZLength, 2)],
                      "volume_mm3": round(shape.Volume, 1),

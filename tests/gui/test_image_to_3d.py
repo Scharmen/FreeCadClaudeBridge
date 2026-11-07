@@ -110,5 +110,24 @@ def test_compare_to_picture_shows_picture_and_model_and_keeps_the_camera(tmp_pat
     assert len(out) == 3
     for img in out[1:]:
         pic = Image.open(io.BytesIO(img.data))
-        assert pic.height == 628 and pic.width > 600              # 600 px high plus the label bar
+        assert pic.height == 508 and pic.width > 500              # 480 px high plus the label bar
     assert pose(call("view", action="set_view", return_camera=True)["camera"]) == pose(camera)
+
+
+def test_compare_crop_shows_a_detail_enlarged_next_to_a_close_up(tmp_path):
+    import io
+
+    call("run_python", doc=DOC, code="doc.addObject('Part::Cylinder', 'Vase')\n"
+         "b = doc.addObject('Part::Box', 'Lip'); b.Length = b.Width = 2; b.Height = 1; doc.recompute()")
+    call("document", action="activate", name=DOC)
+    call("view", action="fit", view="front")
+    camera = call("view", action="set_view", return_camera=True)["camera"]
+    out = anyio.run(lambda: mcp_server.compare_to_picture(vase(tmp_path), ["front"], crop=[0.3, 0.0, 0.7, 0.25],
+                                                          look_at=["Lip"], zoom=1.5))
+    pic = Image.open(io.BytesIO(out[1].data))
+    assert pic.height == 508
+    left_width = pic.width - 12 - round(480 * 200 / 300)   # the model side is the picture's aspect, 480 high
+    assert left_width > 400, "the crop of the top of the vase is shown enlarged"
+    assert pose(call("view", action="set_view", return_camera=True)["camera"]) == pose(camera)
+    with pytest.raises(mcp_server.ToolError):
+        anyio.run(lambda: mcp_server.compare_to_picture(vase(tmp_path), ["front"], crop=[0.9, 0, 0.1, 1]))

@@ -1,7 +1,7 @@
 {
  "name": "person_standing",
  "height": 83.4,
- "description": "Standing adult, 7.5 heads tall, arms relaxed, T-shirt, jeans and sneakers, short hair, on a round base. Parts: Skin, Shirt, Jeans, Shoes_L, Shoes_R, Soles, Hair, Eyes, Pupils, Base.",
+ "description": "Standing adult, 7.5 heads tall, arms relaxed, T-shirt, jeans and sneakers, short hair, on a round base. Parts: Skin, Shirt, Jeans, Shoes_L, Shoes_R, Soles, Hair, Eyes, Pupils, Base. Pose joints: head, arm_r, arm_l (degrees).",
  "cells": 400,
  "convention": "mm, base on z = 0, facing -Y (the front looks towards -Y), Z up",
  "parts": [
@@ -2329,5 +2329,79 @@
     }
    ]
   }
- ]
+ ],
+ "joints": {
+  "head": {
+   "pivot": [
+    0,
+    0.4,
+    72.5
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "box": [
+    [
+     -8,
+     -9,
+     72.8
+    ],
+    [
+     8,
+     8,
+     95
+    ]
+   ]
+  },
+  "arm_r": {
+   "pivot": [
+    9.6,
+    0.5,
+    61.5
+   ],
+   "axis": [
+    0,
+    -1,
+    0
+   ],
+   "box": [
+    [
+     7.5,
+     -8,
+     32
+    ],
+    [
+     20,
+     8,
+     66
+    ]
+   ]
+  },
+  "arm_l": {
+   "pivot": [
+    -9.6,
+    0.5,
+    61.5
+   ],
+   "axis": [
+    0,
+    1,
+    0
+   ],
+   "box": [
+    [
+     -20,
+     -8,
+     32
+    ],
+    [
+     -7.5,
+     8,
+     66
+    ]
+   ]
+  }
+ }
 }

@@ -34,6 +34,7 @@ Never build a person or an animal from scratch or from Part primitives. The `scu
   {"name": "Cap", "color": [0.1, 0.1, 0.1], "primitives": [{"type": "ellipsoid", "center": [0, 0.5, 78], "radii": [4.3, 4.9, 2.6]}]}]}
 ```
 
+- **Poses:** `"pose": {"head": 30, "arm_r": 80}` turns a template's joints by degrees (person: `head` about its axis, `arm_r`/`arm_l` raised sideways; dog: `head`, `tail` up and down). The sleeve, the fur and everything else in the joint's region turn with it. Other poses: new capsules, and hide the old ones by overriding the part.
 - **Coordinates:** base on z = 0, the figure faces -Y, X is its left-right axis, Z up. Primitives you add are in the final size (after scaling), so read `size_mm` and the screenshots first, then place them.
 - **Change, don't restart:** recolor parts, add a beard (strands on Skin), a jacket (a new part over Shirt), a different pose (new capsules for the arms; hide the old ones by overriding the part). Another animal: change the closest template (a horse or a fox from the dog: longer legs or a pointed muzzle) rather than a new blob.
 - **Fur and hair** give the look: `"fur": {"depth", "length", "width", "direction" | "from"}` carves grooves that run along the flow (down and back on an animal's body, out from the crown on a head). Short coat: depth 0.1–0.15 mm, width 0.6–0.8 mm on a 5 cm figure; long fur: depth 0.3, width 1, length 8–10. Depth is capped at 0.3 × width so the surface stays clean.
@@ -72,6 +73,7 @@ Grammar (mm; every primitive may set `"op": "add" | "subtract" | "intersect"` an
 | `box` | `center`, `size`, `round`, `rotate` |
 | `torus` | `center`, `radius`, `thickness`, `rotate` |
 | `cylinder` | `a`, `b`, `radius` |
+| `hair` (preset) | `center`, `radius` or `radii` (the scalp), `count` (default 40), `length`, `style`: `short` (locks lying along the head, down and back), `long` (hanging), `bob`, `beard` (lower front), `fur` (short locks all around a body); `thickness`, `seed`, `blend`. Expands into that many tapered strands rooted on the scalp. |
 
 Scene and part keys: `blend` (mm), `color: [r, g, b]` 0..1, `shininess` 0..1 (default 0, matte; only metal or wet parts get 0.3–0.6), `detail: {"amplitude": mm, "scale": mm, "seed"}` skin or stone texture, `fur: {"depth": mm, "length": mm, "width": mm, "direction": [x, y, z] or "from": [x, y, z], "seed"}` grooves along the flow (depth up to 0.3 × width; `"fur": null` switches a scene-wide fur off for one part). Tool arguments: `voxel_mm` (default 1/300 of the scene, the same for every part), `smooth` Taubin passes (default 4, 2 with fur), `one_piece` (one closed mesh of all parts, for printing), `preview` (default true: a front and side picture comes with the answer). Small holes in a mesh are closed; a part that stays open says so in `part_warnings`.
 
@@ -79,7 +81,7 @@ Rules that make it look real instead of plastic:
 
 - **Proportions first.** Adult figure 7.5–8 heads tall (heroic 8–8.5, child 5–6); shoulders about 2 head widths; the eyes sit halfway down the head; the hand reaches mid-thigh; the elbow is at the waist. Animals: work from the skeleton masses (skull, rib cage, pelvis) outwards.
 - **Ellipsoids and tapered capsules, not spheres.** Equal spheres in a row read as bubbles. Limbs taper (`radius_b`); muscles are flattened ellipsoids rotated along the limb.
-- **Hair, beards, fur: many tapered strands, plus `fur` grooves along them.** 20–80 strands with 3–5 points each, thick at the root and fine at the tip (`radius_end` ≈ 0.3 × `radius`), slightly different lengths and curves, in overlapping layers and following the head's shape; a small blend (0.3–0.8 mm) so they merge into locks; a little detail noise along them.
+- **Hair, beards, fur: many tapered strands, plus `fur` grooves along them.** The `hair` preset places them for you (`{"type": "hair", "center": [0, 0, 70], "radius": 4.5, "count": 60, "length": 8, "style": "short"}` in the Hair part, `style: beard` on the Skin, `style: fur` on an animal); by hand it is 20–80 strands with 3–5 points each, thick at the root and fine at the tip (`radius_end` ≈ 0.3 × `radius`), slightly different lengths and curves, in overlapping layers and following the head's shape; a small blend (0.3–0.8 mm) so they merge into locks; a little detail noise along them.
 - **Faces:** subtract the eye sockets and the mouth line with a small blend; add brow ridge, cheekbones, nose and chin as small ellipsoids. Break the symmetry slightly; real faces are not mirror-perfect.
 - **Cloth:** folds as long thin capsules added (ridges) and subtracted (valleys) along the direction of pull; hems as a torus or a strand.
 - **Surface detail scales with the object:** `detail.amplitude` 0.1–0.3 % of the size for skin, 1–3 % for stone or bark; `scale` is the feature size. Give each material its own part, color and detail.

@@ -64,3 +64,19 @@ def test_a_thread_family_covers_bottle_necks_and_caps():
         catalog.resolve("thread", {"kind": "sideways"})
     with pytest.raises(ValueError, match="pitch"):
         catalog.resolve("thread", {"major": 6, "pitch": 3})
+
+
+def test_car_detail_families_have_sensible_defaults_and_refuse_nonsense():
+    wheel = catalog.resolve("wheel", {"diameter": 60, "spokes": 5})
+    assert wheel["width"] < wheel["diameter"] and wheel["rim"] < wheel["diameter"] and wheel["bore"] > 0
+    lamp = catalog.resolve("lamp", {"width": 30})
+    assert lamp["shape"] == "rect" and lamp["depth"] > 0
+    pattern = catalog.resolve("pattern", {"cells": "honeycomb", "cell": 4})
+    assert pattern["bar"] < pattern["cell"] and pattern["kind"] == "panel"
+    for family, params, says in (("wheel", {"rim": 70, "diameter": 60}, "rim"),
+                                 ("wheel", {"spokes": 1}, "spokes"),
+                                 ("lamp", {"shape": "star"}, "shape"),
+                                 ("pattern", {"cells": "paisley"}, "cells"),
+                                 ("pattern", {"bar": 5, "cell": 4}, "bar")):
+        with pytest.raises(ValueError, match=says):
+            catalog.resolve(family, params)

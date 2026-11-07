@@ -275,3 +275,70 @@ def test_small_holes_in_a_mesh_are_closed_and_reported():
     assert volume(v, fixed) == pytest.approx(volume(v, t), rel=0.01)
     same, none = sculpt.close_holes(v, t)
     assert none == 0 and len(same) == len(t)
+
+
+def test_a_hair_preset_expands_into_many_tapered_strands_from_the_scalp():
+    prims = sculpt.expand_macros([{"type": "hair", "center": [0, 0, 70], "radius": 4, "count": 30, "length": 6,
+                                   "style": "short", "seed": 3}])
+    assert len(prims) == 30 and all(p["type"] == "strand" for p in prims)
+    for p in prims:
+        root, tip = np.array(p["points"][0]), np.array(p["points"][-1])
+        assert np.linalg.norm(root - [0, 0, 70]) < 4.5, "roots on the scalp"
+        assert 3 <= np.linalg.norm(tip - root) <= 6.5 and tip[2] <= root[2] + 1.5, "short hair lies down"
+        assert p["radius_end"] < p["radius"] and len(p["points"]) >= 3
+        assert root[2] > 70 - 1.5, "hair grows on the upper half of the head"
+    again = sculpt.expand_macros([{"type": "hair", "center": [0, 0, 70], "radius": 4, "count": 30, "length": 6,
+                                   "style": "short", "seed": 3}])
+    assert again == prims, "the same seed gives the same hair"
+    beard = sculpt.expand_macros([{"type": "hair", "center": [0, 0, 70], "radius": 4, "count": 20, "length": 5,
+                                   "style": "beard", "seed": 1}])
+    assert all(np.array(p["points"][0])[2] < 70 and np.array(p["points"][0])[1] < 0 for p in beard), \
+        "a beard grows on the lower front of the head"
+    fur = sculpt.expand_macros([{"type": "hair", "center": [0, 0, 20], "radii": [8, 12, 6], "count": 40, "length": 3,
+                                 "style": "fur", "seed": 2}])
+    assert len(fur) == 40
+    with pytest.raises(ValueError, match="style"):
+        sculpt.expand_macros([{"type": "hair", "center": [0, 0, 0], "radius": 1, "style": "mohawk"}])
+
+
+def test_hair_in_a_scene_meshes_as_locks_on_the_head(tmp_path):
+    head = {"name": "Head", "primitives": [{"type": "sphere", "center": [0, 0, 0], "radius": 6}]}
+    hair = {"name": "Hair", "blend": 0.5, "primitives": [{"type": "hair", "center": [0, 0, 0], "radius": 6,
+                                                          "count": 40, "length": 5, "style": "short", "seed": 1}]}
+    res = sculpt.sculpt_scene({"parts": [head, hair]}, str(tmp_path), voxel=0.3)
+    locks = next(p for p in res["parts"] if p["name"] == "Hair")
+    assert locks["pieces"] >= 1 and "warning" not in locks, locks
+
+
+def test_a_pose_turns_the_head_and_raises_an_arm_of_the_template():
+    plain = sculpt.expand_template({"template": "person_standing", "height": 83.4})
+    posed = sculpt.expand_template({"template": "person_standing", "height": 83.4,
+                                    "pose": {"head": 40, "arm_r": 80}})
+    skin = next(p for p in plain["parts"] if p["name"] == "Skin")["primitives"]
+    i_nose = next(i for i, q in enumerate(skin) if q["type"] == "sphere" and q["center"][1] < -4
+                  and 75 < q["center"][2] < 77)
+    hands = [i for i, q in enumerate(skin) if q["type"] == "ellipsoid" and abs(q["center"][0]) > 10
+             and 36 < q["center"][2] < 42]
+    i_right = next(i for i in hands if skin[i]["center"][0] > 0)
+    i_left = next(i for i in hands if skin[i]["center"][0] < 0)
+
+    def prim(scene, index):
+        return np.array(next(p for p in scene["parts"] if p["name"] == "Skin")["primitives"][index]["center"])
+
+    assert abs(prim(posed, i_nose)[0] - prim(plain, i_nose)[0]) > 2, "the head turned about its own axis"
+    assert np.linalg.norm(prim(posed, i_nose) - [0, 0.4, 72]) == pytest.approx(
+        np.linalg.norm(prim(plain, i_nose) - [0, 0.4, 72]), abs=0.3)
+    assert prim(posed, i_right)[2] > prim(plain, i_right)[2] + 15, "the right arm is raised"
+    assert prim(posed, i_right)[0] > prim(plain, i_right)[0] + 10, "and points away from the body"
+    assert np.allclose(prim(posed, i_left), prim(plain, i_left)), "the left arm did not move"
+    shirt = next(p for p in posed["parts"] if p["name"] == "Shirt")
+    sleeve = [q for q in shirt["primitives"] if (q.get("center") or q.get("a") or [0])[0] > 7]
+    assert sleeve and all((q.get("center") or q.get("a"))[2] > 58 for q in sleeve), "the sleeve went with the arm"
+    with pytest.raises(ValueError, match="joint"):
+        sculpt.expand_template({"template": "person_standing", "pose": {"tail": 10}})
+
+
+def test_a_posed_template_still_meshes_closed(tmp_path):
+    res = sculpt.sculpt_scene({"template": "dog_standing", "height": 30, "pose": {"head": 30, "tail": -40},
+                               "one_piece": True}, str(tmp_path), voxel=0.3)
+    assert res["parts"][0]["closed"] and res["parts"][0]["pieces"] == 1

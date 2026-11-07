@@ -1,7 +1,7 @@
 {
  "name": "dog_standing",
  "height": 49.85,
- "description": "Standing Labrador-type dog on an oval base: deep chest, tucked belly, broad head with a stop, hanging ears, otter tail; short fur flowing back and down. Parts: Dog, Eyes, Nose, Base.",
+ "description": "Standing Labrador-type dog on an oval base: deep chest, tucked belly, broad head with a stop, hanging ears, otter tail; short fur flowing back and down. Parts: Dog, Eyes, Nose, Base. Pose joints: head, tail (degrees).",
  "convention": "mm, base on z = 0, facing -Y (the front looks towards -Y), Z up",
  "parts": [
   {
@@ -941,5 +941,55 @@
    ]
   }
  ],
- "cells": 400
+ "cells": 400,
+ "joints": {
+  "head": {
+   "pivot": [
+    0,
+    -14,
+    39
+   ],
+   "axis": [
+    0,
+    0,
+    1
+   ],
+   "box": [
+    [
+     -10,
+     -40,
+     37
+    ],
+    [
+     10,
+     -12.5,
+     60
+    ]
+   ]
+  },
+  "tail": {
+   "pivot": [
+    0,
+    19.5,
+    30
+   ],
+   "axis": [
+    1,
+    0,
+    0
+   ],
+   "box": [
+    [
+     -5,
+     19,
+     24
+    ],
+    [
+     5,
+     40,
+     40
+    ]
+   ]
+  }
+ }
 }

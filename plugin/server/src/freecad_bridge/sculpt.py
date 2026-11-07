@@ -141,6 +141,72 @@ def _sdf(prim: dict[str, Any], p: np.ndarray) -> np.ndarray:
 
 
 KINDS = ("sphere", "ellipsoid", "capsule", "strand", "box", "torus", "cylinder")
+HAIR_STYLES = ("short", "long", "bob", "beard", "fur")
+
+
+def _hair_strands(prim: dict[str, Any]) -> list[dict[str, Any]]:
+    """Many tapered strands rooted on a scalp (sphere or ellipsoid), lying along it or hanging down."""
+    style = str(prim.get("style", "short"))
+    if style not in HAIR_STYLES:
+        raise ValueError(f"unknown hair style '{style}' (use {', '.join(HAIR_STYLES)})")
+    center = _vec(prim, "center")
+    radii = _vec(prim, "radii") if "radii" in prim else np.full(3, _num(prim, "radius"))
+    count = int(prim.get("count", 40))
+    length = _num(prim, "length", float(radii.mean()))
+    radius = _num(prim, "thickness", max(0.12, 0.05 * length + 0.1))
+    rng = np.random.default_rng(int(prim.get("seed", 1)))
+    out = []
+    tries = 0
+    while len(out) < count and tries < 50 * count:
+        tries += 1
+        d = rng.normal(size=3)
+        d /= np.linalg.norm(d)
+        if style in ("short", "long", "bob") and d[2] < -0.3:
+            continue                                  # hair grows on the upper head
+        if style == "beard" and not (d[2] < -0.15 and d[1] < -0.3):
+            continue                                  # a beard on the lower front
+        root = center + radii * d * 0.96
+        n_pts = 4
+        pts = [root]
+        if style in ("short", "fur"):
+            # along the scalp, towards the back and down, as a lock lying on the head
+            flow = np.array([0.0, 0.35, -1.0]) if style == "short" else np.array([0.0, 0.6, -0.8])
+            step_angle = length / (n_pts - 1) / max(float(radii.mean()), 1e-6)
+            cur = d.copy()
+            for _ in range(n_pts - 1):
+                tangent = flow - cur * np.dot(flow, cur)
+                if np.linalg.norm(tangent) < 1e-6:
+                    tangent = np.array([1.0, 0, 0])
+                tangent /= np.linalg.norm(tangent)
+                cur = cur * math.cos(step_angle) + tangent * math.sin(step_angle)
+                cur /= np.linalg.norm(cur)
+                pts.append(center + radii * cur * (0.96 + 0.06 * len(pts) / n_pts))
+        else:
+            out_dir = d * radii / max(float(radii.max()), 1e-6)
+            gravity = np.array([0.0, 0.3 if style == "beard" else 0.0, -1.0])
+            wave = rng.uniform(-0.15, 0.15, size=3)
+            for k in range(1, n_pts):
+                f = k / (n_pts - 1)
+                drift = out_dir * 0.35 * (1 - f) + gravity * f + wave * math.sin(math.pi * f)
+                drift /= np.linalg.norm(drift)
+                pts.append(pts[-1] + drift * length / (n_pts - 1))
+        stretch = rng.uniform(0.85, 1.05)
+        pts = [pts[0] + (q - pts[0]) * stretch for q in pts]
+        out.append({"type": "strand", "points": [[float(x) for x in q] for q in pts],
+                    "radius": float(radius * rng.uniform(0.85, 1.1)), "radius_end": float(radius * 0.3),
+                    **({"blend": prim["blend"]} if "blend" in prim else {})})
+    return out
+
+
+def expand_macros(prims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Presets that stand for many primitives ("hair") become those primitives; the rest pass through."""
+    out: list[dict[str, Any]] = []
+    for p in prims:
+        if p.get("type") == "hair":
+            out.extend(_hair_strands(p))
+        else:
+            out.append(p)
+    return out
 
 
 def _bounds(prim: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
@@ -557,7 +623,9 @@ def _field_any(part: Parts, voxel: float | None) -> tuple[np.ndarray, np.ndarray
 
 def mesh_part(part: Parts, voxel: float | None = None, smooth: int = 4) -> tuple[np.ndarray, np.ndarray]:
     """One part, or a list of parts united into one body (each with its own blend, detail and fur)."""
-    group = part if isinstance(part, list) else [part]
+    group = [{**p, "primitives": expand_macros(p.get("primitives") or [])} for p in
+             (part if isinstance(part, list) else [part])]
+    part = group if isinstance(part, list) else group[0]
     best = None
     for attempt in range(3):
         # a pinch that survives the split depends on how the grid happens to lie over the shape:
@@ -739,7 +807,7 @@ def write_stl(path: str, verts: np.ndarray, tris: np.ndarray) -> None:
 
 # ---------- templates ----------
 
-VECTOR_KEYS = ("center", "radii", "a", "b", "size", "from")
+VECTOR_KEYS = ("center", "radii", "a", "b", "size", "from", "pivot")
 SCALAR_KEYS = ("radius", "radius_b", "radius_end", "round", "thickness", "blend", "voxel", "amplitude", "scale",
                "depth", "length", "width")
 
@@ -769,7 +837,7 @@ def _scaled(obj: Any, k: float) -> Any:
             out[key] = [[float(x) * k for x in p] for p in v]
         elif key in SCALAR_KEYS and isinstance(v, (int, float)):
             out[key] = float(v) * k
-        elif key in ("primitives", "detail", "fur"):
+        elif key in ("primitives", "detail", "fur", "joints", "pivot", "box"):
             out[key] = _scaled(v, k)
         else:
             out[key] = v
@@ -799,9 +867,71 @@ def expand_template(scene: dict[str, Any]) -> dict[str, Any]:
                 target["primitives"] = target["primitives"] + list(v)
             else:
                 target[key] = v
-    rest = {key: v for key, v in scene.items() if key not in ("template", "height", "parts")}
+    pose = scene.get("pose") or {}
+    if pose:
+        joints = _scaled(tpl.get("joints") or {}, k)
+        for name, angle in pose.items():
+            if name not in joints:
+                raise ValueError(f"unknown joint '{name}' for {scene['template']} (joints: "
+                                 f"{', '.join(joints) or 'none'})")
+            _pose_parts(parts, joints[name], float(angle))
+    rest = {key: v for key, v in scene.items() if key not in ("template", "height", "parts", "pose")}
     return {**({"cells": tpl["cells"]} if "cells" in tpl else {}), "template": scene["template"], **rest,
             "parts": parts}
+
+
+def _axis_angle(axis: Any, deg: float) -> np.ndarray:
+    u = np.array([float(x) for x in axis])
+    u /= np.linalg.norm(u)
+    c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    x, y, z = u
+    return np.array([[c + x * x * (1 - c), x * y * (1 - c) - z * s, x * z * (1 - c) + y * s],
+                     [y * x * (1 - c) + z * s, c + y * y * (1 - c), y * z * (1 - c) - x * s],
+                     [z * x * (1 - c) - y * s, z * y * (1 - c) + x * s, c + z * z * (1 - c)]])
+
+
+def _euler(rot: np.ndarray) -> list[float]:
+    """Angles [rx, ry, rz] in degrees for which _rotation gives `rot` (R = Rz Ry Rx)."""
+    ry = math.asin(max(-1.0, min(1.0, -rot[2, 0])))
+    if abs(math.cos(ry)) > 1e-6:
+        rx, rz = math.atan2(rot[2, 1], rot[2, 2]), math.atan2(rot[1, 0], rot[0, 0])
+    else:
+        rx, rz = math.atan2(-rot[1, 2], rot[1, 1]), 0.0
+    return [round(math.degrees(a), 4) for a in (rx, ry, rz)]
+
+
+def _reference(prim: dict[str, Any]) -> np.ndarray | None:
+    for key in ("center", "a"):
+        if key in prim:
+            return np.array([float(x) for x in prim[key]])
+    if prim.get("points"):
+        return np.array([float(x) for x in prim["points"][0]])
+    return None
+
+
+def _pose_parts(parts: list[dict[str, Any]], joint: dict[str, Any], deg: float) -> None:
+    """Turn every primitive whose reference point lies in the joint's box about the joint's pivot and axis."""
+    rot = _axis_angle(joint["axis"], deg)
+    pivot = np.array([float(x) for x in joint["pivot"]])
+    lo, hi = (np.array([float(x) for x in b]) for b in joint["box"])
+
+    def turn(point: Any) -> list[float]:
+        q = pivot + rot @ (np.array([float(x) for x in point]) - pivot)
+        return [float(x) for x in q]
+
+    for part in parts:
+        for prim in part.get("primitives") or []:
+            ref = _reference(prim)
+            if ref is None or not (np.all(ref >= lo) and np.all(ref <= hi)):
+                continue
+            for key in ("center", "a", "b"):
+                if key in prim:
+                    prim[key] = turn(prim[key])
+            if prim.get("points"):
+                prim["points"] = [turn(q) for q in prim["points"]]
+            if prim.get("type") in ("ellipsoid", "box", "torus"):
+                old = _rotation(prim.get("rotate"))
+                prim["rotate"] = _euler(rot @ old if old is not None else rot)
 
 
 def _scene_bounds(parts: list[dict[str, Any]]) -> list[tuple[float, float, float]]:
@@ -822,6 +952,7 @@ def sculpt_scene(scene: dict[str, Any], out_dir: str, voxel: float | None = None
     t0 = time.monotonic()
     scene = expand_template(scene)
     parts = scene.get("parts") or [{"name": scene.get("name", "Sculpt"), **scene}]
+    parts = [{**p, "primitives": expand_macros(p.get("primitives") or [])} for p in parts]
     if "parts" not in scene:
         scene = {k: v for k, v in scene.items() if k not in ("primitives", "one_piece")}
     for part in parts:

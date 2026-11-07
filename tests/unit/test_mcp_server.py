@@ -185,3 +185,11 @@ def test_status_carries_the_preferences_and_selects_an_instance(monkeypatch, tmp
     assert client._selected == 2 and '"selected"' in text
     run(mcp_server.status(select="auto"))
     assert client._selected is None
+
+
+def test_a_compare_crop_is_checked_before_any_picture_is_taken():
+    assert mcp_server._crop([0.1, 0.2, 0.6, 0.9]) == [0.1, 0.2, 0.6, 0.9]
+    assert mcp_server._crop(None) is None
+    for bad in ([0.5, 0.5, 0.4, 0.9], [0, 0, 1], [-0.1, 0, 1, 1], ["a", 0, 1, 1]):
+        with pytest.raises(mcp_server.ToolError):
+            mcp_server._crop(bad)

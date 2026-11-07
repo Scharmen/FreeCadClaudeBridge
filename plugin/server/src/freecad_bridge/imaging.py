@@ -215,9 +215,17 @@ def preview_png(path: str | Path, max_side: int = 1024) -> bytes:
     return buf.getvalue()
 
 
-def side_by_side(picture: str | Path, shot_png: bytes, label: str, height: int = 600) -> bytes:
-    """The user's picture next to a screenshot of the model, both `height` pixels high, labelled."""
+def side_by_side(picture: str | Path, shot_png: bytes, label: str, height: int = 600,
+                 crop: list[float] | None = None) -> bytes:
+    """The user's picture (or a crop of it, in fractions of its width and height) next to a screenshot of the
+    model, both `height` pixels high, labelled."""
     left = _open(picture).convert("RGB")
+    if crop is not None:
+        x0, y0, x1, y1 = (float(c) for c in crop)
+        if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
+            raise ValueError("crop must be [x0, y0, x1, y1] as fractions of the picture, left to right, top to bottom")
+        left = left.crop((round(x0 * left.width), round(y0 * left.height), max(round(x0 * left.width) + 1,
+                          round(x1 * left.width)), max(round(y0 * left.height) + 1, round(y1 * left.height))))
     right = Image.open(io.BytesIO(shot_png)).convert("RGB")
     left = left.resize((max(1, round(left.width * height / left.height)), height))
     right = right.resize((max(1, round(right.width * height / right.height)), height))
@@ -226,7 +234,7 @@ def side_by_side(picture: str | Path, shot_png: bytes, label: str, height: int =
     out.paste(left, (0, bar))
     out.paste(right, (left.width + gap, bar))
     draw = ImageDraw.Draw(out)
-    draw.text((6, 8), "Picture", fill="black")
+    draw.text((6, 8), "Picture (crop)" if crop else "Picture", fill="black")
     draw.text((left.width + gap + 6, 8), label, fill="black")
     buf = io.BytesIO()
     out.save(buf, format="PNG", optimize=True)

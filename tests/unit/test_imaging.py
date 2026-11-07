@@ -1,5 +1,7 @@
 """Image to 3D, server side: outline contours with holes, scaling, alpha, relief grids."""
 
+import io
+
 import pytest
 from PIL import Image, ImageDraw
 
@@ -103,3 +105,22 @@ def test_side_by_side_puts_picture_and_model_at_the_same_height(tmp_path):
     assert out.height > 500 and out.width > 250 + 500          # labels on top; picture 250 wide, model 500
     left, right = out.getpixel((100, out.height - 50)), out.getpixel((out.width - 100, out.height - 50))
     assert left[0] > 200 and left[2] < 50 and right[2] > 200 and right[0] < 50
+
+
+def test_a_crop_of_the_picture_is_shown_enlarged_next_to_the_model(tmp_path):
+    from PIL import Image
+
+    pic = tmp_path / "car.png"
+    img = Image.new("RGB", (400, 200), "white")
+    img.paste((200, 20, 20), (300, 100, 360, 160))      # a red lamp bottom right
+    img.save(pic)
+    shot = io.BytesIO()
+    Image.new("RGB", (320, 240), (230, 230, 230)).save(shot, "PNG")
+    png = imaging.side_by_side(pic, shot.getvalue(), "Model", height=240, crop=[0.7, 0.45, 0.95, 0.85])
+    out = Image.open(io.BytesIO(png)).convert("RGB")
+    assert out.height == 240 + 28
+    left = out.crop((0, 28, out.width - 320 - 12, out.height))
+    reds = sum(1 for px in left.getdata() if px[0] > 150 and px[1] < 80)
+    assert reds > 0.3 * left.width * left.height, "the lamp fills the enlarged crop"
+    with pytest.raises(ValueError, match="crop"):
+        imaging.side_by_side(pic, shot.getvalue(), "Model", crop=[0.9, 0.2, 0.1, 0.4])

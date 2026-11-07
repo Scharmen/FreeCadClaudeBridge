@@ -138,3 +138,46 @@ def test_an_internal_thread_is_a_cutter_for_a_cap(cmd):
     assert r[0] and r[1] == 1
     assert r[2]["pitch"] == pytest.approx(3.0, abs=0.3), r
     assert r[3][2] == pytest.approx(32.3, abs=0.2), "the cutter is the clearance wider than the thread"
+
+
+def test_a_wheel_has_a_tyre_with_tread_a_spoked_rim_and_an_axle_bore(cmd):
+    r = run("Part = b.Part\nt, rim = parts['Tyre'], parts['Rim']\n"
+            "solid_rim = Part.makeCylinder(20, 22, b.V(0, -11, 0), b.V(0, 1, 0))\n"
+            "probe = Part.makeCylinder(1.4, 40, b.V(0, -20, 0), b.V(0, 1, 0))\n"
+            "_result = [box(t), box(rim), rim.Volume / solid_rim.Volume, rim.common(probe).Volume,\n"
+            "           len([f for f in t.Faces if type(f.Surface).__name__ == 'Cylinder']), sorted(parts)]",
+            cmd, "wheel", diameter=60.0, width=24.0, rim=40.0, spokes=5, bore=3.0, grooves=6)
+    assert r[0] == pytest.approx([24, 60, 60], abs=0.3) and r[1][1] == pytest.approx(40, abs=0.3)
+    assert 0.15 < r[2] < 0.7, "a spoked rim is much lighter than a disc"
+    assert r[3] < 1e-6, "the axle bore goes through"
+    assert r[4] >= 6 + 2, "tread grooves around the tyre"
+    assert r[5] == ["Rim", "Tyre"]
+
+
+def test_a_wheel_with_brake_adds_disc_and_caliper_inside_the_rim(cmd):
+    r = run("_result = [sorted(parts), box(parts['Disc']), parts['Caliper'].BoundBox.XMax, parts['Rim'].BoundBox.XMax]",
+            cmd, "wheel", diameter=60.0, rim=40.0, disc=30.0)
+    assert r[0] == ["Caliper", "Disc", "Rim", "Tyre"]
+    assert r[1][1] == pytest.approx(30, abs=0.3) and r[2] < r[3], "the caliper stays inside the rim"
+
+
+def test_a_lamp_has_housing_reflector_lens_and_strip_that_fit_together(cmd):
+    r = run("h, ref, lens, strip = parts['Housing'], parts['Reflector'], parts['Lens'], parts['Strip']\n"
+            "_result = [box(h), box(lens), h.common(lens).Volume, h.common(ref).Volume, h.distToShape(lens)[0],\n"
+            "           lens.BoundBox.YMin < h.BoundBox.YMin + 0.5, strip.Volume > 0, ref.Volume < h.Volume]",
+            cmd, "lamp", width=30.0, height=12.0, depth=15.0)
+    assert r[0][2] == pytest.approx(30, abs=0.3)
+    assert r[2] < 1e-3 and r[3] < 1e-3, "the lens and the reflector sit in the housing without overlap"
+    assert r[4] < 0.3 and r[5] and r[6] and r[7], "the lens closes the front, the strip and reflector are inside"
+
+
+@pytest.mark.parametrize("cells", ["honeycomb", "slats", "mesh", "holes"])
+def test_a_pattern_panel_is_mostly_open_and_the_holes_kind_is_its_negative(cmd, cells):
+    r = run("Part = b.Part\np = parts['Pattern']\nfull = Part.makeBox(40, 1.2, 20, b.V(-20, 0, 0))\n"
+            "_result = [box(p), p.Volume / full.Volume, bool(p.isValid()), len(p.Solids)]",
+            cmd, "pattern", cells=cells, width=40.0, height=20.0, thickness=1.2, cell=4.0, bar=0.8)
+    assert r[0] == pytest.approx([1.2, 20, 40], abs=0.3) and r[2] and r[3] == 1
+    assert 0.25 < r[1] < 0.8, f"{cells}: a panel of bars is mostly open"
+    neg = run("Part = b.Part\np = parts['Pattern']\n_result = [p.Volume, len(p.Solids) >= 2]", cmd, "pattern",
+              cells=cells, kind="holes", width=40.0, height=20.0, thickness=1.2, cell=4.0, bar=0.8)
+    assert neg[0] > 0 and neg[1], "the holes kind is a set of cutters"

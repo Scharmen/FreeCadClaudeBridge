@@ -36,3 +36,7 @@ A body is judged by its reflections. Hand-typed tables of sections, each interpo
 - `removeSplitter()` can break a body with B-spline faces while it looks fine. Work on a copy and keep the result only if `isValid()` still holds.
 - Moving lines inwards for a wall: drop the stations the wall passes at nose and tail, or x stops rising and the build fails with "U Poles and degree mismatch".
 - After the last cut, mesh the body and check `Mesh.isSolid()` before you call it printable. A valid solid can still give a mesh with open spots.
+
+## Detail on a car body
+
+The body is one `faired_body`; the detail comes from parts that carry their own geometry: `make_part` families `wheel` (tyre with tread, spoked rim, brake disc and caliper; the print export mounts them on axles), `lamp` (housing, reflector bowl, lens, LED strip, looking towards -Y: rotate its Placement for the rear), `pattern` (honeycomb or slats for the grille, vents and the diffuser: `kind="holes"` cuts them into a surface, `kind="panel"` fills an opening). Check each against the photo with `compare_to_picture(crop=..., look_at=[...])`.
