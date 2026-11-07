@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.21.1 – what the first figure and car runs showed (unreleased)
+
+The `waving_person` and `toy_car` benchmark tasks ran for the first time (Sonnet and Haiku). Both models reached for the new families, the pose and `one_piece`; what they got wrong was ours:
+
+- The person template's `arm_r` joint was the figure's left arm (it faces -Y, so its right is at -X); every "waving with the right arm" waved with the left. The joints and `Shoes_R`/`Shoes_L` are mirrored to match; the template says which side is which.
+- Joints were not scaled with the template, so a pose at any height but the template's own turned about a pivot in the wrong place (slightly, at 80 mm; badly, at 40).
+- `height` is now the finished figure's height, pose included: a raised hand must not grow an 80 mm figure to 88. Both models spent calls scaling the figure back.
+- The person template's hair is locks: 64 short strands on the scalp on top of the shell, so the head no longer reads as a cap.
+- `make_part` `wheel`: on toy wheels (rim 12–15 mm, bore 3 mm) the hub formula left no room for spokes and the rim came out as a solid disc; the hub and the rim's wall now scale with the rim, and a wheel with no room for spokes is refused with the sizes that would work.
+- Benchmark: the judge also gets a left view, so both ends of a car are seen head-on whichever way it points (the toy cars lost their grille and tail lamps to a view that was never taken).
+
 ## 1.21.0 – detail that reads (unreleased)
 
 - `make_part` families for vehicles: `wheel` (tyre with rounded shoulders and tread grooves, spoked rim with hub and axle bore, brake disc and caliper), `lamp` (housing with an open front, reflector bowl, lens, LED strip; rect or round) and `pattern` (honeycomb, slats, mesh or round holes as a panel to fuse or as cutters to subtract, for grilles, vents and diffusers).

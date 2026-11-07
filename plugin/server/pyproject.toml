@@ -1,6 +1,6 @@
 [project]
 name = "freecad-bridge"
-version = "1.21.0"
+version = "1.21.1"
 description = "MCP server and installer that connect Claude Code to a running FreeCAD"
 readme = "README.md"
 license = "MIT"

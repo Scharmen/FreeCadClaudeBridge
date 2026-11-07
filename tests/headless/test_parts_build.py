@@ -154,6 +154,16 @@ def test_a_wheel_has_a_tyre_with_tread_a_spoked_rim_and_an_axle_bore(cmd):
     assert r[5] == ["Rim", "Tyre"]
 
 
+def test_a_toy_wheel_still_has_windows_between_its_spokes(cmd):
+    r = run("Part = b.Part\nrim = parts['Rim']\n"
+            "solid_rim = Part.makeCylinder(7, rim.BoundBox.YLength, b.V(0, rim.BoundBox.YMin, 0), b.V(0, 1, 0))\n"
+            "_result = rim.Volume / solid_rim.Volume", cmd, "wheel", diameter=20.0, width=8.0, rim=14.0, spokes=5,
+            bore=3.2, grooves=4, groove_depth=0.6)
+    assert 0.2 < r < 0.75, "a 14 mm rim with a 3.2 mm bore is still spoked, not a disc"
+    with pytest.raises(Exception, match="hub|spokes"):
+        run("_result = 1", cmd, "wheel", diameter=12.0, width=5.0, rim=8.0, bore=3.2)
+
+
 def test_a_wheel_with_brake_adds_disc_and_caliper_inside_the_rim(cmd):
     r = run("_result = [sorted(parts), box(parts['Disc']), parts['Caliper'].BoundBox.XMax, parts['Rim'].BoundBox.XMax,"
             " parts['Disc'].BoundBox.YMax]", cmd, "wheel", diameter=60.0, rim=40.0, disc=30.0)

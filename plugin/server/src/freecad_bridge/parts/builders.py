@@ -257,8 +257,12 @@ def wheel(p: dict[str, Any]) -> dict[str, Any]:
     """Tyre, spoked rim and bore on the y axis, the wheel centred at the origin."""
     d, w, rim = p["diameter"], p["width"], p["rim"]
     rw = p["rim_width"] or 0.9 * w
-    hub = p["hub"] or max(0.3 * rim, p["bore"] + 6)
-    sw = p["spoke_width"] or max(2.0, 0.09 * rim)
+    wall = min(3.0, 0.1 * rim)                    # the rim's outer ring; 3 mm on a 60 mm wheel, 1.5 on a toy's
+    hub = p["hub"] or max(0.3 * rim, p["bore"] + 2 * wall)
+    sw = p["spoke_width"] or max(0.8, 0.09 * rim)
+    if rim / 2 - wall < hub / 2 + 1.0:
+        raise ValueError(f"no room for spokes between the hub ({hub:g} mm) and the rim ({rim:g} mm): a bore of "
+                         f"{p['bore']:g} needs a rim of at least {2 * (p['bore'] / 2 + 2 * wall + 1 + wall):g} mm")
     y_axis = V(0, 1, 0)
     tyre = Part.makeCylinder(d / 2, w, V(0, -w / 2, 0), y_axis).cut(Part.makeCylinder(rim / 2 - 0.5, w + 2,
                                                                                      V(0, -w / 2 - 1, 0), y_axis))
@@ -273,7 +277,7 @@ def wheel(p: dict[str, Any]) -> dict[str, Any]:
                 Part.makeCylinder(d / 2 - deep, 1.0, V(0, y - 0.5, 0), y_axis))
             tyre = tyre.cut(ring)
     disc_rim = Part.makeCylinder(rim / 2, rw, V(0, -rw / 2, 0), y_axis)
-    inner = Part.makeCylinder(rim / 2 - 3.0, rw + 2, V(0, -rw / 2 - 1, 0), y_axis).cut(
+    inner = Part.makeCylinder(rim / 2 - wall, rw + 2, V(0, -rw / 2 - 1, 0), y_axis).cut(
         Part.makeCylinder(hub / 2, rw + 2, V(0, -rw / 2 - 1, 0), y_axis))
     spokes = None
     for i in range(int(p["spokes"])):

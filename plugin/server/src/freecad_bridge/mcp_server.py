@@ -816,16 +816,17 @@ async def sculpt(scene: dict[str, Any] | None = None, name: str = "Sculpt", voxe
                  pose: dict[str, float] | None = None, doc: str | None = None,
                  instance: int | None = None) -> list[Any]:
     """Organic shapes (people, animals, faces, hair, plants, rocks) from primitives that melt into
-    each other like clay; every person or animal starts from a template: scene (or the same keys as
+    each other like clay; people and animals start from a template: scene (or the keys as
     arguments) = {"template":
-    "person_standing" | "dog_standing" | "cat_sitting", "height": mm, "parts": [{"name", "color",
+    "person_standing" | "dog_standing" | "cat_sitting", "height": mm (finished, pose included), "pose":
+    {"arm_r": 150} (joints in degrees; _r is the figure's own right), "parts": [{"name", "color",
     "fur", "primitives": [...]}]}, a part with a template part's name changes it. Primitives (mm):
     sphere, ellipsoid, capsule, strand, box, torus, cylinder, each with op add|subtract and its own
-    blend; "detail" adds skin texture, "fur" carves grooves along the flow. The grammar and the rules
-    that make it look real are in references/organic.md of the freecad skill. one_piece=true unites
+    blend; "detail" adds skin texture, "fur" carves grooves along the flow. Grammar and the rules that
+    make it look real: references/organic.md of the freecad skill. one_piece=true unites
     every part into one closed mesh for printing (each part keeps its fur and blend; the first part's
-    colour). The meshes are computed outside FreeCAD and imported as Mesh objects in a group (one undo
-    step). The answer carries a front and side preview: look at it, do not take another picture."""
+    colour). The meshes are computed outside FreeCAD and imported as a group of Mesh objects (one undo
+    step). The answer carries a front and side preview: look at it, take no other picture."""
     from . import sculpt as sculpt_mod
 
     scene = dict(scene or {})

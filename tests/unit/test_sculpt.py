@@ -319,8 +319,8 @@ def test_a_pose_turns_the_head_and_raises_an_arm_of_the_template():
                   and 75 < q["center"][2] < 77)
     hands = [i for i, q in enumerate(skin) if q["type"] == "ellipsoid" and abs(q["center"][0]) > 10
              and 36 < q["center"][2] < 42]
-    i_right = next(i for i in hands if skin[i]["center"][0] > 0)
-    i_left = next(i for i in hands if skin[i]["center"][0] < 0)
+    i_right = next(i for i in hands if skin[i]["center"][0] < 0)     # facing -Y, the figure's right is at -X
+    i_left = next(i for i in hands if skin[i]["center"][0] > 0)
 
     def prim(scene, index):
         return np.array(next(p for p in scene["parts"] if p["name"] == "Skin")["primitives"][index]["center"])
@@ -329,11 +329,23 @@ def test_a_pose_turns_the_head_and_raises_an_arm_of_the_template():
     assert np.linalg.norm(prim(posed, i_nose) - [0, 0.4, 72]) == pytest.approx(
         np.linalg.norm(prim(plain, i_nose) - [0, 0.4, 72]), abs=0.3)
     assert prim(posed, i_right)[2] > prim(plain, i_right)[2] + 15, "the right arm is raised"
-    assert prim(posed, i_right)[0] > prim(plain, i_right)[0] + 10, "and points away from the body"
+    assert prim(posed, i_right)[0] < prim(plain, i_right)[0] - 10, "and points away from the body"
     assert np.allclose(prim(posed, i_left), prim(plain, i_left)), "the left arm did not move"
     shirt = next(p for p in posed["parts"] if p["name"] == "Shirt")
-    sleeve = [q for q in shirt["primitives"] if (q.get("center") or q.get("a") or [0])[0] > 7]
+    sleeve = [q for q in shirt["primitives"] if (q.get("center") or q.get("a") or [0])[0] < -7]
     assert sleeve and all((q.get("center") or q.get("a"))[2] > 58 for q in sleeve), "the sleeve went with the arm"
+
+
+def test_a_posed_figure_keeps_the_asked_height_and_the_shoes_are_on_the_right_feet():
+    plain = sculpt.expand_template({"template": "person_standing", "height": 80})
+    posed = sculpt.expand_template({"template": "person_standing", "height": 80, "pose": {"arm_r": 150}})
+    crown, top = (sculpt._part_bounds([{**p, "primitives": sculpt.expand_macros(p["primitives"])} for p in s["parts"]]
+                                      )[0][1][2] for s in (plain, posed))
+    assert top == pytest.approx(crown, abs=0.5), "the raised hand reaches the height the crown had"
+    hand = next(p for p in posed["parts"] if p["name"] == "Skin")
+    assert min(sculpt._bounds(q)[0][2] for q in hand["primitives"]) > 5, "the whole figure shrank: feet on the base"
+    right = next(p for p in posed["parts"] if p["name"] == "Shoes_R")
+    assert all(q["center"][0] < 0 for q in right["primitives"] if "center" in q), "Shoes_R at -X"
     with pytest.raises(ValueError, match="joint"):
         sculpt.expand_template({"template": "person_standing", "pose": {"tail": 10}})
 

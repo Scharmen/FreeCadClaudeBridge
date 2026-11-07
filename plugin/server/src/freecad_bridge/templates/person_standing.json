@@ -1,9 +1,9 @@
 {
  "name": "person_standing",
  "height": 83.4,
- "description": "Standing adult, 7.5 heads tall, arms relaxed, T-shirt, jeans and sneakers, short hair, on a round base. Parts: Skin, Shirt, Jeans, Shoes_L, Shoes_R, Soles, Hair, Eyes, Pupils, Base. Pose joints: head, arm_r, arm_l (degrees).",
+ "description": "Standing adult, 7.5 heads tall, arms relaxed, T-shirt, jeans and sneakers, short hair, on a round base. Parts: Skin, Shirt, Jeans, Shoes_L, Shoes_R, Soles, Hair, Eyes, Pupils, Base. Pose joints: head, arm_r, arm_l (degrees; _r is the figure's own right, at -X since it faces -Y).",
  "cells": 400,
- "convention": "mm, base on z = 0, facing -Y (the front looks towards -Y), Z up",
+ "convention": "mm, base on z = 0, facing -Y (the front looks towards -Y), Z up; the figure's right side is at -X",
  "parts": [
   {
    "name": "Skin",
@@ -1498,7 +1498,7 @@
    ]
   },
   {
-   "name": "Shoes_R",
+   "name": "Shoes_L",
    "color": [
     0.72,
     0.2,
@@ -1670,7 +1670,7 @@
    ]
   },
   {
-   "name": "Shoes_L",
+   "name": "Shoes_R",
    "color": [
     0.72,
     0.2,
@@ -2030,6 +2030,25 @@
      ]
     },
     {
+     "type": "hair",
+     "center": [
+      0,
+      0.75,
+      78.8
+     ],
+     "radii": [
+      4.5,
+      5.25,
+      4.8
+     ],
+     "count": 64,
+     "length": 3.4,
+     "thickness": 0.6,
+     "style": "short",
+     "seed": 2,
+     "blend": 0.4
+    },
+    {
      "type": "box",
      "center": [
       0,
@@ -2357,30 +2376,6 @@
   },
   "arm_r": {
    "pivot": [
-    9.6,
-    0.5,
-    61.5
-   ],
-   "axis": [
-    0,
-    -1,
-    0
-   ],
-   "box": [
-    [
-     7.5,
-     -8,
-     32
-    ],
-    [
-     20,
-     8,
-     66
-    ]
-   ]
-  },
-  "arm_l": {
-   "pivot": [
     -9.6,
     0.5,
     61.5
@@ -2398,6 +2393,30 @@
     ],
     [
      -7.5,
+     8,
+     66
+    ]
+   ]
+  },
+  "arm_l": {
+   "pivot": [
+    9.6,
+    0.5,
+    61.5
+   ],
+   "axis": [
+    0,
+    -1,
+    0
+   ],
+   "box": [
+    [
+     7.5,
+     -8,
+     32
+    ],
+    [
+     20,
      8,
      66
     ]

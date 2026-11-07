@@ -211,6 +211,11 @@ def expand_macros(prims: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _bounds(prim: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
     kind = prim.get("type")
+    if kind == "hair":                      # the preset before expansion: the scalp plus the strands' length
+        center = _vec(prim, "center")
+        radii = _vec(prim, "radii") if "radii" in prim else np.full(3, _num(prim, "radius"))
+        reach = radii * 1.05 + _num(prim, "length", float(radii.mean()))
+        return center - reach, center + reach
     if kind not in KINDS:
         raise ValueError(f"unknown primitive type '{kind}' (use {', '.join(KINDS)})")
     if kind in ("capsule", "cylinder"):
@@ -837,12 +842,18 @@ def _scaled(obj: Any, k: float) -> Any:
             out[key] = [[float(x) * k for x in p] for p in v]
         elif key in SCALAR_KEYS and isinstance(v, (int, float)):
             out[key] = float(v) * k
-        elif key in ("primitives", "detail", "fur", "joints", "pivot", "box"):
+        elif key == "box" and isinstance(v, list):       # a joint's region: two corners
+            out[key] = [[float(x) * k for x in corner] for corner in v]
+        elif key in ("primitives", "detail", "fur", "joints"):
             out[key] = _scaled(v, k)
         else:
             out[key] = v
     return out
 
+
+def _joints(tpl: dict[str, Any], k: float) -> dict[str, Any]:
+    """The template's joints with pivot and box scaled by k (the axis is a direction)."""
+    return {name: _scaled(joint, k) for name, joint in (tpl.get("joints") or {}).items()}
 
 def expand_template(scene: dict[str, Any]) -> dict[str, Any]:
     """{"template": name, "height": mm, "parts": [...]} -> a plain scene.
@@ -854,7 +865,23 @@ def expand_template(scene: dict[str, Any]) -> dict[str, Any]:
     if "template" not in scene:
         return scene
     tpl = load_template(str(scene["template"]))
-    k = float(scene.get("height") or tpl["height"]) / float(tpl["height"])
+    height = float(scene.get("height") or tpl["height"])
+    k = height / float(tpl["height"])
+    pose = scene.get("pose") or {}
+    joints = _joints(tpl, k)
+    for name in pose:
+        if name not in joints:
+            raise ValueError(f"unknown joint '{name}' for {scene['template']} (joints: {', '.join(joints) or 'none'})")
+    if pose:            # `height` is the finished figure's height: a raised arm must not grow past it
+        probe = [{**p, "primitives": expand_macros(p.get("primitives") or [])} for p in
+                 (_scaled(p, k) for p in tpl["parts"])]            # hair as strands, not its loose bound
+        crown = _part_bounds(probe)[0][1][2]
+        for name, angle in pose.items():
+            _pose_parts(probe, joints[name], float(angle))
+        top = _part_bounds(probe)[0][1][2]
+        if top > crown + 1e-6:
+            k *= crown / top
+            joints = _joints(tpl, k)
     parts = [_scaled(p, k) for p in tpl["parts"]]
     by_name = {p["name"]: p for p in parts}
     for extra in scene.get("parts") or []:
@@ -867,14 +894,8 @@ def expand_template(scene: dict[str, Any]) -> dict[str, Any]:
                 target["primitives"] = target["primitives"] + list(v)
             else:
                 target[key] = v
-    pose = scene.get("pose") or {}
-    if pose:
-        joints = _scaled(tpl.get("joints") or {}, k)
-        for name, angle in pose.items():
-            if name not in joints:
-                raise ValueError(f"unknown joint '{name}' for {scene['template']} (joints: "
-                                 f"{', '.join(joints) or 'none'})")
-            _pose_parts(parts, joints[name], float(angle))
+    for name, angle in pose.items():
+        _pose_parts(parts, joints[name], float(angle))
     rest = {key: v for key, v in scene.items() if key not in ("template", "height", "parts", "pose")}
     return {**({"cells": tpl["cells"]} if "cells" in tpl else {}), "template": scene["template"], **rest,
             "parts": parts}

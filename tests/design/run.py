@@ -46,7 +46,7 @@ USER_BRIDGE = platforms.bridge_dir()
 BENCH_HOME = USER_BRIDGE / "benchmark"
 BENCH_BRIDGE = BENCH_HOME / "bridge"
 TIMEOUT_S = 25 * 60
-VIEWS = ("Isometric", "Front", "Right", "Top", "Bottom", "Rear")
+VIEWS = ("Isometric", "Front", "Right", "Top", "Bottom", "Rear", "Left")   # both ends of a car, whichever way it points
 CHECK_TOOLS = ("check_design", "check_print", "check_fit", "flex_test", "inspect_views")
 
 
