@@ -1,3 +1,3 @@
 """FreeCAD × Claude Code bridge: MCP server, client and installer."""
 
-__version__ = "1.19.0"
+__version__ = "1.20.0"

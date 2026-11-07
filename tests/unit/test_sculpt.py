@@ -230,3 +230,48 @@ def test_specks_smaller_than_three_voxels_are_dropped():
                            {"type": "sphere", "center": [9, 0, 0], "radius": 0.3}], "blend": 0}
     v, t = sculpt.mesh_part(part, voxel=0.25, smooth=0)
     assert sculpt.pieces(len(v), t) == 1 and v[np.unique(t)][:, 0].max() < 6
+
+
+def test_one_piece_unites_a_template_into_a_single_closed_mesh(tmp_path):
+    res = sculpt.sculpt_scene({"template": "dog_standing", "height": 30, "one_piece": True}, str(tmp_path), voxel=0.3)
+    assert [p["name"] for p in res["parts"]] == ["dog_standing"]
+    piece = res["parts"][0]
+    assert piece["pieces"] == 1 and piece["closed"] is True and "warning" not in piece
+    v, t = read_stl(piece["path"])
+    assert closed(t)
+    apart = sculpt.sculpt_scene({"template": "dog_standing", "height": 30}, str(tmp_path / "apart"), voxel=0.3)
+    biggest = max(volume(*read_stl(p["path"])) for p in apart["parts"])
+    assert volume(v, t) > biggest, "the base is in it too"
+    assert res["size_mm"] == pytest.approx(apart["size_mm"], abs=0.5)
+
+
+def test_one_piece_keeps_each_part_s_fur_and_takes_the_scene_name(tmp_path):
+    body = {"name": "Body", "color": [0.8, 0.6, 0.5], "primitives": [{"type": "sphere", "center": [0, 0, 0],
+                                                                         "radius": 6}]}
+    hair = {"name": "Hair", "fur": {"depth": 0.3, "length": 4, "width": 1.0, "from": [0, 0, 8]},
+            "primitives": [{"type": "sphere", "center": [0, 0, 4], "radius": 4}]}
+    one = sculpt.sculpt_scene({"name": "Head", "one_piece": True, "parts": [body, hair]}, str(tmp_path), voxel=0.3)
+    assert [p["name"] for p in one["parts"]] == ["Head"] and one["parts"][0]["color"] == [0.8, 0.6, 0.5]
+    v, t = read_stl(one["parts"][0]["path"])
+    assert closed(t)
+    smooth = sculpt.sculpt_scene({"name": "Head", "one_piece": True, "parts": [body, {**hair, "fur": None}]},
+                                 str(tmp_path / "smooth"), voxel=0.3)
+    sv, st = read_stl(smooth["parts"][0]["path"])
+
+    def grooves(pts):   # how much the hair's radius varies over its top
+        top = pts[pts[:, 2] > 6.5]
+        return np.linalg.norm(top - np.array([0, 0, 4]), axis=1).std()
+    assert grooves(v) > 5 * grooves(sv), "the grooves of the hair are still there"
+
+
+def test_small_holes_in_a_mesh_are_closed_and_reported():
+    v, t = sculpt.mesh_part({"primitives": [{"type": "sphere", "center": [0, 0, 0], "radius": 10}]},
+                            voxel=0.5, smooth=2)
+    top = np.argsort(-v[t].mean(1)[:, 2])[:4]            # four triangles near the top: one hole
+    opened = np.delete(t, top, axis=0)
+    assert not closed(opened)
+    fixed, holes = sculpt.close_holes(v, opened)
+    assert holes == 1 and closed(fixed)
+    assert volume(v, fixed) == pytest.approx(volume(v, t), rel=0.01)
+    same, none = sculpt.close_holes(v, t)
+    assert none == 0 and len(same) == len(t)

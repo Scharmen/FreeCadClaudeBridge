@@ -56,3 +56,19 @@ def test_sculpt_imports_watertight_matte_parts_as_one_undo_step():
     call("run_python", doc=DOC, code="doc.undo()")
     gone = call("run_python", doc=DOC, code="_result = len(doc.Objects)")["result"]
     assert gone == 0, "the whole sculpt is one undo step"
+
+
+def test_one_piece_imports_a_single_closed_mesh_for_printing():
+    scene = {"template": "cat_sitting", "height": 40,
+             "parts": [{"name": "Collar", "color": [0.9, 0.1, 0.1],
+                        "primitives": [{"type": "torus", "center": [0, -4, 26], "radius": 5.5, "thickness": 0.8,
+                                        "rotate": [80, 0, 0]}]}]}
+    full = anyio.run(lambda: mcp_server.sculpt(scene, name="Cat", one_piece=True, voxel_mm=0.25, doc=DOC))
+    res = json.loads(full[0])
+    assert not res.get("part_warnings"), res
+    parts = res["result"]["parts"]
+    assert len(parts) == 1 and parts[0]["watertight"] is True
+    assert parts[0]["size_mm"][2] == pytest.approx(40, abs=1.0)
+    count = call("run_python", doc=DOC, code="_result = sum(1 for o in doc.Objects if o.TypeId == 'Mesh::Feature')",
+                 recompute=False)["result"]
+    assert count == 1

@@ -257,29 +257,70 @@ def fur_noise(points: np.ndarray, fur: dict[str, Any]) -> np.ndarray:
     return np.cos(np.pi * np.clip(n, -1, 1))       # smooth ridges where the noise crosses zero
 
 
+def _part_margin(part: dict[str, Any]) -> float:
+    detail = part.get("detail") or {}
+    fur = part.get("fur") or None
+    return max(float(part.get("blend", DEFAULT_BLEND)), 0) + abs(float(detail.get("amplitude", 0))) \
+        + (_fur_params(fur)[0] if fur else 0.0)
+
+
+def _frame(parts: list[dict[str, Any]], voxel: float | None) -> tuple[np.ndarray, np.ndarray, list[np.ndarray],
+                                                                        float, float]:
+    """The grid every part of a union is sampled on: origin, size, axes, voxel and a far value."""
+    margin = 0.0
+    lo_all: np.ndarray | None = None
+    hi_all: np.ndarray | None = None
+    for part in parts:
+        prims = part.get("primitives") or []
+        if not prims:
+            raise ValueError("a part needs at least one primitive")
+        if len(prims) > MAX_PRIMITIVES:
+            raise ValueError(f"too many primitives ({len(prims)} > {MAX_PRIMITIVES})")
+        boxes = [_bounds(p) for p in prims]
+        for p in prims:                        # validate everything before the heavy work
+            _sdf(p, np.zeros((1, 3)))
+        adds = [b for p, b in zip(prims, boxes, strict=True) if p.get("op", "add") == "add"] or boxes
+        lo = np.min([b[0] for b in adds], axis=0)     # cuts never make a shape larger: a big box that
+        hi = np.max([b[1] for b in adds], axis=0)     # flattens the base does not enlarge the grid
+        lo_all = lo if lo_all is None else np.minimum(lo_all, lo)
+        hi_all = hi if hi_all is None else np.maximum(hi_all, hi)
+        margin = max(margin, _part_margin(part))
+    assert lo_all is not None and hi_all is not None
+    voxel = choose_voxel([tuple(lo_all), tuple(hi_all)], voxel)
+    lo, hi = lo_all - (margin + 2 * voxel), hi_all + (margin + 2 * voxel)
+    n = np.ceil((hi - lo) / voxel).astype(int) + 1
+    axes = [lo[i] + np.arange(n[i]) * voxel for i in range(3)]
+    return lo, n, axes, voxel, float(np.linalg.norm(hi - lo))
+
+
 def field(part: dict[str, Any], voxel: float | None = None) -> tuple[np.ndarray, np.ndarray, float]:
+    lo, n, axes, voxel, far = _frame([part], voxel)
+    return _fill(part, lo, n, axes, voxel, far), lo, voxel
+
+
+def field_union(parts: list[dict[str, Any]], voxel: float | None = None) -> tuple[np.ndarray, np.ndarray, float]:
+    """Several parts as one body: each keeps its own blend, detail and fur, then the fields are united."""
+    lo, n, axes, voxel, far = _frame(parts, voxel)
+    grid: np.ndarray | None = None
+    for part in parts:
+        one = _fill(part, lo, n, axes, voxel, far)
+        # a part's own blend joins it to the rest; at least a voxel and a half, so an eye that only touches
+        # its socket still becomes one body
+        k = max(float(part.get("blend", DEFAULT_BLEND)), 1.5 * voxel)
+        grid = one if grid is None else _smooth_union(grid, one, k)
+    assert grid is not None
+    return grid, lo, voxel
+
+
+def _fill(part: dict[str, Any], lo: np.ndarray, n: np.ndarray, axes: list[np.ndarray], voxel: float,
+          far: float) -> np.ndarray:
     prims = part.get("primitives") or []
-    if not prims:
-        raise ValueError("a part needs at least one primitive")
-    if len(prims) > MAX_PRIMITIVES:
-        raise ValueError(f"too many primitives ({len(prims)} > {MAX_PRIMITIVES})")
     blend = float(part.get("blend", DEFAULT_BLEND))
     detail = part.get("detail") or {}
     amp = float(detail.get("amplitude", 0))
     fur = part.get("fur") or None
     fur_depth = _fur_params(fur)[0] if fur else 0.0
     boxes = [_bounds(p) for p in prims]
-    for p in prims:                        # validate everything before the heavy work
-        _sdf(p, np.zeros((1, 3)))
-    adds = [b for p, b in zip(prims, boxes, strict=True) if p.get("op", "add") == "add"] or boxes
-    lo = np.min([b[0] for b in adds], axis=0)     # cuts never make a shape larger: a big box that
-    hi = np.max([b[1] for b in adds], axis=0)     # flattens the base does not enlarge the grid
-    voxel = choose_voxel([tuple(lo), tuple(hi)], voxel)
-    margin = 2 * voxel + max(blend, 0) + abs(amp) + fur_depth
-    lo, hi = lo - margin, hi + margin
-    n = np.ceil((hi - lo) / voxel).astype(int) + 1
-    axes = [lo[i] + np.arange(n[i]) * voxel for i in range(3)]
-    far = float(np.linalg.norm(hi - lo))
     grid = np.full(tuple(n), far, dtype=np.float32)
     for prim, (blo, bhi) in zip(prims, boxes, strict=True):
         k = float(prim.get("blend", blend))
@@ -317,7 +358,7 @@ def field(part: dict[str, Any], voxel: float | None = None) -> tuple[np.ndarray,
             pts = np.stack([axes[0][part_idx[0]], axes[1][part_idx[1]], axes[2][part_idx[2]]], axis=1)
             # carve only (0..depth): grooves between the locks; pushing out could leave islands in the air
             grid[part_idx] += (fur_depth * 0.5 * (1 - fur_noise(pts, fur))).astype(np.float32)
-    return grid, lo, voxel
+    return grid
 
 
 def _sample(prim: dict[str, Any], sub_axes: list[np.ndarray]) -> np.ndarray:
@@ -507,14 +548,23 @@ def taubin(verts: np.ndarray, tris: np.ndarray, iterations: int, lam: float = 0.
     return v
 
 
-def mesh_part(part: dict[str, Any], voxel: float | None = None, smooth: int = 4) -> tuple[np.ndarray, np.ndarray]:
+Parts = dict[str, Any] | list[dict[str, Any]]
+
+
+def _field_any(part: Parts, voxel: float | None) -> tuple[np.ndarray, np.ndarray, float]:
+    return field_union(part, voxel) if isinstance(part, list) else field(part, voxel)
+
+
+def mesh_part(part: Parts, voxel: float | None = None, smooth: int = 4) -> tuple[np.ndarray, np.ndarray]:
+    """One part, or a list of parts united into one body (each with its own blend, detail and fur)."""
+    group = part if isinstance(part, list) else [part]
     best = None
     for attempt in range(3):
         # a pinch that survives the split depends on how the grid happens to lie over the shape:
         # a slightly finer grid moves the samples and usually removes it
         wanted = None if voxel is None and attempt == 0 else \
-            (voxel or choose_voxel(*_part_bounds(part))) * (1 - 0.07 * attempt)
-        grid, origin, used = field(part, wanted)
+            (voxel or choose_voxel(*_part_bounds(group))) * (1 - 0.07 * attempt)
+        grid, origin, used = _field_any(part, wanted)
         verts, tris = split_pinches(*surface_nets(grid, origin, used))
         bad = non_manifold_edges(tris)
         if best is None or bad < best[0]:
@@ -526,8 +576,44 @@ def mesh_part(part: dict[str, Any], voxel: float | None = None, smooth: int = 4)
     if bad:
         verts, tris = _carve_bad_edges(part, wanted, verts, tris)
     tris = drop_specks(verts, tris, 3 * used)
-    passes = int(part.get("smooth", min(smooth, 2) if part.get("fur") else smooth))  # more would erase the fur
+    tris, _holes = close_holes(verts, tris)
+    kept = np.unique(tris)                       # a dropped speck leaves vertices nobody uses
+    remap = np.full(len(verts), -1)
+    remap[kept] = np.arange(len(kept))
+    verts, tris = verts[kept], remap[tris]
+    furry = any(p.get("fur") for p in group)
+    given = [p["smooth"] for p in group if "smooth" in p]
+    passes = int(given[0] if given else (min(smooth, 2) if furry else smooth))  # more would erase the fur
     return taubin(verts, tris, passes), tris
+
+
+def boundary_loops(tris: np.ndarray) -> list[list[int]]:
+    """The holes of a mesh: closed runs of edges that belong to one triangle only, in that triangle's direction."""
+    e = np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]])
+    key = np.sort(e, axis=1)
+    _, first, counts = np.unique(key, axis=0, return_index=True, return_counts=True)
+    single = e[first[counts == 1]]
+    nxt: dict[int, int] = {int(a): int(b) for a, b in single}
+    loops: list[list[int]] = []
+    while nxt:
+        start, cur = next(iter(nxt)), None
+        loop = [start]
+        cur = nxt.pop(start)
+        while cur != start and cur in nxt:
+            loop.append(cur)
+            cur = nxt.pop(cur)
+        if cur == start and len(loop) >= 3:
+            loops.append(loop)
+    return loops
+
+
+def close_holes(verts: np.ndarray, tris: np.ndarray, max_edges: int = 400) -> tuple[np.ndarray, int]:
+    """Fill each small hole with a fan, keeping the outward orientation; returns the triangles and the count."""
+    loops = [lp for lp in boundary_loops(tris) if len(lp) <= max_edges]
+    if not loops:
+        return tris, 0
+    extra = [[lp[0], lp[i + 1], lp[i]] for lp in loops for i in range(1, len(lp) - 1)]
+    return np.concatenate([tris, np.array(extra, dtype=tris.dtype)]), len(loops)
 
 
 def bad_edge_points(verts: np.ndarray, tris: np.ndarray) -> np.ndarray:
@@ -538,11 +624,11 @@ def bad_edge_points(verts: np.ndarray, tris: np.ndarray) -> np.ndarray:
     return (verts[bad[:, 0]] + verts[bad[:, 1]]) / 2 if len(bad) else np.zeros((0, 3))
 
 
-def _carve_bad_edges(part: dict[str, Any], voxel: float | None, verts: np.ndarray,
+def _carve_bad_edges(part: Parts, voxel: float | None, verts: np.ndarray,
                      tris: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Edges the splitter cannot untangle (two sheets meeting at a fur ridge): carve the field a third of a
     voxel deeper around them, which turns the ambiguous cell into an ordinary one, and mesh again."""
-    grid, origin, used = field(part, voxel)
+    grid, origin, used = _field_any(part, voxel)
     for _ in range(4):
         spots = bad_edge_points(verts, tris)
         if not len(spots):
@@ -561,8 +647,9 @@ def non_manifold_edges(tris: np.ndarray) -> int:
     return int((counts != 2).sum())
 
 
-def _part_bounds(part: dict[str, Any]) -> tuple[list[tuple[float, float, float]], None]:
-    boxes = [_bounds(p) for p in part.get("primitives") or []]
+def _part_bounds(part: Parts) -> tuple[list[tuple[float, float, float]], None]:
+    group = part if isinstance(part, list) else [part]
+    boxes = [_bounds(p) for one in group for p in one.get("primitives") or []]
     lo = np.min([b[0] for b in boxes], axis=0)
     hi = np.max([b[1] for b in boxes], axis=0)
     return [tuple(lo), tuple(hi)], None
@@ -713,7 +800,8 @@ def expand_template(scene: dict[str, Any]) -> dict[str, Any]:
             else:
                 target[key] = v
     rest = {key: v for key, v in scene.items() if key not in ("template", "height", "parts")}
-    return {**({"cells": tpl["cells"]} if "cells" in tpl else {}), **rest, "parts": parts}
+    return {**({"cells": tpl["cells"]} if "cells" in tpl else {}), "template": scene["template"], **rest,
+            "parts": parts}
 
 
 def _scene_bounds(parts: list[dict[str, Any]]) -> list[tuple[float, float, float]]:
@@ -734,6 +822,8 @@ def sculpt_scene(scene: dict[str, Any], out_dir: str, voxel: float | None = None
     t0 = time.monotonic()
     scene = expand_template(scene)
     parts = scene.get("parts") or [{"name": scene.get("name", "Sculpt"), **scene}]
+    if "parts" not in scene:
+        scene = {k: v for k, v in scene.items() if k not in ("primitives", "one_piece")}
     for part in parts:
         for p in part.get("primitives") or []:
             _sdf(p, np.zeros((1, 3)))      # explain bad input before the heavy work
@@ -744,9 +834,17 @@ def sculpt_scene(scene: dict[str, Any], out_dir: str, voxel: float | None = None
     os.makedirs(out_dir, exist_ok=True)
     out = []
     lo_all, hi_all = None, None
-    for i, part in enumerate(parts):
+    merged_parts = []
+    for part in parts:
         inherited = {key: scene[key] for key in ("detail", "fur") if key in scene and key not in part}
-        merged = {"blend": scene.get("blend", DEFAULT_BLEND), **inherited, **part}
+        merged_parts.append({"blend": scene.get("blend", DEFAULT_BLEND), **inherited, **part})
+    jobs: list[tuple[dict[str, Any], Parts]] = [(p, m) for p, m in zip(parts, merged_parts, strict=True)]
+    if scene.get("one_piece") and parts:        # one print: every part's primitives in one body, fur and all
+        first = parts[0]
+        whole = {"name": scene.get("name") or scene.get("template") or first.get("name") or "Sculpt",
+                 "color": first.get("color"), "shininess": first.get("shininess", 0.0)}
+        jobs = [(whole, merged_parts)]
+    for i, (part, merged) in enumerate(jobs):
         verts, tris = mesh_part(merged, part.get("voxel", shared), smooth)
         name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in str(part.get("name") or f"Part{i + 1}"))
         path = os.path.join(out_dir, f"{name}.stl")
@@ -756,14 +854,18 @@ def sculpt_scene(scene: dict[str, Any], out_dir: str, voxel: float | None = None
             lo_all = verts.min(0) if lo_all is None else np.minimum(lo_all, verts.min(0))
             hi_all = verts.max(0) if hi_all is None else np.maximum(hi_all, verts.max(0))
         n_pieces = pieces(len(verts), tris)
-        others = [p for j, p in enumerate(parts) if j != i]
+        others = [m for j, (_p, m) in enumerate(jobs) if j != i and isinstance(m, dict)]
         loose = floating_pieces(verts, tris, others, 2 * shared) if n_pieces > 1 else 0
+        is_closed = not boundary_loops(tris) and non_manifold_edges(tris) == 0
         entry = {"name": name, "path": path, "triangles": int(len(tris)), "color": part.get("color"),
                  "shininess": float(part.get("shininess", 0.0)),
-                 "size_mm": [round(float(x), 2) for x in size], "pieces": n_pieces}
+                 "size_mm": [round(float(x), 2) for x in size], "pieces": n_pieces, "closed": is_closed}
         if loose:
             entry["warning"] = (f"{loose} piece(s) float: they touch neither the rest of the part nor another part "
                                 "(a strand in the air, an eyeball inside its socket). Move them into the body.")
+        elif not is_closed:
+            entry["warning"] = ("the mesh is not closed (a hole too large to fill or sheets that meet at an edge): "
+                                "thicken the thin spot or raise the blend there, a slicer cannot print it as it is")
         out.append(entry)
     total = (hi_all - lo_all) if lo_all is not None else np.zeros(3)
     return {"parts": out, "voxel_mm": round(shared, 4), "size_mm": [round(float(x), 2) for x in total],

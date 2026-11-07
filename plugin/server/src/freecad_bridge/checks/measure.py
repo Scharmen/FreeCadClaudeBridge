@@ -154,20 +154,27 @@ def inclined_planes(s: Any) -> int:
     return count
 
 
-def pitch_from_crests(lines: list[list[float]], eps: float = 0.02) -> float | None:
-    """The pitch of a helix from where lines at equal angles around the axis run through material.
+def pitch_from_runs(lines: list[list[tuple[float, float]]], clip: tuple[float, float] | None = None,
+                    eps: float = 0.02) -> float | None:
+    """The pitch of a helix from the stretches where lines at equal angles around the axis run through material.
 
-    Going one line further, a helix moves by pitch / number of lines. A ring, a wall or a base does not
-    move, so it casts no vote, and a thread of only a turn or two still counts, which repeats along one
-    line would not show.
+    Going one line further, a helix moves by pitch / number of lines, so the start and the end of each run
+    move by that too; a ring, a wall or a base does not move and casts no vote. Both edges vote, so a thread
+    of a turn or two still counts. An edge at the shape's end (`clip`) is where the thread was cut off, not
+    a flank, and stays out.
     """
+    def edges(runs: list[tuple[float, float]], kind: int) -> list[float]:
+        return [r[kind] for r in runs if clip is None or all(abs(r[kind] - c) > 1e-3 for c in clip)]
+
     votes = []
     for here, there in zip(lines, lines[1:] + lines[:1], strict=True):
-        for z in here:
-            if there:
-                dz = min((t - z for t in there), key=abs)
-                if abs(dz) > eps:
-                    votes.append(dz * len(lines))
+        for kind in (0, 1):
+            targets = edges(there, kind)
+            for z in edges(here, kind):
+                if targets:
+                    dz = min((t - z for t in targets), key=abs)
+                    if abs(dz) > eps:
+                        votes.append(dz * len(lines))
     best, most = None, 0
     for v in votes:
         near = [w for w in votes if abs(w - v) <= 0.15 * abs(v) + eps]
@@ -176,8 +183,13 @@ def pitch_from_crests(lines: list[list[float]], eps: float = 0.02) -> float | No
     return best if most >= 4 else None
 
 
-def _line_runs(pts: Any, tris: Any, u: float, w: float) -> list[float]:
-    """Middles of the stretches where a line along the first coordinate runs through the mesh."""
+def pitch_from_crests(lines: list[list[float]], eps: float = 0.02) -> float | None:
+    """Kept for callers that have crest middles only."""
+    return pitch_from_runs([[(z, z) for z in line] for line in lines], None, eps)
+
+
+def _line_runs(pts: Any, tris: Any, u: float, w: float) -> list[tuple[float, float]]:
+    """The stretches (start, end) where a line along the first coordinate runs through the mesh."""
     import numpy as np
 
     a, b, c = pts[tris[:, 0]], pts[tris[:, 1]], pts[tris[:, 2]]
@@ -191,7 +203,7 @@ def _line_runs(pts: Any, tris: Any, u: float, w: float) -> list[float]:
     z = a[good][hit, 0] + p[hit] * (b[good][hit, 0] - a[good][hit, 0]) + q[hit] * (c[good][hit, 0] - a[good][hit, 0])
     z = np.sort(z)
     z = z[np.concatenate(([True], np.diff(z) > 1e-6))] if len(z) else z   # a line through a shared edge hits twice
-    return [float((z[i] + z[i + 1]) / 2) for i in range(0, len(z) - 1, 2)]
+    return [(float(z[i]), float(z[i + 1])) for i in range(0, len(z) - 1, 2)]
 
 
 def thread_pitch(s: Any, band: list[float], lines: int = 6) -> dict[str, Any] | None:
@@ -216,7 +228,7 @@ def thread_pitch(s: Any, band: list[float], lines: int = 6) -> dict[str, Any] | 
     for j in range(lines):
         angle = 2 * math.pi * j / lines + 0.0137       # off the seams of round faces
         found.append(_line_runs(pts, tris, c[1] + r * math.cos(angle), c[2] + r * math.sin(angle)))
-    pitch = pitch_from_crests(found)
+    pitch = pitch_from_runs(found, (float(pts[:, 0].min()), float(pts[:, 0].max())))
     return {"crests": len(found[0]), "pitch": None if pitch is None else r4(pitch)}
 
 

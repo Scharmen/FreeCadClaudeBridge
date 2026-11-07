@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.20.0 – models that pass their own checks (unreleased)
+
+- `make_part` family `thread`: an external thread on any diameter (bottle neck, lid, plug) as a solid to fuse onto the neck, with a lead-in chamfer and an optional thicker core, or an internal thread as a cutter for a cap, clearance wider for printing. Every model in the benchmark had cut the bottle's thread by hand and got the pitch wrong (9.6 to 130 mm instead of 3).
+- `sculpt(one_piece=true)`: every part united into one closed mesh for printing, each keeping its own blend, detail and fur; parts that only touch (an eye in its socket) still join. A figure is one print, as the user asked.
+- Sculpted meshes: small holes are closed before the import, each part says whether it is closed, and one that stays open says so in `part_warnings` instead of arriving as an unprintable mesh.
+
 ## 1.19.0 – leaner sessions (unreleased)
 
 Measured on the benchmark logs: the same model, built by Opus in 96 tool calls for $2.87, by Sonnet in 12 for $0.25, with the same score. Most of the difference was check loops, pictures that stay in the context, and errors that cost a turn each. This release cuts all three.

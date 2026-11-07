@@ -175,12 +175,23 @@ def test_check_all_runs_every_check_on_one_copy_and_answers_with_problems_first(
     assert quick["ok"] is True and "print" not in quick
 
 
+def _camera_size(text):
+    """The view's height (orthographic) or angle (perspective): smaller means closer."""
+    for ln in text.splitlines():
+        words = ln.split()
+        if words and words[0] in ("height", "heightAngle"):
+            return float(words[1])
+    raise AssertionError(text)
+
+
 def test_a_view_name_as_action_and_a_close_up_with_look_at():
+    camera = f'_result = Gui.getDocument("{DOC}").ActiveView.getCamera()'
+    call("view", action="fit", view="front")
+    whole = call("run_python", code=camera, doc=DOC, recompute=False)["result"]
+    call("run_python", code="Gui.Selection.clearSelection()", doc=DOC, recompute=False)
     r = call("view", action="fit", view="front", look_at=["Pin"], zoom=2.0, screenshot=True, width=320, height=240)
     assert r["image_png_base64"] and r["action"] == "fit"
-    cam = call("run_python", code=f'_result = Gui.getDocument("{DOC}").ActiveView.getCamera()', doc=DOC,
-               recompute=False)["result"]
-    height = [float(ln.split()[1]) for ln in cam.splitlines() if ln.strip().startswith("height ")]
-    assert height and height[0] < 30, "framed on the 6 mm pin, not on the 200 mm scene"
+    close = call("run_python", code=camera, doc=DOC, recompute=False)["result"]
+    assert _camera_size(close) < 0.3 * _camera_size(whole), "framed on the 6 mm pin, not on the whole scene"
     sel = call("selection")
     assert not sel.get("items") and not sel.get("selection"), "the user's selection is left as it was"

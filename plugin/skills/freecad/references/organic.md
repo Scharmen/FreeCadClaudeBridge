@@ -39,7 +39,7 @@ Never build a person or an animal from scratch or from Part primitives. The `scu
 - **Fur and hair** give the look: `"fur": {"depth", "length", "width", "direction" | "from"}` carves grooves that run along the flow (down and back on an animal's body, out from the crown on a head). Short coat: depth 0.1–0.15 mm, width 0.6–0.8 mm on a 5 cm figure; long fur: depth 0.3, width 1, length 8–10. Depth is capped at 0.3 × width so the surface stays clean.
 - **Check the face up close:** `view` with a screenshot zoomed on the head; eyes, nose and mouth must read at the printed size.
 
-**One piece:** a template's parts touch and print together. To join them, put all their primitives into one part in the `sculpt` scene. Do not fuse the finished meshes: that leaves open, invalid meshes and costs many minutes.
+**One piece:** for printing, call `sculpt(..., one_piece=true)`: every part is united into one closed mesh, each keeping its own blend, detail and fur (the first part's colour; paint the rest). Do not fuse the finished meshes in FreeCAD: that leaves open, invalid meshes and costs many minutes.
 
 ## The `sculpt` tool
 
@@ -73,7 +73,7 @@ Grammar (mm; every primitive may set `"op": "add" | "subtract" | "intersect"` an
 | `torus` | `center`, `radius`, `thickness`, `rotate` |
 | `cylinder` | `a`, `b`, `radius` |
 
-Scene and part keys: `blend` (mm), `color: [r, g, b]` 0..1, `shininess` 0..1 (default 0, matte; only metal or wet parts get 0.3–0.6), `detail: {"amplitude": mm, "scale": mm, "seed"}` skin or stone texture, `fur: {"depth": mm, "length": mm, "width": mm, "direction": [x, y, z] or "from": [x, y, z], "seed"}` grooves along the flow (depth up to 0.3 × width; `"fur": null` switches a scene-wide fur off for one part). Tool arguments: `voxel_mm` (default 1/300 of the scene, the same for every part), `smooth` Taubin passes (default 4, 2 with fur), `preview` (default true: a front and side picture comes with the answer).
+Scene and part keys: `blend` (mm), `color: [r, g, b]` 0..1, `shininess` 0..1 (default 0, matte; only metal or wet parts get 0.3–0.6), `detail: {"amplitude": mm, "scale": mm, "seed"}` skin or stone texture, `fur: {"depth": mm, "length": mm, "width": mm, "direction": [x, y, z] or "from": [x, y, z], "seed"}` grooves along the flow (depth up to 0.3 × width; `"fur": null` switches a scene-wide fur off for one part). Tool arguments: `voxel_mm` (default 1/300 of the scene, the same for every part), `smooth` Taubin passes (default 4, 2 with fur), `one_piece` (one closed mesh of all parts, for printing), `preview` (default true: a front and side picture comes with the answer). Small holes in a mesh are closed; a part that stays open says so in `part_warnings`.
 
 Rules that make it look real instead of plastic:
 

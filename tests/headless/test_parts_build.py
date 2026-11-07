@@ -117,3 +117,24 @@ def test_knob_has_a_d_bore(cmd):
             "_result = [box(k), sum(1 for f in k.Faces if type(f.Surface).__name__ == 'Cylinder' and"
             " abs(f.Surface.Radius - 3.1) < 0.01), k.Volume]", cmd, "knob")
     assert r[0] == pytest.approx([18, 25, 25], abs=0.2) and r[1] == 1
+
+
+def test_an_external_thread_on_a_bottle_neck_measures_its_pitch(cmd):
+    r = run("import Part\nfrom freecad_bridge.checks import measure\nt = parts['Thread']\n"
+            "neck = Part.makeCylinder(14, 10)\nbottle = neck.fuse(t)\n"
+            "_result = [box(t), measure.thread_pitch(bottle, [13.0, 16.5]), bool(bottle.isValid()),"
+            " len(bottle.Solids)]",
+            cmd, "thread", major=32.0, pitch=3.0, length=4.5, core=28.0)
+    assert r[0][2] == pytest.approx(32, abs=0.2) and r[0][0] == pytest.approx(4.5, abs=0.3)
+    assert r[1]["pitch"] == pytest.approx(3.0, abs=0.3), r
+    assert r[2] and r[3] == 1, "the thread fuses with the neck into one solid"
+
+
+def test_an_internal_thread_is_a_cutter_for_a_cap(cmd):
+    r = run("import Part\nfrom freecad_bridge.checks import measure\nc = parts['ThreadCutter']\n"
+            "cap = Part.makeCylinder(20, 10).cut(c)\n"
+            "_result = [bool(cap.isValid()), len(cap.Solids), measure.thread_pitch(cap, [13.0, 16.5]), box(c)]",
+            cmd, "thread", kind="internal", major=32.0, pitch=3.0, length=8.0)
+    assert r[0] and r[1] == 1
+    assert r[2]["pitch"] == pytest.approx(3.0, abs=0.3), r
+    assert r[3][2] == pytest.approx(32.3, abs=0.2), "the cutter is the clearance wider than the thread"

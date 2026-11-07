@@ -228,6 +228,23 @@ def bolt_nut(p: dict[str, Any], iso: dict[str, Any]) -> dict[str, Any]:
     return {"Bolt": the_bolt, "Nut": the_nut}
 
 
+def thread(p: dict[str, Any]) -> dict[str, Any]:
+    """An external thread as a solid from z = 0 to length (chamfered lead-in at the top, optionally on a
+    thicker core), or an internal thread as a cutter that reaches a pitch beyond both ends."""
+    major, pitch, length = p["major"], p["pitch"], p["length"]
+    if p["kind"] == "internal":
+        return {"ThreadCutter": _thread(major, pitch, length, p["clearance"])}
+    solid = _thread(major, pitch, length).common(Part.makeCylinder(major, length))
+    lead = THREAD_DEPTH * pitch + 0.2
+    tip = Part.makeCone(major / 2 + 0.2, major / 2 - THREAD_DEPTH * pitch, lead, V(0, 0, length - lead))
+    rest = Part.makeCylinder(major, length - lead)
+    solid = solid.common(tip.fuse(rest))
+    core = float(p.get("core") or 0.0)
+    if core > major - 2 * THREAD_DEPTH * pitch:
+        solid = solid.fuse(Part.makeCylinder(core / 2, length))
+    return {"Thread": solid.removeSplitter()}
+
+
 def _countersunk(screw: float, depth: float, x: float, y: float, top: float, up: bool = True) -> Any:
     """Through hole with a 90° countersink opening at z = top."""
     head = screw * 2
@@ -403,6 +420,8 @@ def build(family: str, p: dict[str, Any], iso: dict[str, Any], strain: dict[str,
         return snap_box(p, strain)
     if family == "faired_body":
         return faired_body(p)
+    if family == "thread":
+        return thread(p)
     return {"gear_pair": gear_pair, "spring": spring, "hinge": hinge, "enclosure": enclosure, "bracket": bracket,
             "knob": knob}[family](p)
 

@@ -790,20 +790,24 @@ _result = {{"group": _grp.Name, "parts": _made}}
 
 @mcp.tool(annotations=WRITE, structured_output=False)
 async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | None = None, smooth: int = 4,
-                 preview: bool = True, doc: str | None = None, instance: int | None = None) -> list[Any]:
+                 one_piece: bool = False, preview: bool = True, doc: str | None = None,
+                 instance: int | None = None) -> list[Any]:
     """Organic shapes (people, animals, faces, hair, plants, rocks) from primitives that melt into
     each other like clay; every person or animal starts from a template: scene = {"template":
     "person_standing" | "dog_standing" | "cat_sitting", "height": mm, "parts": [{"name", "color",
     "fur", "primitives": [...]}]}, a part with a template part's name changes it. Primitives (mm):
     sphere, ellipsoid, capsule, strand, box, torus, cylinder, each with op add|subtract and its own
     blend; "detail" adds skin texture, "fur" carves grooves along the flow. The grammar and the rules
-    that make it look real are in references/organic.md of the freecad skill. The meshes are computed
-    outside FreeCAD and imported as Mesh objects in a group (one undo step). The answer carries a
-    front and side preview: look at it, do not take another picture."""
+    that make it look real are in references/organic.md of the freecad skill. one_piece=true unites
+    every part into one closed mesh for printing (each part keeps its fur and blend; the first part's
+    colour). The meshes are computed outside FreeCAD and imported as Mesh objects in a group (one undo
+    step). The answer carries a front and side preview: look at it, do not take another picture."""
     from . import sculpt as sculpt_mod
 
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name) or "Sculpt"
     out_dir = os.path.join(str(platforms.bridge_dir()), "sculpt", f"{safe}-{time.strftime('%Y%m%d-%H%M%S')}")
+    if one_piece:
+        scene = {**scene, "one_piece": True}
     try:
         res = await anyio.to_thread.run_sync(lambda: sculpt_mod.sculpt_scene(scene, out_dir, voxel_mm, smooth))
     except ValueError as e:

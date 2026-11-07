@@ -125,6 +125,7 @@ def total_memory() -> int:
             ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))  # type: ignore[attr-defined]
             return int(st.ullTotalPhys)
         with open("/proc/meminfo") as f:
-            return int(re.search(r"MemTotal:\s+(\d+)", f.read())[1]) * 1024
+            found = re.search(r"MemTotal:\s+(\d+)", f.read())
+            return int(found[1]) * 1024 if found else 0
     except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
         return 0

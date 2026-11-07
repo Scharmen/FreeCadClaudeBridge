@@ -34,6 +34,12 @@ FAMILIES: dict[str, dict[str, Any]] = {
             "params": {"size": "M8", "clearance": 0.3}},
     "bolt_nut": {"doc": "A bolt with its nut screwed on, nut_at mm below the head.",
                  "params": {"size": "M8", "length": 30.0, "nut_at": 10.0, "clearance": 0.3}},
+    "thread": {"doc": "A thread on any diameter: external (a bottle neck, a lid, a screw-in plug) as a solid to "
+                      "fuse onto the neck, from z = 0 up with a lead-in chamfer at the top; internal as a cutter to "
+                      "subtract from a cap or a hole, clearance wider for printing. major = outside diameter, core = "
+                      "diameter of the neck under an external thread (0: the thread's minor diameter).",
+               "params": {"major": 32.0, "pitch": 3.0, "length": 9.0, "kind": "external", "core": 0.0,
+                          "clearance": 0.3}},
     "hinge": {"doc": "Pin hinge opened flat: two leaves, knuckles, a separate pin, countersunk screw holes.",
               "params": {"length": 40.0, "leaf_width": 20.0, "thickness": 3.0, "pin": 3.0, "gap": 0.3, "knuckles": 5,
                          "screw": 4.0}},
@@ -104,6 +110,16 @@ def _validate(family: str, p: dict[str, Any]) -> None:
         raise ValueError("a hinge needs an odd number of knuckles, so that one leaf holds both ends of the pin")
     if family == "faired_body":
         _validate_lines(p)
+    if family == "thread":
+        if p["kind"] not in ("external", "internal"):
+            raise ValueError("kind must be external or internal")
+        if p["pitch"] <= 0 or p["length"] <= 0:
+            raise ValueError("pitch and length must be positive")
+        if p["major"] < 4 * p["pitch"]:
+            raise ValueError(f"a pitch of {p['pitch']:g} is too coarse for {p['major']:g} mm: the thread depth would "
+                             "eat the core (major must be at least 4 × pitch)")
+        if p["core"] and p["core"] >= p["major"]:
+            raise ValueError("core must be smaller than major")
     if family == "knob" and p["shaft"] + 4 >= p["diameter"]:
         raise ValueError("the knob needs at least 2 mm of wall around the shaft")
 

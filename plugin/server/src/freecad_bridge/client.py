@@ -151,7 +151,7 @@ def pick_instance(pid: int | None = None) -> Instance:
 
 def connect(inst: Instance, timeout: float) -> socket.socket:
     if inst.transport == "unix":
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock = socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM)   # noqa: B009 - absent on Windows
         target: Any = inst.address
     else:
         host, port = inst.address.rsplit(":", 1)

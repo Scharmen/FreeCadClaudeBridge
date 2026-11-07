@@ -54,3 +54,13 @@ def test_faired_body_keeps_its_lines():
     lines = [LINE(0), {**LINE(5), "crease": True}, LINE(0)]
     p = catalog.resolve("faired_body", {"lines": lines, "name": "Lower"})
     assert p["lines"] == lines and p["poles"] == 13 and p["name"] == "Lower"
+
+
+def test_a_thread_family_covers_bottle_necks_and_caps():
+    p = catalog.resolve("thread", {"major": 32, "pitch": 3, "length": 4.5})
+    assert p["kind"] == "external" and p["clearance"] == 0.3 and p["major"] == 32.0
+    assert "thread" in catalog.describe() and "neck" in catalog.describe()["thread"]["what"]
+    with pytest.raises(ValueError, match="kind"):
+        catalog.resolve("thread", {"kind": "sideways"})
+    with pytest.raises(ValueError, match="pitch"):
+        catalog.resolve("thread", {"major": 6, "pitch": 3})
