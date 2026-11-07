@@ -85,6 +85,7 @@ def test_export_creates_files_and_a_guide(tmp_path):
 from claudebridge.printkit import dialog
 d = dialog.PrintDialog(doc)
 opts = d.options()
+opts["split"] = True
 d.deleteLater()
 _result = dialog.export_now(doc, opts, {folder!r})
 """, timeout_s=280)
@@ -98,12 +99,45 @@ _result = dialog.export_now(doc, opts, {folder!r})
     assert (Path(folder) / report["whole"]["file"]).is_file()
 
 
+def test_one_print_needs_no_split_and_still_gets_a_guide(tmp_path):
+    folder = tmp_path / "kit"
+    r = py(f"""
+from claudebridge.printkit import dialog
+d = dialog.PrintDialog(doc)
+opts = d.options()
+opts["split"] = False
+d.deleteLater()
+_result = dialog.export_now(doc, opts, {str(folder)!r})
+""", timeout_s=280)
+    assert r["ok"], r
+    assert r["pieces"] == 5, "one print and four wheels"
+    assert Path(r["guide"]).read_bytes()[:4] == b"%PDF"
+    report = json.loads((folder / "report.json").read_text())
+    assert report["pieces"] == [] and report["joints"] == []
+    assert (folder / report["together"]["file"]).is_file()
+
+
+def test_the_dialog_splits_by_default_only_when_one_print_cannot_work():
+    r = py("""
+from claudebridge.printkit import dialog
+d = dialog.PrintDialog(doc)
+d.printer.setCurrentText("Bambu Lab P1S / X1C")
+many = d.split.isChecked()
+d.printer.setCurrentText("Creality Ender 3")
+one = d.split.isChecked()
+d.deleteLater()
+_result = [many, one]
+""")
+    assert r == [False, True]
+
+
 def test_the_guide_is_written_in_both_languages(tmp_path):
     r = py(f"""
 import json
 from claudebridge.printkit import dialog, guide
 d = dialog.PrintDialog(doc)
 opts = d.options()
+opts["split"] = True
 d.deleteLater()
 out = dialog.export_now(doc, opts, {str(tmp_path / 'kit')!r})
 report = json.load(open({str(tmp_path / 'kit' / 'report.json')!r}))
