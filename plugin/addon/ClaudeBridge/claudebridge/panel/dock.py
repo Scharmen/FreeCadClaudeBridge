@@ -631,12 +631,13 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         if kind not in ("text_delta", "thinking_delta"):
             debuglog.log("event", **{k: v for k, v in ev.items() if k != "content"})
         was = self.activity.phase
-        self.activity.on_event(ev, time.time())
+        progressed = self.activity.on_event(ev, time.time())
         self.usage.on_event(ev)
         if kind in ("rate_limit", "result"):
             self._save_usage()
             self._update_mode_label()
-        self.stall_noted = False
+        if progressed:            # a thinking update that repeats its token count does not end a stall
+            self.stall_noted = False
         if was == "thinking" and self.activity.phase != "thinking":
             self._thought_line()
         if kind not in ("text_delta", "text", "thinking_delta", "thinking_start"):
@@ -774,6 +775,10 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
 
         limit = bsettings.load(bpaths.bridge_dir())["chat.stall_seconds"]
         ex = _executor()
+        note = self.activity.long_thinking(now, activity.LONG_THINKING_SECONDS)
+        if note:
+            debuglog.log("long_thinking", note=note)
+            self._note(f"💭 {note}")
         warning = self.activity.stall(now, limit, freecad_busy=bool(ex and ex.busy))
         if warning and not self.stall_noted:
             self.stall_noted = True

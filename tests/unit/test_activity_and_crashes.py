@@ -66,6 +66,55 @@ def test_stall_detection_tells_freecad_work_from_silence():
     assert a.stall(now=900, limit=90) is None, "waiting for the user is not a stall"
 
 
+def think(a, tokens, now):
+    return a.on_event({"kind": "thinking_delta", "text": "", "tokens": tokens}, now=now)
+
+
+def test_long_thinking_shows_that_the_token_count_still_grows():
+    a = activity.Activity()
+    a.start(now=0)
+    a.on_event({"kind": "thinking_start"}, now=1)
+    for t in range(2, 722, 2):                       # 12 minutes, 40 tokens a second
+        assert think(a, 40 * (t - 1), now=t), "a growing count is progress"
+    line = a.describe(now=721)
+    assert line.startswith("Thinking · 12:00 · ~28.8k tokens") and "+40/s" in line, line
+    assert a.stall(now=721, limit=120) is None
+
+
+def test_thinking_whose_count_stops_growing_is_a_stall_even_with_events():
+    a = activity.Activity()
+    a.start(now=0)
+    a.on_event({"kind": "thinking_start"}, now=1)
+    think(a, 5000, now=10)
+    for t in range(12, 300, 2):                      # updates keep coming, the count does not move
+        assert not think(a, 5000, now=t), "the same count again is no progress"
+    line = a.describe(now=300)
+    assert "no new tokens for 4:50" in line and "/s" not in line, line
+    msg = a.stall(now=300, limit=120)
+    assert msg and "not grown for 4:50" in msg and "~5k tokens" in msg, msg
+
+
+def test_thinking_without_token_estimates_still_counts_as_alive():
+    a = activity.Activity()
+    a.start(now=0)
+    a.on_event({"kind": "thinking_start"}, now=1)
+    for t in range(2, 400, 5):
+        assert a.on_event({"kind": "thinking_delta", "text": "hm"}, now=t)
+    assert a.stall(now=400, limit=120) is None
+
+
+def test_long_thinking_gets_one_note_that_it_is_still_planning():
+    a = activity.Activity()
+    a.start(now=0)
+    a.on_event({"kind": "thinking_start"}, now=0)
+    for t in range(1, 302):
+        think(a, 30 * t, now=t)
+    assert a.long_thinking(now=200, after=300) is None
+    note = a.long_thinking(now=301, after=300)
+    assert note and "5:01" in note and "still growing" in note and "Stop" in note, note
+    assert a.long_thinking(now=400, after=300) is None, "said once per thinking block"
+
+
 # ---------- crash markers
 
 def test_crash_marker_found_for_a_dead_process(tmp_path):

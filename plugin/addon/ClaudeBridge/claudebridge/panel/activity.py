@@ -11,6 +11,9 @@ from .stream import short_tool_name
 from .usage import short
 
 LONG_TOOLS = {"run_headless", "export", "import"}     # may legitimately run for minutes
+RATE_WINDOW = 10.0       # seconds of token samples behind the "+N/s" in the status line
+QUIET_SHOWN = 15.0       # from this many seconds without new tokens the status line says so
+LONG_THINKING_SECONDS = 300.0   # after this much thinking the chat says once that Claude is still at it
 
 
 def _clock(seconds: float) -> str:
@@ -30,9 +33,13 @@ class Activity:
         self.done_tokens: dict[str, int] = {}   # real output tokens per API call of this turn
         self.thinking_since: float | None = None
         self.last_thought_seconds: int | None = None
+        self.progress_at = 0.0         # last real progress: a new token, text, a tool step (not a repeated count)
+        self.samples: list[tuple[float, int]] = []   # (time, tokens so far) while thinking, for the rate
+        self.long_noted = False
 
     def start(self, now: float) -> None:
-        self.started = self.last_event = self.since = now
+        self.started = self.last_event = self.since = self.progress_at = now
+        self.samples, self.long_noted = [], False
         self.phase, self.tool, self.tool_id, self.tokens = "starting", "", None, 0
         self.done_tokens = {}
 
@@ -42,6 +49,7 @@ class Activity:
     def alive(self, now: float) -> None:
         """Count as a sign of life (FreeCAD was busy computing and could not update the window)."""
         self.last_event = max(self.last_event, now)
+        self.progress_at = max(self.progress_at, now)
 
     def _set(self, phase: str, now: float) -> None:
         if self.phase == "thinking" and phase != "thinking" and self.thinking_since is not None:
@@ -50,14 +58,25 @@ class Activity:
         if phase != self.phase:
             self.phase, self.since = phase, now
 
-    def on_event(self, ev: dict[str, Any], now: float) -> None:
+    def thought_tokens(self) -> int:
+        return sum(self.done_tokens.values()) + self.tokens
+
+    def on_event(self, ev: dict[str, Any], now: float) -> bool:
+        """Take one event; True when it is real progress (a thinking update that repeats the count is not)."""
         kind = ev.get("kind")
         self.last_event = now
+        progress = True
         if kind in ("thinking_start", "thinking_delta"):
             if self.phase != "thinking":
                 self.thinking_since, self.tokens = now, 0
+                self.samples, self.long_noted = [], False
             self._set("thinking", now)
-            self.tokens = max(self.tokens, int(ev.get("tokens") or 0))
+            if kind == "thinking_delta" and ev.get("tokens") is not None:
+                count = int(ev.get("tokens") or 0)
+                progress = count > self.tokens
+                self.tokens = max(self.tokens, count)
+                self.samples.append((now, self.thought_tokens()))
+                self.samples = [s for s in self.samples if s[0] >= now - RATE_WINDOW]
         elif kind == "usage":
             msg = ev.get("message") or "?"
             out = int(ev.get("output") or 0)
@@ -77,13 +96,29 @@ class Activity:
             self._set("approval", now)
         elif kind == "result":
             self._set("idle", now)
+        if progress:
+            self.progress_at = now
+        return progress
+
+    def rate(self) -> float:
+        """Thinking tokens per second over the last few seconds of updates (0 when there are too few)."""
+        if len(self.samples) < 2 or self.samples[-1][0] - self.samples[0][0] < 2:
+            return 0.0
+        (t0, n0), (t1, n1) = self.samples[0], self.samples[-1]
+        return max(0.0, (n1 - n0) / (t1 - t0))
 
     def describe(self, now: float) -> str:
         total = _clock(now - self.started)
         if self.phase == "thinking":
             text = f"Thinking · {_clock(now - self.since)}"
-            total = sum(self.done_tokens.values()) + self.tokens
-            return text + (f" · ~{short(total)} tokens" if total else "")
+            count = self.thought_tokens()
+            if count:
+                text += f" · ~{short(count)} tokens"
+            quiet = now - self.progress_at
+            if quiet >= QUIET_SHOWN:
+                return text + f" · no new tokens for {_clock(quiet)}"
+            rate = self.rate()
+            return text + (f" · +{rate:.0f}/s" if rate >= 1 else "")
         if self.phase == "tool":
             return f"Running {self.tool} ({int(now - self.since)} s) · {total}"
         if self.phase == "writing":
@@ -94,9 +129,33 @@ class Activity:
             return f"Starting the next step · {total}" if now - self.started > 2 else f"Starting · {total}"
         return ""
 
+    def long_thinking(self, now: float, after: float) -> str | None:
+        """Once per thinking block that runs past `after` seconds while its count still grows: say it is alive."""
+        if (self.phase != "thinking" or self.long_noted or now - self.since < after
+                or now - self.progress_at >= QUIET_SHOWN):
+            return None
+        self.long_noted = True
+        rate = self.rate()
+        speed = f", +{rate:.0f} a second" if rate >= 1 else ""
+        return (f"Claude has been thinking for {_clock(now - self.since)} and is not stuck: its plan is still "
+                f"growing (~{short(self.thought_tokens())} tokens{speed}). Big designs can take several minutes. "
+                "Stop ends it; a lower Effort answers sooner.")
+
     def stall(self, now: float, limit: float, freecad_busy: bool = False) -> str | None:
-        """A warning when nothing happened for `limit` seconds, or None (waiting for the user is fine)."""
-        if self.phase in ("idle", "approval") or now - self.last_event < limit:
+        """A warning when nothing happened for `limit` seconds, or None (waiting for the user is fine).
+
+        While thinking, updates that repeat the same token count do not count: only a growing count does.
+        """
+        if self.phase in ("idle", "approval"):
+            return None
+        if self.phase == "thinking":
+            if now - self.progress_at < limit:
+                return None
+            quiet = _clock(now - self.progress_at)
+            return (f"Claude has been thinking for {_clock(now - self.since)}, but its token count has not grown "
+                    f"for {quiet} (~{short(self.thought_tokens())} tokens). It may be stuck: Stop, or create a "
+                    "debug report.")
+        if now - self.last_event < limit:
             return None
         quiet = _clock(now - self.last_event)
         if self.phase == "tool" and self.tool in LONG_TOOLS:
