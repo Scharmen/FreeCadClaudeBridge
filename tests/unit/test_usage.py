@@ -100,7 +100,7 @@ def test_thinking_shows_the_turns_real_tokens_plus_the_running_estimate():
     for ev in feed(start("m1", 40000), delta(3000, 2000)):
         a.on_event(ev, now=101)
     a.on_event({"kind": "thinking_start"}, now=102)
-    a.on_event({"kind": "thinking_delta", "text": "", "tokens": 1500}, now=110)
+    a.on_event({"kind": "thinking_delta", "text": "", "step": 1500}, now=110)
     assert a.describe(now=112) == "Thinking · 0:10 · ~4.5k tokens"
 
 

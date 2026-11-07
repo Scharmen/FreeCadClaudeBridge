@@ -19,12 +19,24 @@ def test_thinking_progress_and_status_events():
                                                   "content_block": {"type": "thinking", "thinking": ""}}},
                {"type": "stream_event", "event": {"type": "content_block_delta",
                                                   "delta": {"type": "thinking_delta", "thinking": "",
-                                                            "estimated_tokens": 1200}}},
+                                                            "estimated_tokens": 150}}},
+               {"type": "system", "subtype": "thinking_tokens", "estimated_tokens": 1200,
+                "estimated_tokens_delta": 150},
                {"type": "system", "subtype": "status", "status": "requesting"})
     kinds = [e["kind"] for e in evs]
     assert "thinking_start" in kinds and {"kind": "status", "status": "requesting"} in evs
     delta = next(e for e in evs if e["kind"] == "thinking_delta")
-    assert delta["tokens"] == 1200 and delta["text"] == ""
+    assert delta["step"] == 150 and delta["text"] == "", "Claude Code sends the size of each step, not a total"
+    assert "system" not in kinds, "the running total arrives every second and is not worth a log line"
+
+
+def test_api_retries_and_unknown_system_events_reach_the_panel():
+    evs = feed({"type": "system", "subtype": "api_retry", "attempt": 2, "max_retries": 10, "retry_delay_ms": 18000,
+                "error_status": 529, "error": "overloaded"},
+               {"type": "system", "subtype": "something_new", "x": 1})
+    assert evs[0] == {"kind": "api_retry", "attempt": 2, "max_retries": 10, "delay_s": 18.0, "status": 529,
+                      "error": "overloaded"}
+    assert evs[1] == {"kind": "system", "subtype": "something_new"}
 
 
 def test_activity_describes_the_current_step():
@@ -32,8 +44,9 @@ def test_activity_describes_the_current_step():
     a.start(now=100)
     assert a.describe(now=101).startswith("Starting")
     a.on_event({"kind": "thinking_start"}, now=102)
-    a.on_event({"kind": "thinking_delta", "text": "", "tokens": 1500}, now=110)
-    assert a.describe(now=112) == "Thinking · 0:10 · ~1.5k tokens"   # since thinking began
+    a.on_event({"kind": "thinking_delta", "text": "", "step": 1000}, now=108)
+    a.on_event({"kind": "thinking_delta", "text": "", "step": 500}, now=110)
+    assert a.describe(now=112) == "Thinking · 0:10 · ~1.5k tokens · +250/s"   # the steps add up
     a.on_event({"kind": "tool_use", "id": "t1", "name": "mcp__plugin_freecad_freecad__run_python",
                 "input": {}}, now=120)
     assert a.describe(now=135) == "Running run_python (15 s) · 0:35"
@@ -66,16 +79,16 @@ def test_stall_detection_tells_freecad_work_from_silence():
     assert a.stall(now=900, limit=90) is None, "waiting for the user is not a stall"
 
 
-def think(a, tokens, now):
-    return a.on_event({"kind": "thinking_delta", "text": "", "tokens": tokens}, now=now)
+def think(a, step, now):
+    return a.on_event({"kind": "thinking_delta", "text": "", "step": step}, now=now)
 
 
 def test_long_thinking_shows_that_the_token_count_still_grows():
     a = activity.Activity()
     a.start(now=0)
     a.on_event({"kind": "thinking_start"}, now=1)
-    for t in range(2, 722, 2):                       # 12 minutes, 40 tokens a second
-        assert think(a, 40 * (t - 1), now=t), "a growing count is progress"
+    for t in range(2, 722, 2):                       # 12 minutes, 40 tokens a second, in steps of 80
+        assert think(a, 80, now=t), "a step that adds tokens is progress"
     line = a.describe(now=721)
     assert line.startswith("Thinking · 12:00 · ~28.8k tokens") and "+40/s" in line, line
     assert a.stall(now=721, limit=120) is None
@@ -87,7 +100,7 @@ def test_thinking_whose_count_stops_growing_is_a_stall_even_with_events():
     a.on_event({"kind": "thinking_start"}, now=1)
     think(a, 5000, now=10)
     for t in range(12, 300, 2):                      # updates keep coming, the count does not move
-        assert not think(a, 5000, now=t), "the same count again is no progress"
+        assert not think(a, 0, now=t), "an empty step is no progress"
     line = a.describe(now=300)
     assert "no new tokens for 4:50" in line and "/s" not in line, line
     msg = a.stall(now=300, limit=120)
@@ -108,11 +121,25 @@ def test_long_thinking_gets_one_note_that_it_is_still_planning():
     a.start(now=0)
     a.on_event({"kind": "thinking_start"}, now=0)
     for t in range(1, 302):
-        think(a, 30 * t, now=t)
+        think(a, 30, now=t)
     assert a.long_thinking(now=200, after=300) is None
     note = a.long_thinking(now=301, after=300)
     assert note and "5:01" in note and "still growing" in note and "Stop" in note, note
     assert a.long_thinking(now=400, after=300) is None, "said once per thinking block"
+
+
+def test_an_api_retry_is_shown_with_its_countdown_and_is_no_stall():
+    a = activity.Activity()
+    a.start(now=0)
+    a.on_event({"kind": "thinking_start"}, now=1)
+    think(a, 150, now=2)
+    a.on_event({"kind": "api_retry", "attempt": 2, "max_retries": 10, "delay_s": 300.0, "status": 529,
+                "error": "overloaded"}, now=10)
+    assert a.describe(now=20) == "API error 529 (overloaded) · retry 2 of 10 in 4:50 · 0:20"
+    assert a.stall(now=200, limit=120) is None, "waiting for a retry Claude Code announced is no stall"
+    a.on_event({"kind": "thinking_start"}, now=311)
+    think(a, 50, now=312)
+    assert a.describe(now=313).startswith("Thinking · 0:02 · ~50 tokens"), "the retry starts a fresh count"
 
 
 # ---------- crash markers

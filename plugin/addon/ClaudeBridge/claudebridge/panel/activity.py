@@ -25,11 +25,13 @@ class Activity:
     def __init__(self) -> None:
         self.started = 0.0
         self.last_event = 0.0
-        self.phase = "idle"            # starting, thinking, writing, tool, approval, idle
+        self.phase = "idle"            # starting, thinking, writing, tool, approval, retrying, idle
         self.since = 0.0
         self.tool = ""
         self.tool_id: str | None = None
-        self.tokens = 0                # estimate for the thinking block in progress
+        self.tokens = 0                # estimate for the thinking block in progress (sum of its steps)
+        self.retry: dict[str, Any] = {}
+        self.retry_at = 0.0
         self.done_tokens: dict[str, int] = {}   # real output tokens per API call of this turn
         self.thinking_since: float | None = None
         self.last_thought_seconds: int | None = None
@@ -71,12 +73,13 @@ class Activity:
                 self.thinking_since, self.tokens = now, 0
                 self.samples, self.long_noted = [], False
             self._set("thinking", now)
-            if kind == "thinking_delta" and ev.get("tokens") is not None:
-                count = int(ev.get("tokens") or 0)
-                progress = count > self.tokens
-                self.tokens = max(self.tokens, count)
-                self.samples.append((now, self.thought_tokens()))
-                self.samples = [s for s in self.samples if s[0] >= now - RATE_WINDOW]
+            if kind == "thinking_delta":
+                step = int(ev.get("step") or 0)
+                progress = step > 0 or bool(ev.get("text"))
+                self.tokens += step
+                if "step" in ev:
+                    self.samples.append((now, self.thought_tokens()))
+                    self.samples = [s for s in self.samples if s[0] >= now - RATE_WINDOW]
         elif kind == "usage":
             msg = ev.get("message") or "?"
             out = int(ev.get("output") or 0)
@@ -94,10 +97,16 @@ class Activity:
             self.tool_id = None
         elif kind == "permission_request":
             self._set("approval", now)
+        elif kind == "api_retry":
+            self._set("retrying", now)
+            self.retry = ev
+            self.retry_at = now + float(ev.get("delay_s") or 0)
         elif kind == "result":
             self._set("idle", now)
         if progress:
             self.progress_at = now
+        if kind == "api_retry":           # Claude Code said when it tries again: quiet until then is expected
+            self.last_event = self.progress_at = max(now, self.retry_at)
         return progress
 
     def rate(self) -> float:
@@ -125,6 +134,12 @@ class Activity:
             return f"Writing the answer · {total}"
         if self.phase == "approval":
             return f"Waiting for your approval · {total}"
+        if self.phase == "retrying":
+            r = self.retry
+            what = f"API error {r['status']}" if r.get("status") else "No answer from the API"
+            what += f" ({r['error']})" if r.get("error") else ""
+            wait = f" in {_clock(self.retry_at - now)}" if self.retry_at > now else ""
+            return f"{what} · retry {r.get('attempt')} of {r.get('max_retries')}{wait} · {total}"
         if self.phase == "starting":
             return f"Starting the next step · {total}" if now - self.started > 2 else f"Starting · {total}"
         return ""

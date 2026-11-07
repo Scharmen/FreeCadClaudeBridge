@@ -696,6 +696,12 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
                 self._append(f"<div style='color:#2a7'>✓ <code>{html.escape(name)}</code> {dt:.1f} s</div>")
         elif kind == "permission_request":
             self._permission_card(ev)
+        elif kind == "api_retry":
+            what = f"error {ev['status']}" if ev.get("status") else "no answer"
+            what += f" ({ev['error']})" if ev.get("error") else ""
+            self._note(f"⚠ The Claude API answered with {what}. Claude Code tries again in "
+                       f"{ev.get('delay_s', 0):.0f} s (attempt {ev.get('attempt')} of {ev.get('max_retries')}).",
+                       error=True)
         elif kind == "permission_denied":
             self._note(f"Not allowed by your Claude Code settings: {ev.get('tool')}", error=True)
         elif kind == "control_response" and not ev.get("ok"):

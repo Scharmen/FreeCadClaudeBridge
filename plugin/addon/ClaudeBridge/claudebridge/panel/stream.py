@@ -18,7 +18,9 @@ Full chat (persistent session, --input-format stream-json):
   permission_request  request_id, tool, input, suggestions, summary, reason, tool_use_id
   control_request     request_id, subtype, request (other requests from Claude Code)
   control_response    request_id, ok, response, error
-  thinking_delta      text
+  thinking_delta      text, step (estimated tokens this step adds; Claude Code sends no thinking text)
+  api_retry           attempt, max_retries, delay_s, status, error (Claude Code retries a failed request)
+  system              subtype (any other system event, for the debug log)
   todos               items (from TodoWrite)
 
 Builders for the session's stdin: user_message, control_request, permission_response;
@@ -75,6 +77,15 @@ class StreamParser:
             return [{"kind": "permission_denied",
                      "tool": ev.get("tool_name") or ev.get("tool") or "?",
                      "message": ev.get("message") or ev.get("reason") or ""}]
+        if t == "system" and sub == "api_retry":
+            return [{"kind": "api_retry", "attempt": int(ev.get("attempt") or 0),
+                     "max_retries": int(ev.get("max_retries") or 0),
+                     "delay_s": round(float(ev.get("retry_delay_ms") or 0) / 1000, 1),
+                     "status": ev.get("error_status"), "error": str(ev.get("error") or "")}]
+        if t == "system" and sub == "thinking_tokens":
+            return []          # the running total, every second; the thinking deltas carry the same steps
+        if t == "system":
+            return [{"kind": "system", "subtype": sub}]
         if t == "stream_event":
             return self._stream_event(ev.get("event") or {})
         if t == "assistant":
@@ -115,8 +126,8 @@ class StreamParser:
             return [{"kind": "text_delta", "text": delta.get("text", "")}]
         if e.get("type") == "content_block_delta" and delta.get("type") == "thinking_delta":
             out = {"kind": "thinking_delta", "text": delta.get("thinking", "")}
-            if delta.get("estimated_tokens") is not None:     # Claude Code sends no thinking text, only progress
-                out["tokens"] = delta["estimated_tokens"]
+            if delta.get("estimated_tokens") is not None:     # no thinking text, only the size of this step
+                out["step"] = delta["estimated_tokens"]
             return [out]
         return []
 
