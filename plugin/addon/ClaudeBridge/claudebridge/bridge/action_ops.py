@@ -232,6 +232,8 @@ def _view(args: dict[str, Any], ex: Any) -> dict[str, Any]:
                 Gui.Selection.addSelection(d, n, sub)
     zoom = float(args.get("zoom") or 1.0)
     if zoom > 0 and zoom != 1.0:
+        from pivy import coin  # noqa: F401  (loads the Coin wrappers; without it getCameraNode fails in a fresh FreeCAD)
+
         cam = v.getCameraNode()
         for field in ("height", "heightAngle"):
             if hasattr(cam, field):

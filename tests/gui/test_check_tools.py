@@ -68,9 +68,9 @@ def test_check_design_reports_what_is_wrong_and_changes_nothing():
     assert state() == before, "no undo step, no new object, no file name"
 
 
-def test_a_wrong_spec_key_is_explained():
-    with pytest.raises(Exception, match="unknown spec keys"):
-        anyio.run(lambda: mcp_server.check_design(doc=DOC, spec={"hight": [1, 2]}))
+def test_a_wrong_spec_key_is_named_and_the_rest_is_checked():
+    res = tool(mcp_server.check_design, spec={"hight": [1, 2], "solids": [1, 50]})
+    assert res["ok"] and res["ignored_spec_keys"] == ["hight"]
 
 
 def test_check_print_finds_a_thin_wall_where_it_is():
