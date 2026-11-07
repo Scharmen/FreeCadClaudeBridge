@@ -521,7 +521,8 @@ def _write_stl(mesh: Any, path: str) -> None:
     mesh.write(path)
 
 
-def _whole(items: list[Item], printer: dict[str, Any], name: str, out_dir: str, folder: str) -> dict[str, Any]:
+def _whole(items: list[Item], printer: dict[str, Any], name: str, out_dir: str, folder: str,
+           lang: str = "de") -> dict[str, Any]:
     colors = {it.name: it.color for it in items}
     slots = plan.assign_slots(colors, int(printer["slots"]))
     palette = plan.slot_colors(colors, slots)
@@ -536,13 +537,14 @@ def _whole(items: list[Item], printer: dict[str, Any], name: str, out_dir: str, 
     bed = printer["bed"]
     shift = ((bed[0] - size[0]) / 2 - x0, (bed[1] - size[1]) / 2 - y0, -z0)
     parts = [(it.label, slots[it.name], *_triangles(m)) for it, m in meshes]
-    rel = os.path.join(folder, f"{_safe_name(name)}_komplett.3mf")
+    word = "komplett" if lang == "de" else "complete"
+    rel = os.path.join(folder, f"{_safe_name(name)}_{word}.3mf")
     threemf.write(os.path.join(out_dir, rel), [(name, parts, shift)], palette)
     whole = Mesh.Mesh()
     for _, m in meshes:
         whole.addMesh(m)
     whole.translate(*shift)
-    stl = os.path.join(folder, f"{_safe_name(name)}_komplett.stl")
+    stl = os.path.join(folder, f"{_safe_name(name)}_{word}.stl")
     whole.write(os.path.join(out_dir, stl))
     fits = all(s <= b for s, b in zip(size, bed, strict=True))
     return {"file": rel, "stl": stl, "size_mm": [round(s, 1) for s in size], "fits": fits, "colors": len(palette),
@@ -613,7 +615,7 @@ def run(path: str, options: dict[str, Any], out_dir: str) -> dict[str, Any]:
         _clean_overlaps(items, warn, lang)
         _step("overlaps cleaned")
         if options.get("whole", True):
-            report["whole"] = _whole(items, printer, name, out_dir, folders["whole"])
+            report["whole"] = _whole(items, printer, name, out_dir, folders["whole"], lang)
             _step("whole model written")
         if options.get("split", True):
             _split(items, options, report, lim, folders, out_dir, warn, lang)
@@ -721,11 +723,13 @@ def _split(items: list[Item], options: dict[str, Any], report: dict[str, Any], l
         pins = [(ln, lim["dowel_d"], False) for ln in lengths] + [(max(lengths), lim["dowel_d"], False)] * spare
         report["dowels"] = {"count": len(lengths), "spare": spare, "d": lim["dowel_d"], "lengths": sorted(set(lengths)),
                             "hole_d": lim["dowel_d"] + lim["hole_gap"],
-                            "file": _connector_plate(pins, out_dir, folders["joints"], "Stifte", printer)}
+                            "file": _connector_plate(pins, out_dir, folders["joints"],
+                                                    "Stifte" if lang == "de" else "Pins", printer)}
     if axles:
         pins = [(a["length"], a["d"], a["kind"] == "headed") for a in axles]
         report["axles"] = {"count": len(axles), "items": axles,
-                           "file": _connector_plate(pins, out_dir, folders["joints"], "Achsen", printer)}
+                           "file": _connector_plate(pins, out_dir, folders["joints"],
+                                                   "Achsen" if lang == "de" else "Axles", printer)}
     size = {p["id"]: p["size_mm"][0] * p["size_mm"][1] * p["size_mm"][2] for p in report["pieces"]}
     report["order"] = plan.assembly_order(
         [{"id": p["id"], "volume": size[p["id"]]} for p in report["pieces"] if not p["moving"]], [

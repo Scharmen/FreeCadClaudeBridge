@@ -52,12 +52,12 @@ def cmd():
     return found[0].command
 
 
-def run(cmd, tmp, join="pins", printer=None, moving=True, extra=""):
+def run(cmd, tmp, join="pins", printer=None, moving=True, extra="", lang="de"):
     printer = printer or {"name": "Test", "bed": [250, 250, 250], "nozzle": 0.4, "slots": 4, "process": "fdm"}
     code = (f"import sys\nsys.path.insert(0, {str(ADDON)!r})\nWORK = {str(tmp)!r}\n" + MODEL + extra
             + "from claudebridge.printkit import engine\n"
             + f"_result = engine.run(WORK + '/car.FCStd', {{'colors': COLORS, 'printer': {printer!r}, 'join': {join!r}, "
-            + f"'whole': True, 'split': True, 'moving': MOVING if {moving} else [], 'lang': 'de', 'name': 'Car'}}, "
+            + f"'whole': True, 'split': True, 'moving': MOVING if {moving} else [], 'lang': {lang!r}, 'name': 'Car'}}, "
             + "WORK + '/kit')\n")
     return score.run_freecad(code, cmd)
 
@@ -209,3 +209,10 @@ def test_each_part_says_whether_it_needs_support(pins):
     assert all(isinstance(p["support"], bool) for p in r["pieces"])
     roof = next(p for p in r["pieces"] if p["objects"][0] == "Roof")
     assert roof["support"] is False, "a block lies flat"
+
+
+def test_an_english_export_has_english_file_names(cmd, tmp_path):
+    r = run(cmd, tmp_path, lang="en")
+    names = [r["whole"]["file"], r["dowels"]["file"], r["axles"]["file"], *(p["file"] for p in r["plates"])]
+    assert all(not any(w in n for w in ("Stifte", "Achsen", "komplett", "Farben", "Teile")) for n in names), names
+    assert {p["color_name"] for p in r["plates"]} >= {"Green", "Black", "Silver"}
