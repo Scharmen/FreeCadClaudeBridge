@@ -350,6 +350,17 @@ def test_a_posed_figure_keeps_the_asked_height_and_the_shoes_are_on_the_right_fe
         sculpt.expand_template({"template": "person_standing", "pose": {"tail": 10}})
 
 
+def test_a_raised_sleeve_stays_on_the_shoulder_instead_of_hanging_down():
+    posed = sculpt.expand_template({"template": "person_standing", "height": 80, "pose": {"arm_r": 150}})
+    shirt = next(p for p in posed["parts"] if p["name"] == "Shirt")["primitives"]
+    caps = [q for q in shirt if q["type"] == "capsule" and q.get("op", "add") == "add" and abs(q["a"][0]) > 5
+            and q["a"][0] * q["b"][0] > 0]   # one side only, not the collar across both shoulders
+    right = next(q for q in caps if q["a"][0] < 0)          # the raised sleeve (the figure's right is at -X)
+    left = next(q for q in caps if q["a"][0] > 0)           # its mirror, still at rest
+    assert np.allclose(right["a"], [-left["a"][0], *left["a"][1:]], atol=0.05), "the sleeve starts at the shoulder"
+    assert right["b"][2] > (left["a"][2] + left["b"][2]) / 2, f"and goes up with the arm, not down: {right}"
+
+
 def test_a_posed_template_still_meshes_closed(tmp_path):
     res = sculpt.sculpt_scene({"template": "dog_standing", "height": 30, "pose": {"head": 30, "tail": -40},
                                "one_piece": True}, str(tmp_path), voxel=0.3)

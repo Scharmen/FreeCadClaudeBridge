@@ -931,25 +931,35 @@ def _reference(prim: dict[str, Any]) -> np.ndarray | None:
 
 
 def _pose_parts(parts: list[dict[str, Any]], joint: dict[str, Any], deg: float) -> None:
-    """Turn every primitive whose reference point lies in the joint's box about the joint's pivot and axis."""
+    """Turn every primitive whose reference point lies in the joint's box about the joint's pivot and axis.
+
+    A capsule or strand that crosses the joint keeps its points on the body side of the pivot (behind it,
+    seen from the limb) where they are: a sleeve that starts on the shoulder stays there instead of
+    swinging down beside the torso when the arm goes up.
+    """
     rot = _axis_angle(joint["axis"], deg)
     pivot = np.array([float(x) for x in joint["pivot"]])
     lo, hi = (np.array([float(x) for x in b]) for b in joint["box"])
+    limb = (lo + hi) / 2 - pivot
 
-    def turn(point: Any) -> list[float]:
-        q = pivot + rot @ (np.array([float(x) for x in point]) - pivot)
-        return [float(x) for x in q]
+    def turn(point: Any, anchored: bool = False) -> list[float]:
+        p = np.array([float(x) for x in point])
+        if anchored and float(np.dot(p - pivot, limb)) < 0:
+            return [float(x) for x in p]
+        return [float(x) for x in pivot + rot @ (p - pivot)]
 
     for part in parts:
         for prim in part.get("primitives") or []:
             ref = _reference(prim)
             if ref is None or not (np.all(ref >= lo) and np.all(ref <= hi)):
                 continue
-            for key in ("center", "a", "b"):
+            if "center" in prim:
+                prim["center"] = turn(prim["center"])
+            for key in ("a", "b"):
                 if key in prim:
-                    prim[key] = turn(prim[key])
+                    prim[key] = turn(prim[key], anchored=True)
             if prim.get("points"):
-                prim["points"] = [turn(q) for q in prim["points"]]
+                prim["points"] = [turn(q, anchored=True) for q in prim["points"]]
             if prim.get("type") in ("ellipsoid", "box", "torus"):
                 old = _rotation(prim.get("rotate"))
                 prim["rotate"] = _euler(rot @ old if old is not None else rot)
