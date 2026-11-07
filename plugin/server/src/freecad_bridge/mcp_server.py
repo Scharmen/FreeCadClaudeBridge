@@ -206,10 +206,13 @@ async def get_console(since: int = 0, level: Literal["log", "message", "warning"
 
 
 @mcp.tool(annotations=READ, structured_output=False)
-async def api_help(target: str, instance: int | None = None) -> str:
+async def api_help(target: str | None = None, query: str | None = None, instance: int | None = None) -> str:
     """API of the installed FreeCAD: a Python path (`Part.makeBox`, `Sketcher.Constraint`),
     a type (`PartDesign::Pad`: properties with type and description) or an object name in
     the active document. Use instead of guessing; FreeCAD 1.1 changed some APIs."""
+    target = target or query
+    if not target:
+        raise ToolError("INVALID_ARGS: give target, e.g. 'Part.makeBox', 'PartDesign::Pad' or an object name")
     name = target.strip().removeprefix("mcp__plugin_freecad_freecad__")
     for t in await mcp.list_tools():
         if t.name == name:
@@ -807,11 +810,14 @@ _result = {{"group": _grp.Name, "parts": _made}}
 
 
 @mcp.tool(annotations=WRITE, structured_output=False)
-async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | None = None, smooth: int = 4,
-                 one_piece: bool = False, preview: bool = True, doc: str | None = None,
+async def sculpt(scene: dict[str, Any] | None = None, name: str = "Sculpt", voxel_mm: float | None = None,
+                 smooth: int = 4, one_piece: bool = False, preview: bool = True, template: str | None = None,
+                 height: float | None = None, parts: list[dict[str, Any]] | None = None,
+                 pose: dict[str, float] | None = None, doc: str | None = None,
                  instance: int | None = None) -> list[Any]:
     """Organic shapes (people, animals, faces, hair, plants, rocks) from primitives that melt into
-    each other like clay; every person or animal starts from a template: scene = {"template":
+    each other like clay; every person or animal starts from a template: scene (or the same keys as
+    arguments) = {"template":
     "person_standing" | "dog_standing" | "cat_sitting", "height": mm, "parts": [{"name", "color",
     "fur", "primitives": [...]}]}, a part with a template part's name changes it. Primitives (mm):
     sphere, ellipsoid, capsule, strand, box, torus, cylinder, each with op add|subtract and its own
@@ -822,6 +828,13 @@ async def sculpt(scene: dict[str, Any], name: str = "Sculpt", voxel_mm: float | 
     step). The answer carries a front and side preview: look at it, do not take another picture."""
     from . import sculpt as sculpt_mod
 
+    scene = dict(scene or {})
+    for key, value in (("template", template), ("height", height), ("parts", parts), ("pose", pose)):
+        if value is not None:
+            scene[key] = value
+    if not scene:
+        raise ToolError('INVALID_ARGS: give a scene: {"template": "dog_standing", "height": 50, "parts": [...]} '
+                        'or {"parts": [{"name", "primitives": [...]}]}')
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name) or "Sculpt"
     out_dir = os.path.join(str(platforms.bridge_dir()), "sculpt", f"{safe}-{time.strftime('%Y%m%d-%H%M%S')}")
     if one_piece:
@@ -858,22 +871,56 @@ async def _on_copy(make_call: Any, doc: str | None, instance: int | None, after:
         raise ToolError(f"CHECK_FAILED: {type(e).__name__}: {e}") from e
 
 
+def _fold_spec(spec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """A spec written loosely into the grammar: part keys at the top level become one part, parts given as
+    names or as a dict become part entries, keys nobody knows are set aside instead of refused."""
+    from .checks import spec as spec_mod
+
+    out: dict[str, Any] = {}
+    part: dict[str, Any] = {}
+    ignored: list[str] = []
+    for key, value in spec.items():
+        if key in spec_mod.KNOWN:
+            out[key] = value
+        elif key in spec_mod.PART_KEYS:
+            part[key] = value
+        else:
+            ignored.append(key)
+    parts = out.get("parts")
+    if isinstance(parts, dict):
+        parts = [{"name": name, **(value if isinstance(value, dict) else {})} for name, value in parts.items()]
+    if isinstance(parts, list):
+        parts = [{"name": str(p)} if not isinstance(p, dict) else p for p in parts]
+        cleaned = []
+        for p in parts:
+            keep = {k: v for k, v in p.items() if k in spec_mod.PART_KEYS}
+            ignored += [f"parts.{k}" for k in p if k not in spec_mod.PART_KEYS]
+            cleaned.append(keep)
+        parts = cleaned
+    if part:
+        part.setdefault("name", "part")
+        parts = [*(parts or []), part]
+    if parts is not None:
+        out["parts"] = parts
+    return out, ignored
+
+
 def _prepare_spec(spec: dict[str, Any] | None) -> dict[str, Any]:
     from .checks import spec as spec_mod
 
-    spec = spec or {}
-    unknown = set(spec) - spec_mod.KNOWN
-    bad_part = {k for p in spec.get("parts", []) if isinstance(p, dict) for k in p} - spec_mod.PART_KEYS
-    if unknown or bad_part:
-        raise ToolError(f"INVALID_ARGS: unknown spec keys {sorted(unknown | bad_part)}; known: "
-                        f"{sorted(spec_mod.KNOWN)}, per part: {sorted(spec_mod.PART_KEYS)}; the grammar is in "
-                        "references/checks.md of the freecad skill")
+    if spec is not None and not isinstance(spec, dict):
+        raise ToolError('INVALID_ARGS: spec is a dict, e.g. {"parts": [{"name": "housing", "bbox": [50, 50, 12], '
+                        '"tol": 0.5, "holes": [{"d": [4.3, 4.8], "count": [4, 4]}]}], "solids": [1, 1]}; the grammar '
+                        'is in references/checks.md of the freecad skill')
+    spec, ignored = _fold_spec(spec or {})
     try:
         spec = spec_mod.normalize(spec)
         spec_mod.evaluate(spec, {"parts": []})
     except (TypeError, ValueError, KeyError, AttributeError) as e:
         raise ToolError(f"INVALID_ARGS: this spec cannot be read ({type(e).__name__}: {e}). Ranges are "
                         "[lo, hi]; the grammar is in references/checks.md of the freecad skill") from e
+    if ignored:
+        spec["_ignored"] = ignored
     return spec
 
 
@@ -891,8 +938,13 @@ async def check_design(spec: dict[str, Any] | None = None, doc: str | None = Non
 
     spec = _prepare_spec(spec)
 
+    ignored = spec.pop("_ignored", None)
+
     def after(measured: dict[str, Any], _tmp: str) -> dict[str, Any]:
-        return runner.design_summary(spec_mod.evaluate(spec, measured), measured)
+        report = runner.design_summary(spec_mod.evaluate(spec, measured), measured)
+        if ignored:
+            report["ignored_spec_keys"] = ignored
+        return report
 
     text = runner.spec_json(spec)
     return _dump(await _on_copy(lambda path, _tmp: f"import json\n_result = measure.measure({path!r}, "
@@ -1076,6 +1128,7 @@ async def check_all(spec: dict[str, Any] | None = None, fits: list[dict[str, Any
     from .checks import spec as spec_mod
 
     spec = _prepare_spec(spec)
+    ignored = spec.pop("_ignored", None)
     pairs = []
     for f in fits or []:
         if not isinstance(f, dict):
@@ -1102,6 +1155,8 @@ async def check_all(spec: dict[str, Any] | None = None, fits: list[dict[str, Any
                 continue
             verdicts.append({"a": f["a"], "b": f["b"], "kind": f["kind"], "closest_at": f["where"], **v})
         report = runner.all_summary(design, prints, verdicts)
+        if ignored:
+            report["ignored_spec_keys"] = ignored
         cut = None
         if section is not None and meshes:
             axis = str(section.get("axis", "z")).lower()

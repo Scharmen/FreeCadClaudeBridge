@@ -193,3 +193,50 @@ def test_a_compare_crop_is_checked_before_any_picture_is_taken():
     for bad in ([0.5, 0.5, 0.4, 0.9], [0, 0, 1], [-0.1, 0, 1, 1], ["a", 0, 1, 1]):
         with pytest.raises(mcp_server.ToolError):
             mcp_server._crop(bad)
+
+
+def test_a_spec_written_loosely_is_folded_into_the_grammar_instead_of_refused():
+    spec, ignored = mcp_server._fold_spec({"bbox": [50, 50, 12], "tol": 0.5, "holes": [{"d": [4, 5], "count": 4}],
+                                           "name": "housing", "solids": 1, "process": "fdm", "min_wall_mm": 1.2})
+    assert spec["parts"] == [{"name": "housing", "bbox": [50, 50, 12], "tol": 0.5,
+                              "holes": [{"d": [4, 5], "count": 4}]}]
+    assert spec["solids"] == 1 and set(ignored) == {"process", "min_wall_mm"}
+    spec, ignored = mcp_server._fold_spec({"parts": ["Box", {"name": "Lid", "bbox": [60, 40, 6]}],
+                                           "total": {"bbox": [1, 1, 1]}})
+    assert spec["parts"][0] == {"name": "Box"} and spec["parts"][1]["bbox"] == [60, 40, 6]
+    spec, _ = mcp_server._fold_spec({"parts": {"Box": {"bbox": [60, 40, 24]}, "Lid": {}}})
+    assert [p["name"] for p in spec["parts"]] == ["Box", "Lid"]
+    with pytest.raises(mcp_server.ToolError, match="parts"):
+        mcp_server._prepare_spec("Housing 50 x 50 x 12 mm with four M4 holes")
+    prepared = mcp_server._prepare_spec({"bbox": [50, 50, 12], "weird": 1})
+    assert prepared["parts"][0]["bbox"] == [50, 50, 12] and prepared.get("_ignored") == ["weird"]
+
+
+def test_sculpt_takes_the_scene_keys_at_the_top_level_too(monkeypatch):
+    seen = {}
+
+    def fake_scene(scene, out_dir, voxel, smooth):
+        seen.update(scene)
+        return {"parts": [], "seconds": 0.1, "voxel_mm": 0.2, "size_mm": [1, 1, 1]}
+    from freecad_bridge import sculpt as sculpt_mod
+
+    monkeypatch.setattr(sculpt_mod, "sculpt_scene", fake_scene)
+
+    async def raw(op, args, **_k):
+        return {"result": {"group": "G", "parts": []}}
+    monkeypatch.setattr(mcp_server, "_raw", raw)
+    run(mcp_server.sculpt(template="dog_standing", height=50, parts=[{"name": "Collar", "primitives": []}],
+                          one_piece=True))
+    assert seen["template"] == "dog_standing" and seen["height"] == 50 and seen["one_piece"] is True
+    assert seen["parts"][0]["name"] == "Collar"
+    with pytest.raises(mcp_server.ToolError, match="scene"):
+        run(mcp_server.sculpt())
+
+
+def test_api_help_takes_query_as_well(monkeypatch):
+    async def never(*_a, **_k):
+        raise AssertionError("not asked")
+    monkeypatch.setattr(mcp_server, "_call", never)
+    assert "mcp tool" in run(mcp_server.api_help(query="make_part"))
+    with pytest.raises(mcp_server.ToolError, match="target"):
+        run(mcp_server.api_help())
