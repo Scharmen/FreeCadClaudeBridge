@@ -6,6 +6,7 @@
 - `compare_to_picture(crop=[x0, y0, x1, y1], look_at=[...], zoom)`: a part of the picture enlarged next to a close-up of the matching objects, so a lamp or a grille can be checked at the size it is seen.
 - `sculpt`: the `hair` preset places 20–80 tapered strands on a scalp (short locks along the head, long, bob, beard, fur) with one key; templates take a `pose` (person: head, arm_r, arm_l; dog: head, tail) that turns everything in the joint's region, sleeve and fur included.
 - Benchmark tasks `waving_person` and `toy_car` for figures with a pose and vehicles with wheels, lamps and a grille.
+- Code: the chat panel (`panel/dock.py`, 1 976 lines) is split into `common` (settings, paths, HTML helpers), `widgets` (input box, chat view, conversation rows), `sidebar`, `approvals` and `attachments` mixins and a 1 000-line `dock`; the print engine (`printkit/engine.py`, 865 lines) into `common`, `pieces`, `moving`, `joints`, `writers` and a 200-line `engine`. No behaviour change; the print tests and a panel built in a running FreeCAD cover it.
 
 ## 1.20.0 – models that pass their own checks (unreleased)
 
