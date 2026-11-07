@@ -185,6 +185,36 @@ def assembly_order(pieces: list[dict[str, Any]], joints: list[dict[str, Any]]) -
     return order
 
 
+def split_needed(colors: int, slots: int, fits: bool) -> bool:
+    """Splitting costs assembly, so it is the default only when one print cannot do the job."""
+    return colors > slots or not fits
+
+
+def print_count(report: dict[str, Any]) -> int:
+    """How many things the user has to print: the split parts, or else the one print and its moving parts."""
+    if report.get("pieces"):
+        return len(report["pieces"])
+    together = report.get("together")
+    return 1 + len(together["moving"]) if together else 1
+
+
+def together_lines(t: dict[str, str], moving: list[dict[str, Any]]) -> list[str]:
+    """All the assembly the one print needs: mounting what moves."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in moving:
+        name = " / ".join(m["objects"])
+        if m["type"] == "stub":
+            out.append(t["add_stub"].format(a=name, host=m.get("host", "")))
+        elif m["type"] == "through":
+            axle = m.get("axle", "")
+            if axle not in seen:
+                seen.add(axle)
+                out.append(t["axle_in"].format(axle=axle))
+            out.append(t["add_axle"].format(a=name, axle=axle))
+    return out
+
+
 def step_lines(t: dict[str, str], piece: str, joints: list[dict[str, Any]], built: set[str], name: dict[str, str],
                moving: dict[str, dict[str, Any]], axles_done: set[str]) -> list[str]:
     """What the guide says for adding one piece. Only the hub of a moving part goes on the axle."""
@@ -234,10 +264,13 @@ TEXT: dict[str, dict[str, str]] = {
            "tips_resin": "Drucke jede Platte, wasche und härte die Teile, bevor du sie zusammensetzt.",
            "painted": "Zu dünn für einen eigenen Druck, deshalb im Nachbarteil enthalten; am besten bemalen: {list}",
            "warnings": "Bitte beachten", "fit_test": "Tipp: Drucke zuerst einen Stift und ein kleines Teil, um die Passung zu prüfen. Klemmt es, Loch vorsichtig aufbohren; ist es locker, etwas Kleber.",
-           "no_split": "Die Aufteilung wurde nicht gewählt."},
+           "no_split": "Die Aufteilung wurde nicht gewählt.",
+           "together_title": "Am wenigsten Zusammenbau",
+           "together_tip": "Alles Feste als ein Druck: {file}, {x} × {y} × {z} mm, {n} Farben. Die beweglichen Teile druckst du extra und steckst sie nur noch an:",
+           "whole_fixed": "Im Gesamtmodell oben sitzen die beweglichen Teile fest, es ist also eher ein Standmodell."},
     "en": {"guide_lang": "Language of the files", "support": "Turn on supports in the slicer for: {list}.", "filament": "Filament", "title": "3D print: {name}", "dialog": "3D print export", "printer": "Printer", "custom": "Own printer",
            "bed": "Build volume X × Y × Z (mm)", "nozzle": "Nozzle (mm)", "slots": "Colours at once",
-           "process": "Process", "whole": "Whole model as one print", "split": "Split by colour, to assemble",
+           "process": "Process", "whole": "Whole model as one print", "split": "Also split by colour, to assemble",
            "join": "Assembly", "pins": "Plug together: model holes and connector pins",
            "glue": "Glue: gluing faces only, no pins", "moving": "Moving parts", "none_moving": "None found",
            "folder": "Folder", "start": "Create", "working": "Working, this can take a few minutes…",
@@ -258,5 +291,8 @@ TEXT: dict[str, dict[str, str]] = {
            "tips_resin": "Print each plate, wash and cure the parts before you assemble them.",
            "painted": "Too thin for a print of their own, so they are part of the neighbouring piece; best painted: {list}",
            "warnings": "Please note", "fit_test": "Tip: print one pin and a small part first to test the fit. If it binds, carefully drill the hole; if it is loose, add a little glue.",
-           "no_split": "Splitting was not chosen."},
+           "no_split": "Splitting was not chosen.",
+           "together_title": "Least assembly",
+           "together_tip": "Everything fixed as one print: {file}, {x} × {y} × {z} mm, {n} colours. Print the moving parts apart and just plug them on:",
+           "whole_fixed": "In the whole model above the moving parts are fixed, so it is more of a display model."},
 }

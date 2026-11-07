@@ -75,7 +75,7 @@ d.deleteLater()
 _result = {"printer": opts["printer"]["name"], "join": opts["join"], "moving": len(opts["moving"]),
            "whole": opts["whole"], "split": opts["split"], "visible": d.isVisible()}
 """)
-    assert r["printer"] and r["join"] in ("pins", "glue") and r["moving"] == 4 and r["whole"] and r["split"]
+    assert r["printer"] and r["join"] in ("pins", "glue") and r["moving"] == 4 and r["whole"]
     assert r["visible"] is False
 
 

@@ -172,21 +172,67 @@ MOVING = [{"objects": ["Tyre_" + n, "Rim_" + n], "axis": "y", "axle": "Axle_F"} 
     assert r["axles"]["count"] == 1 and not any("Axle_F" in p["objects"] for p in r["pieces"])
 
 
-def test_two_big_parts_of_one_colour_stay_apart_and_small_trim_joins(cmd, tmp_path):
-    extra = """
+def _part_names(path):
+    return zipfile.ZipFile(path).read("Metadata/model_settings.config").decode()
+
+
+def _same_colour(extra_part=""):
+    return f"""
 d = App.openDocument(WORK + "/car.FCStd")
-trim = d.addObject("Part::Feature", "Trim")
-trim.Shape = Part.makeBox(4, 4, 4, V(40, -2, 50))
+{extra_part}
 d.save()
 App.closeDocument(d.Name)
-COLORS["Trim"] = COLORS["Roof"]
 COLORS["Roof"] = COLORS["Body"]
-COLORS["Trim"] = COLORS["Body"]
 """
+
+
+def test_two_big_parts_of_one_colour_become_one_print(cmd, tmp_path):
+    r = run(cmd, tmp_path, extra=_same_colour(), moving=False)
+    one = next(p for p in r["pieces"] if "Body" in p["objects"])
+    assert "Roof" in one["objects"]
+
+
+def test_parts_of_one_colour_stay_apart_only_when_together_they_miss_the_bed(cmd, tmp_path):
+    printer = {"name": "Small", "bed": [110, 110, 110], "nozzle": 0.4, "slots": 4, "process": "fdm"}
+    extra = _same_colour('o = d.addObject("Part::Feature", "Tail")\no.Shape = Part.makeBox(100, 40, 25, V(100, -20, 10))')
+    extra += 'COLORS["Tail"] = COLORS["Body"]\n'
+    r = run(cmd, tmp_path, extra=extra, moving=False, printer=printer)
+    with_body = next(p for p in r["pieces"] if "Body" in p["objects"])
+    assert "Tail" not in with_body["objects"], "200 mm together does not fit a 110 mm bed"
+    assert "Roof" in with_body["objects"], "what does fit is still joined"
+
+
+def test_parts_that_only_nearly_touch_are_not_called_one_print(cmd, tmp_path):
+    extra = _same_colour('o = d.addObject("Part::Feature", "Near")\no.Shape = Part.makeBox(5, 40, 25, V(100.02, -20, 10))')
+    extra += 'COLORS["Near"] = COLORS["Body"]\n'
     r = run(cmd, tmp_path, extra=extra, moving=False)
-    ids = {p["objects"][0]: p for p in r["pieces"]}
-    assert "Roof" in ids and "Body" in ids, "two big parts"
-    assert "Trim" in ids["Roof"]["objects"]
+    assert "Near" not in next(p for p in r["pieces"] if "Body" in p["objects"])["objects"]
+
+
+def test_moving_parts_stay_movable_on_one_print_of_everything_else(pins):
+    tmp, r = pins
+    t = r["together"]
+    kit = tmp / "kit"
+    names = _part_names(kit / t["file"])
+    assert "Body" in names and "Tyre" not in names and "Rim" not in names
+    assert t["fits"] is True and t["colors"] >= 3
+    wheels = "".join(_part_names(kit / f) for f in t["moving_files"])
+    assert all(f"Tyre_{n}" in wheels and f"Rim_{n}" in wheels for n in ("FL", "RL", "FR", "RR"))
+    assert (kit / t["axles"]["file"]).is_file() and t["axles"]["count"] == 4
+
+
+def test_the_one_print_has_the_axle_sockets_but_no_pin_holes(cmd, pins):
+    tmp, r = pins
+    t = r["together"]
+    code = (f"import Mesh\nm = Mesh.Mesh({str(tmp / 'kit' / t['stl'])!r})\n_result = abs(m.Volume)\n")
+    solid = 100 * 40 * 25 + 50 * 30 * 15 + 6 * 8 * 6 + 90 * 40 * 0.3 - 50 * 30 * 0.3  # the stripe sinks into the roof
+    volume = score.run_freecad(code, cmd)
+    assert solid - 4 * 3.2 * 3.2 * 3.15 * 20 < volume < solid - 4 * 10, "four sockets out of the body and nothing else"
+    assert all(m["type"] == "stub" for m in t["moving"])
+
+
+def test_without_moving_parts_the_whole_model_is_already_the_one_print(cmd, tmp_path):
+    assert run(cmd, tmp_path, moving=False)["together"] is None
 
 
 def test_the_order_builds_the_fixed_parts_before_the_wheels(pins):

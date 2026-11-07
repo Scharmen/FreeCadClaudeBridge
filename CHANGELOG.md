@@ -3,6 +3,7 @@
 ## 1.18.0 (unreleased)
 
 - **3D print export button** (File menu and toolbar in every workbench, and in the chat panel). It asks for the printer and the assembly method only when used, then writes on a saved copy: the whole model as one coloured 3MF and STL; one plate set per colour with each part laid down for printing; holes and printed connector pins, or gluing; axles for parts that turn, such as wheels, so that they need no glue; and a PDF assembly guide with a picture for each step. Parts too thin to print alone go into a neighbour and are named for painting.
+- Print export keeps assembly to a minimum. With moving parts it also writes everything fixed as one coloured print (with the axle sockets) plus the moving parts laid flat and their axles. Parts of one colour that touch always become one piece unless together they miss the bed or the kernel cannot really join them. Splitting by colour is ticked by default only when the model has more colours than the printer or does not fit its bed.
 - `make_part` family `faired_body`: a smooth closed body from a few feature lines, fitted instead of interpolated, with sharp edges only at creases. It reports how far the surface stays from the given points.
 - `check_surface`: glossy paint and reflection stripes from two sides, plus a count of ripples along lengthwise cuts, to find bumps the normal view hides.
 - Skill: `references/surfaces.md`, how to build car and boat bodies.

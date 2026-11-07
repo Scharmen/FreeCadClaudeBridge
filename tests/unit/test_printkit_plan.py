@@ -105,3 +105,30 @@ def test_only_the_hub_goes_on_the_axle_and_the_tyre_is_glued_to_it():
     assert tyre == ["Glue Tyre to Rim."]
     other = plan.step_lines(t, "rim", [], {"body"}, name, moving, done)
     assert not any("through the bores" in x for x in other), "the axle goes in once"
+
+
+@pytest.mark.parametrize(("colors", "slots", "fits", "wanted"), [
+    (4, 4, True, False), (5, 4, True, True), (1, 1, True, False), (3, 1, True, True), (2, 4, False, True),
+])
+def test_splitting_is_only_offered_by_default_when_one_print_cannot_do_it(colors, slots, fits, wanted):
+    assert plan.split_needed(colors, slots, fits) is wanted
+
+
+def test_the_count_of_prints_is_what_the_user_has_to_print():
+    assert plan.print_count({"pieces": [{}, {}, {}], "together": {"moving": [{}, {}]}}) == 3
+    assert plan.print_count({"pieces": [], "together": {"moving": [{}, {}]}}) == 3
+    assert plan.print_count({"pieces": [], "together": None}) == 1
+
+
+def test_the_steps_for_one_print_are_only_the_moving_parts():
+    t = plan.TEXT["en"]
+    lines = plan.together_lines(t, [
+        {"type": "stub", "objects": ["Tyre", "Rim"], "host": "Body"},
+        {"type": "through", "objects": ["Wheel_L"], "axle": "Axle"},
+        {"type": "through", "objects": ["Wheel_R"], "axle": "Axle"},
+        {"type": "none", "objects": ["Lost"]},
+    ])
+    assert len(lines) == 4
+    assert "Tyre / Rim" in lines[0] and "Body" in lines[0]
+    assert sum("Slide Axle" in ln for ln in lines) == 1, "the axle goes in once"
+    assert not any("Lost" in ln for ln in lines), "a part with no axle is a warning, not a step"

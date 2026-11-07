@@ -110,7 +110,6 @@ class PrintDialog(QtWidgets.QDialog):
         self.whole = QtWidgets.QCheckBox(self.t["whole"])
         self.whole.setChecked(True)
         self.split = QtWidgets.QCheckBox(self.t["split"])
-        self.split.setChecked(True)
         lay.addWidget(self.whole)
         lay.addWidget(self.split)
         box = QtWidgets.QGroupBox(self.t["join"])
@@ -181,6 +180,14 @@ class PrintDialog(QtWidgets.QDialog):
             self.nozzle.setValue(preset["nozzle"])
             self.slots.setValue(preset["slots"])
             self.process.setCurrentIndex(1 if preset["process"] == "resin" else 0)
+        self._split_default()
+
+    def _split_default(self) -> None:
+        """One print unless it cannot work: too many colours for the printer, or too big for its bed."""
+        colors = len(set(plan.group_colors({o["name"]: o["color"] for o in self.items}).values()))
+        fits = all(max(o["hi"][i] for o in self.items) - min(o["lo"][i] for o in self.items) <= s.value()
+                   for i, s in enumerate(self.bed)) if self.items else True
+        self.split.setChecked(plan.split_needed(colors, self.slots.value(), fits))
 
     def _pick(self) -> None:
         path = QtWidgets.QFileDialog.getExistingDirectory(self, self.t["folder"], self.folder.text())
@@ -278,7 +285,7 @@ def finish(job: dict[str, str], output: str) -> dict[str, Any]:
         report = json.load(f)
     name = "Anleitung.pdf" if report.get("lang") == "de" else "Assembly_guide.pdf"
     pdf = guide.build(report, job["folder"], os.path.join(job["folder"], name))
-    return {"ok": True, "guide": pdf, "pieces": len(report.get("pieces", []))}
+    return {"ok": True, "guide": pdf, "pieces": plan.print_count(report)}
 
 
 def export_now(doc: Any, options: dict[str, Any], folder: str) -> dict[str, Any]:

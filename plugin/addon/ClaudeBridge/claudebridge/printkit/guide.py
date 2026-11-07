@@ -177,8 +177,26 @@ def build(report: dict[str, Any], folder: str, path: str) -> str:
                 doc.text(f"{t['filament']} {number}: {plan.color_name(color, lang)} ({color})", 20, gap=4)
             if not whole["fits"]:
                 doc.text(t["too_big_whole"], color="#b02020")
+        together = report.get("together")
+        if together:
+            size = together["size_mm"]
+            doc.text(t["whole_fixed"], 20)
+            doc.text(t["together_title"], 28, True)
+            doc.text(t["together_tip"].format(file=together["file"], x=size[0], y=size[1], z=size[2],
+                                              n=together["colors"]))
+            for number, color in enumerate(together["palette"], 1):
+                doc.text(f"{t['filament']} {number}: {plan.color_name(color, lang)} ({color})", 20, gap=4)
+            for f in together["moving_files"]:
+                doc.text(f, 20, gap=6)
+            if together["axles"]["count"]:
+                doc.text(f"{t['axles']}: {together['axles']['count']} × {together['axles']['file']}", 20, gap=6)
+            for line in plan.together_lines(t, together["moving"]):
+                doc.text(line, 22, gap=8)
+            if not together["fits"]:
+                doc.text(t["too_big_whole"], color="#b02020")
         if not pieces:
-            doc.text(t["no_split"])
+            if not together:
+                doc.text(t["no_split"])
         else:
             for plate in report.get("plates", []):
                 doc.text(f"{plate['color_name']}, {t['plate']} {plate['number']}: {plate['file']}", 20, gap=6)

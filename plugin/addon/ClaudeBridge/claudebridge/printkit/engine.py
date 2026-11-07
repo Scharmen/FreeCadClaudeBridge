@@ -26,7 +26,6 @@ from .surface import Surface
 V = App.Vector
 TOUCH = 0.05
 MAX_FACES = 40
-MERGE_SHARE = 0.03  # same colour: small trim joins its part, two big parts stay apart and can be assembled
 THIN_SHARE = 0.6  # mean thickness (2V/A) reads low on ribbed parts, so a part is too thin only well below the limit
 DUST = 0.05       # mm³
 MIN_BASE = 10.0   # mm² on the bed, or the part comes loose
@@ -171,18 +170,26 @@ def _touching(a: Geo, b: Geo) -> bool:
 
 
 def _fuse(a: Any, b: Any) -> Any | None:
-    """A fuse, or None when the kernel lost a part of it (it can return only one of the two without complaint)."""
+    """A fuse, or None when the kernel lost a part of it or the two did not really join into one body."""
     try:
         out = a.fuse(b)
     except Part.OCCError:
         return None
-    if not out.isValid() or not out.Solids or out.Volume < 0.98 * max(a.Volume, b.Volume):
+    if not out.isValid() or not out.Solids or len(out.Solids) >= len(a.Solids) + len(b.Solids):
         return None
-    return out
+    big, small = max(a.Volume, b.Volume), min(a.Volume, b.Volume)
+    return None if out.Volume < 0.98 * big + 0.2 * small else out
 
 
-def _make_pieces(items: list[Item]) -> list[Piece]:
-    """Parts of one colour that touch become one piece, as far as the kernel can join them."""
+def _fits_together(a: Any, b: Any, bed: list[float]) -> bool:
+    """Whether two boxes taken as one fit the printer in some axis order."""
+    box = App.BoundBox(a)
+    box.add(b)
+    return all(s <= e for s, e in zip(sorted((box.XLength, box.YLength, box.ZLength)), sorted(bed), strict=True))
+
+
+def _make_pieces(items: list[Item], bed: list[float]) -> list[Piece]:
+    """One print beats many: parts of one colour that touch become one piece, unless the bed or the kernel says no."""
     pieces: list[Piece] = []
     left = list(items)
     while left:
@@ -193,18 +200,23 @@ def _make_pieces(items: list[Item]) -> list[Piece]:
                     left.remove(other)
                     group.append(other)
         group.sort(key=lambda it: -it.volume)
-        current = Piece([group[0]])
-        for it in group[1:]:
-            joined = None
-            if current.shape is not None and it.shape is not None and it.volume <= MERGE_SHARE * current.volume:
-                joined = _fuse(current.shape, it.shape)
-            if joined is None:
-                pieces.append(current)
-                current = Piece([it])
-            else:
-                current.shape = joined
-                current.items.append(it)
-        pieces.append(current)
+        while group:
+            current = Piece([group.pop(0)])
+            grown = current.shape is not None
+            while grown:
+                grown = False
+                for it in list(group):
+                    if it.shape is None or not _fits_together(current.box, it.box, bed):
+                        continue
+                    if not any(_touching(member, it) for member in current.items):
+                        continue
+                    joined = _fuse(current.shape, it.shape)
+                    if joined is not None:
+                        current.shape = joined
+                        current.items.append(it)
+                        group.remove(it)
+                        grown = True
+            pieces.append(current)
     return pieces
 
 
@@ -231,6 +243,37 @@ def _merge_thin(pieces: list[Piece], min_thick: float) -> tuple[list[Piece], lis
                 pieces.remove(thin)
                 break
     return pieces, painted
+
+
+def _centre(pieces: list[Piece]) -> Any:
+    centre = V(0, 0, 0)
+    total = 0.0
+    for p in pieces:
+        centre += p.box.Center * p.volume
+        total += p.volume
+    return centre * (1 / total)
+
+
+def _join_again(pieces: list[Piece], bed: list[float]) -> list[Piece]:
+    """A merged thin part can bridge two pieces of one colour that did not touch before."""
+    grown = True
+    while grown:
+        grown = False
+        for a in pieces:
+            for b in pieces:
+                if (a is b or a.color != b.color or a.rotor is not b.rotor or a.shape is None or b.shape is None
+                        or a.volume < b.volume or not _fits_together(a.box, b.box, bed) or not _touching(a, b)):
+                    continue
+                joined = _fuse(a.shape, b.shape)
+                if joined is not None:
+                    a.shape = joined
+                    a.items += b.items
+                    pieces.remove(b)
+                    grown = True
+                    break
+            if grown:
+                break
+    return pieces
 
 
 def _axis_vector(axis: str) -> Any:
@@ -521,34 +564,122 @@ def _write_stl(mesh: Any, path: str) -> None:
     mesh.write(path)
 
 
+def _write_assembled(parts: list[tuple[str, int, Any]], name: str, palette: list[str], bed: list[float], out_dir: str,
+                     base: str) -> dict[str, Any]:
+    """Parts as they sit in the model, as one coloured print in the middle of the bed: 3MF and STL."""
+    boxes = [m.BoundBox for _, _, m in parts]
+    low = [min(getattr(b, a + "Min") for b in boxes) for a in "XYZ"]
+    size = [max(getattr(b, a + "Max") for b in boxes) - low[i] for i, a in enumerate("XYZ")]
+    shift = ((bed[0] - size[0]) / 2 - low[0], (bed[1] - size[1]) / 2 - low[1], -low[2])
+    threemf.write(os.path.join(out_dir, base + ".3mf"), [(name, [(label, slot, *_triangles(m)) for label, slot, m in parts],
+                                                          shift)], palette)
+    together = Mesh.Mesh()
+    for _, _, m in parts:
+        together.addMesh(m)
+    together.translate(*shift)
+    together.write(os.path.join(out_dir, base + ".stl"))
+    return {"file": base + ".3mf", "stl": base + ".stl", "size_mm": [round(s, 1) for s in size],
+            "fits": all(s <= b for s, b in zip(size, bed, strict=True)), "colors": len(palette), "palette": palette}
+
+
 def _whole(items: list[Item], printer: dict[str, Any], name: str, out_dir: str, folder: str,
            lang: str = "de") -> dict[str, Any]:
     colors = {it.name: it.color for it in items}
     slots = plan.assign_slots(colors, int(printer["slots"]))
-    palette = plan.slot_colors(colors, slots)
-    meshes = [(it, _mesh(it.shape) if it.shape is not None else it.mesh.copy()) for it in items]
-    x0 = min(m.BoundBox.XMin for _, m in meshes)
-    y0 = min(m.BoundBox.YMin for _, m in meshes)
-    z0 = min(m.BoundBox.ZMin for _, m in meshes)
-    x1 = max(m.BoundBox.XMax for _, m in meshes)
-    y1 = max(m.BoundBox.YMax for _, m in meshes)
-    z1 = max(m.BoundBox.ZMax for _, m in meshes)
-    size = [x1 - x0, y1 - y0, z1 - z0]
-    bed = printer["bed"]
-    shift = ((bed[0] - size[0]) / 2 - x0, (bed[1] - size[1]) / 2 - y0, -z0)
-    parts = [(it.label, slots[it.name], *_triangles(m)) for it, m in meshes]
+    parts = [(it.label, slots[it.name], _mesh(it.shape) if it.shape is not None else it.mesh.copy()) for it in items]
     word = "komplett" if lang == "de" else "complete"
-    rel = os.path.join(folder, f"{_safe_name(name)}_{word}.3mf")
-    threemf.write(os.path.join(out_dir, rel), [(name, parts, shift)], palette)
-    whole = Mesh.Mesh()
-    for _, m in meshes:
-        whole.addMesh(m)
-    whole.translate(*shift)
-    stl = os.path.join(folder, f"{_safe_name(name)}_{word}.stl")
-    whole.write(os.path.join(out_dir, stl))
-    fits = all(s <= b for s, b in zip(size, bed, strict=True))
-    return {"file": rel, "stl": stl, "size_mm": [round(s, 1) for s in size], "fits": fits, "colors": len(palette),
-            "palette": palette}
+    return _write_assembled(parts, name, plan.slot_colors(colors, slots), printer["bed"], out_dir,
+                            os.path.join(folder, f"{_safe_name(name)}_{word}"))
+
+
+def _lay_flat(mesh: Any, axis: str) -> None:
+    """What turns prints with its axis upright: round on the bed, and no support."""
+    if axis == "x":
+        mesh.rotate(0, math.pi / 2, 0)
+    elif axis == "y":
+        mesh.rotate(math.pi / 2, 0, 0)
+
+
+def _write_moving(pieces: list[Piece], slots: dict[str, int], palette: list[str], printer: dict[str, Any], out_dir: str,
+                  folder: str, base: str, warn: list[str], lang: str) -> list[str]:
+    """Each moving part as one coloured print, however many objects it has; plates of them."""
+    rotors: dict[int, list[Piece]] = {}
+    for p in pieces:
+        rotors.setdefault(id(p.rotor), []).append(p)
+    laid: dict[str, list[tuple[str, int, Any]]] = {}
+    for group in rotors.values():
+        meshes = [(p.labels[0], slots[p.items[0].name], _mesh(p.shape) if p.shape is not None else p.mesh.copy()) for p in group]
+        for _, _, m in meshes:
+            _lay_flat(m, group[0].rotor["axis"])
+        boxes = [m.BoundBox for _, _, m in meshes]
+        low = [min(getattr(b, a + "Min") for b in boxes) for a in "XYZ"]
+        for _, _, m in meshes:
+            m.translate(-low[0], -low[1], -low[2])
+        laid[group[0].labels[0]] = meshes
+    def size(meshes: list[tuple[str, int, Any]]) -> tuple[float, float, float]:
+        return tuple(max(getattr(m.BoundBox, a + "Max") for _, _, m in meshes) for a in "XYZ")
+    placed, too_big = plan.layout([(n, *size(ms)) for n, ms in laid.items()], printer["bed"])
+    for n in too_big:
+        warn.append(_say(lang, f"{n} ist größer als der Bauraum und muss kleiner skaliert werden.",
+                         f"{n} is larger than the build volume: scale it down."))
+    plates: dict[int, list[tuple]] = {}
+    for n, spot in placed.items():
+        meshes = laid[n]
+        if spot["turned"]:
+            for _, _, m in meshes:
+                m.rotate(0, 0, math.pi / 2)
+            width = min(m.BoundBox.XMin for _, _, m in meshes)
+            depth = min(m.BoundBox.YMin for _, _, m in meshes)
+            for _, _, m in meshes:
+                m.translate(-width, -depth, 0)
+        plates.setdefault(int(spot["plate"]), []).append(
+            (n, [(label, slot, *_triangles(m)) for label, slot, m in meshes], (spot["x"], spot["y"], 0.0)))
+    files = []
+    for number, objects in sorted(plates.items()):
+        rel = os.path.join(folder, f"{base}_{number}.3mf")
+        threemf.write(os.path.join(out_dir, rel), objects, palette)
+        files.append(rel)
+    return files
+
+
+def _together(items: list[Item], options: dict[str, Any], lim: dict[str, float], folder: str, joints_folder: str,
+              out_dir: str, warn: list[str], lang: str) -> dict[str, Any] | None:
+    """Least assembly with something that moves: one print of all that is fixed, and the moving parts to mount."""
+    moving = list(options.get("moving") or [])
+    if not moving:
+        return None
+    printer = options["printer"]
+    name = options.get("name", "Modell")
+    axle_names = {m["axle"] for m in moving if m.get("axle")}
+    rotor_of = {n: m for m in moving for n in m["objects"]}
+    parts = [it for it in items if it.name not in axle_names]
+    colors = {it.name: it.color for it in parts}
+    slots = plan.assign_slots(colors, int(printer["slots"]))
+    palette = plan.slot_colors(colors, slots)
+    pieces = []
+    for it in parts:
+        p = Piece([it])
+        p.rotor = rotor_of.get(it.name)
+        p.id = it.name
+        pieces.append(p)
+    entries, axles = _plan_moving(pieces, items, moving, lim, _centre(pieces), warn, lang)
+    _apply_cuts(pieces, warn, lang)
+    _drop_dust(pieces)
+    fixed = [(p.labels[0], slots[p.items[0].name], _mesh(p.shape) if p.shape is not None else p.mesh.copy())
+             for p in pieces if p.rotor is None]
+    if not fixed:
+        return None
+    word = "bewegliche_Teile" if lang == "de" else "moving_parts"
+    body = "Rest_als_ein_Druck" if lang == "de" else "Rest_as_one_print"
+    out = _write_assembled(fixed, name, palette, printer["bed"], out_dir, os.path.join(folder, f"{_safe_name(name)}_{body}"))
+    out["moving"] = entries
+    out["moving_files"] = _write_moving([p for p in pieces if p.rotor is not None], slots, palette, printer, out_dir, folder,
+                                        f"{_safe_name(name)}_{word}", warn, lang)
+    out["axles"] = {"count": len(axles), "file": None}
+    if axles:
+        out["axles"]["file"] = _connector_plate([(a["length"], a["d"], a["kind"] == "headed") for a in axles], out_dir,
+                                                joints_folder, "Achsen" if lang == "de" else "Axles", printer)
+    return out
 
 
 def _pin_mesh(length: float, d: float, headed: bool) -> Any:
@@ -603,7 +734,7 @@ def run(path: str, options: dict[str, Any], out_dir: str) -> dict[str, Any]:
         os.makedirs(os.path.join(out_dir, f), exist_ok=True)
     warn: list[str] = []
     report: dict[str, Any] = {"name": name, "printer": printer, "join": options.get("join", "glue"), "lang": lang,
-                              "whole": None, "pieces": [], "plates": [], "joints": [], "moving": [], "painted": [],
+                              "whole": None, "together": None, "pieces": [], "plates": [], "joints": [], "moving": [], "painted": [],
                               "order": [], "warnings": warn, "dowels": {"count": 0, "file": None, "d": lim["dowel_d"]},
                               "axles": {"count": 0, "file": None}, "limits": lim}
     doc = App.openDocument(path)
@@ -616,6 +747,7 @@ def run(path: str, options: dict[str, Any], out_dir: str) -> dict[str, Any]:
         _step("overlaps cleaned")
         if options.get("whole", True):
             report["whole"] = _whole(items, printer, name, out_dir, folders["whole"], lang)
+            report["together"] = _together(items, options, lim, folders["whole"], folders["joints"], out_dir, warn, lang)
             _step("whole model written")
         if options.get("split", True):
             _split(items, options, report, lim, folders, out_dir, warn, lang)
@@ -638,30 +770,24 @@ def _split(items: list[Item], options: dict[str, Any], report: dict[str, Any], l
     colour_groups = plan.group_colors({it.name: it.color for it in parts})
     for it in parts:
         it.color = colour_groups[it.name]
-    pieces = _make_pieces(fixed)
+    pieces = _make_pieces(fixed, printer["bed"])
     for m in moving:
         group = [it for it in parts if it.name in m["objects"]]
-        for p in _make_pieces(group):
+        for p in _make_pieces(group, printer["bed"]):
             p.rotor = m
             pieces.append(p)
     _step(f"{len(pieces)} pieces")
     pieces, painted = _merge_thin(pieces, THIN_SHARE * lim["min_thick"])
     _step(f"thin parts merged: {len(painted)}")
     report["painted"] = painted
+    pieces = _join_again(pieces, printer["bed"])
     pieces.sort(key=lambda p: -p.volume)
     used: dict[str, int] = {}
     for p in pieces:
         base = _safe_name(p.labels[0])
         used[base] = used.get(base, 0) + 1
         p.id = base if used[base] == 1 else f"{base}_{used[base]}"
-    centre = V(0, 0, 0)
-    total = 0.0
-    for p in pieces:
-        c = p.box.Center
-        centre += c * p.volume
-        total += p.volume
-    centre = centre * (1 / total)
-    report["moving"], axles = _plan_moving(pieces, items, moving, lim, centre, warn, lang)
+    report["moving"], axles = _plan_moving(pieces, items, moving, lim, _centre(pieces), warn, lang)
     _step("moving parts planned")
     joints, lengths = _make_joints(pieces, options.get("join", "glue"), lim)
     report["joints"] = joints
