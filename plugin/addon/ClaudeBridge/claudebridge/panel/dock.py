@@ -208,8 +208,9 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         lay.addLayout(row)
 
         self.setWidget(body)
-        for name, tip in (("qt_dockwidget_floatbutton", "Undock the chat panel into a window, or dock it back"),
-                          ("qt_dockwidget_closebutton", "Close the chat panel (View → Panels → Claude brings it back)")):
+        title_tips = (("qt_dockwidget_floatbutton", "Undock the chat panel into its own window, or dock it back"),
+                      ("qt_dockwidget_closebutton", "Close the chat panel (View → Panels → Claude brings it back)"))
+        for name, tip in title_tips:
             btn = self.findChild(QtWidgets.QAbstractButton, name)
             if btn is not None:
                 btn.setToolTip(tip)
