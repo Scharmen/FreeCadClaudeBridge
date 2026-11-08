@@ -22,7 +22,7 @@ from . import audit, crashguard, paths, protocol
 BUSY_WAIT_S = 30.0
 SAFETY_OPS = {"run_python", "run_command", "import", "task_dialog"}   # copy unsaved work before these
 READ_ONLY_OPS = {"status_gui", "get_tree", "get_object", "inspect_shape", "inspect_sketch", "get_changes",
-                 "get_console", "list_commands"}
+                 "get_console", "list_commands", "sub_chat"}
 
 
 class OpError(Exception):

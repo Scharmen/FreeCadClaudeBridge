@@ -262,6 +262,12 @@ async def selection(action: Literal["get", "set", "add", "clear"] = "get", items
     return await _call("selection", {"action": action, "items": items}, instance=instance)
 
 
+@mcp.tool(annotations=READ, structured_output=False)
+async def sub_chat(parts: list[str], instance: int | None = None) -> str:
+    """On request only: offer sub chats for these parts in the chat panel."""
+    return await _call("sub_chat", {"parts": parts}, instance=instance)
+
+
 @mcp.tool(annotations=WRITE, structured_output=False)
 async def document(action: Literal["new", "open", "save", "save_as", "close", "activate", "recompute", "undo",
                                    "redo", "list", "snapshot", "snapshots", "restore"],
@@ -680,7 +686,7 @@ async def make_part(family: str = "list", params: dict[str, Any] | None = None, 
     spoked rim, brake), lamp (housing, reflector, lens, strip) and pattern (honeycomb, slats, mesh, holes
     for grilles and vents); faired_body for a smooth car or boat body from feature lines.
     family="list" shows every family with its parameters and defaults. Use it instead of building
-    these by hand, then change or add to the result. Each part is a solid in one undo step, in its
+    these by hand. Each part is a solid in one undo step, in its
     mounted position; at=[x, y, z] moves the group. To change sizes call it again with
     replace=["ObjectName"]; the object's Family and Parameters properties say how it was made. The
     answer carries a front and side preview: look at it, do not take another picture."""
@@ -825,8 +831,8 @@ async def sculpt(scene: dict[str, Any] | None = None, name: str = "Sculpt", voxe
     blend; "detail" adds skin texture, "fur" carves grooves along the flow. Grammar and the rules that
     make it look real: references/organic.md of the freecad skill. one_piece=true unites
     every part into one closed mesh for printing (each part keeps its fur and blend; the first part's
-    colour). The meshes are computed outside FreeCAD and imported as a group of Mesh objects (one undo
-    step). The answer carries a front and side preview: look at it, take no other picture."""
+    colour). The meshes arrive as a group of Mesh objects (one undo step). The answer carries a
+    front and side preview: look at it, take no other picture."""
     from . import sculpt as sculpt_mod
 
     scene = dict(scene or {})

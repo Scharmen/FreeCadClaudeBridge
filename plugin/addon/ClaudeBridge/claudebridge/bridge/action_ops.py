@@ -293,3 +293,25 @@ def snapshot(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         return {"opened_as": restored.Name, "label": restored.Label,
                 "note": "Opened as a separate, unsaved copy; the original is unchanged. Use save_as to keep it."}
     raise OpError(protocol.INVALID_ARGS, "action must be create, list or restore")
+
+
+def sub_chat(args: dict[str, Any], ex: Any) -> dict[str, Any]:
+    """Offer the user sub chats for parts of the active model in the chat panel (buttons; nothing opens
+    by itself)."""
+    doc = App.ActiveDocument
+    if doc is None:
+        raise OpError(protocol.NO_DOCUMENT, "no active document")
+    found, missing = [], []
+    for name in args.get("parts") or []:
+        obj = doc.getObject(str(name)) or next(iter(doc.getObjectsByLabel(str(name))), None)
+        if obj is None:
+            missing.append(name)
+        else:
+            found.append({"name": obj.Name, "label": obj.Label})
+    from ..panel import dock
+
+    panel = dock.get_panel()
+    if panel is not None and found:
+        panel.offer_sub_chats(found)
+    return {"offered": [p["label"] for p in found], "missing": missing, "panel": panel is not None,
+            "note": "The user opens each sub chat with a click; it starts from this chat's history."}

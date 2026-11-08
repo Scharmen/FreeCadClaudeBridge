@@ -45,6 +45,16 @@ class PreferencesPage:
                                       "plugin and the addon")
         af.addRow(self.check_updates)
         af.addRow("Connection:", self.transport)
+        folder_row = QtWidgets.QHBoxLayout()
+        self.projects = QtWidgets.QLineEdit()
+        self.projects.setToolTip("Every model gets its own folder here: Name/Name.FCStd, exports/, print/, "
+                                 "references/")
+        browse = QtWidgets.QPushButton("…")
+        browse.setToolTip("Choose the projects folder")
+        browse.clicked.connect(self._browse_projects)
+        folder_row.addWidget(self.projects, 1)
+        folder_row.addWidget(browse)
+        af.addRow("Projects folder:", folder_row)
         af.addRow(QtWidgets.QLabel("<small>Changes here apply after restarting FreeCAD.</small>"))
         layout.addWidget(addon_box)
 
@@ -110,6 +120,9 @@ class PreferencesPage:
             spin.setValue(values[key])
         self.ask_feedback.setChecked(bool(values["learning.ask_for_feedback"]))
         self.check_updates.setChecked(p.GetBool("CheckUpdates", True))
+        from ..bridge import projects
+
+        self.projects.setText(p.GetString(projects.PARAM, "") or projects.default_root())
         self._update_lessons()
         self._update_preview()
 
@@ -119,10 +132,19 @@ class PreferencesPage:
         p.SetBool("ShowPanel", self.show_panel.isChecked())
         p.SetString("Transport", self.transport.currentText())
         p.SetBool("CheckUpdates", self.check_updates.isChecked())
+        from ..bridge import projects
+
+        folder = self.projects.text().strip()
+        p.SetString(projects.PARAM, "" if not folder or folder == projects.default_root() else folder)
         settings.save(paths.bridge_dir(), {**self.values(),
                                            "learning.ask_for_feedback": int(self.ask_feedback.isChecked())})
 
     # ----- helpers
+
+    def _browse_projects(self) -> None:
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self.form, "Projects folder", self.projects.text())
+        if folder:
+            self.projects.setText(folder)
 
     def values(self) -> dict[str, Any]:
         return {key: spin.value() for key, spin in self.spins.items()}

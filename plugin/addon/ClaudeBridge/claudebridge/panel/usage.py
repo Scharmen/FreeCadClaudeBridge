@@ -155,3 +155,38 @@ def picture_line(paths: list[str]) -> str:
             "built, call compare_to_picture with each picture from the matching view, list every difference "
             "(missing parts, proportions, details, colors), fix them and check again before you answer.]")
 
+
+
+def read_profile() -> dict[str, Any]:
+    """The account profile Claude Code keeps in its global config (it refreshes it itself). Its
+    organizationType follows a plan change right away, unlike the login token's subscriptionType."""
+    import json
+    import os
+
+    base = os.environ.get("CLAUDE_CONFIG_DIR")
+    path = os.path.join(base, ".claude.json") if base else os.path.join(os.path.expanduser("~"), ".claude.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            account = json.load(f).get("oauthAccount")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return account if isinstance(account, dict) else {}
+
+
+PLAN_NAMES = {"claude_max": "Claude Max", "claude_pro": "Claude Pro", "claude_team": "Claude Team",
+              "claude_enterprise": "Claude Enterprise", "max": "Claude Max", "pro": "Claude Pro",
+              "team": "Claude Team", "enterprise": "Claude Enterprise"}
+
+
+def plan_name(profile: dict[str, Any], token_type: str | None = None) -> str | None:
+    """"Claude Max 5x" from the profile; else the plan the login token names; None when neither says."""
+    import re
+
+    org = str(profile.get("organizationType") or "").lower()
+    name = PLAN_NAMES.get(org)
+    if name:
+        tier = re.search(r"(\d+x)$", str(profile.get("organizationRateLimitTier") or ""))
+        return f"{name} {tier[1]}" if tier and name == "Claude Max" else name
+    if token_type:
+        return PLAN_NAMES.get(token_type.lower(), token_type)
+    return None

@@ -126,8 +126,11 @@ def context_line() -> str:
             item += ": " + ", ".join(list(s.SubElementNames)[:10])
         parts.append(item)
     sel = "; ".join(parts) if parts else "nothing"
-    where = f", file {doc.FileName}" if doc.FileName else ", not saved yet"
-    return f"[FreeCAD] Active document: {doc.Label} ({doc.Name}){where}. Selection: {sel}."
+    from ..bridge import ops, projects
+
+    where = f", file {doc.FileName}" if doc.FileName else ""
+    files = projects.context(doc.FileName or "", doc.Label, ops.projects_root())
+    return f"[FreeCAD] Active document: {doc.Label} ({doc.Name}){where}. Selection: {sel}. {files}."
 
 
 BUTTON_COLORS = {"allow": "#2e7d32", "always": "#1565c0", "deny": "#a12a2a", "option": "#455a64",

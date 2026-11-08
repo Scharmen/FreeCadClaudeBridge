@@ -13,7 +13,7 @@ import FreeCADGui as Gui
 from PySide import QtCore, QtGui, QtWidgets
 
 from ..bridge import paths
-from . import activity, conversations, debuglog, secrets, tips, usage
+from . import activity, conversations, debuglog, look, secrets, tips, usage
 from .approvals import ApprovalsMixin
 from .attachments import AttachmentsMixin
 from .claude_process import ClaudeSession
@@ -70,7 +70,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         self.turn_steps = 0
         self.store = conversations.Store(paths.bridge_dir())
         self.pending: dict[str, str] = {}  # title and folder of a conversation until Claude names its session
-        self.tool_rows: dict[str, tuple[str, float]] = {}
+        self.tool_rows: dict[str, tuple[str, float, Any]] = {}   # name, start, cursor at the end of its line
         self.text_open = False
         self.turn_started = 0.0
         self.current_key = _doc_key()
@@ -249,6 +249,9 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         debuglog.prune()
         QtCore.QTimer.singleShot(0, self._report_crashes)
         self._init_updates()
+        self.plan_timer = QtCore.QTimer(self)            # a plan change shows within a minute
+        self.plan_timer.timeout.connect(self._update_mode_label)
+        self.plan_timer.start(60 * 1000)
 
     # ----- settings -----
 
@@ -293,8 +296,9 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         mode = self.mode()
         self.act_sub.setChecked(mode == "subscription")
         self.act_key.setChecked(mode == "api_key")
-        account = (self.info.get("account") or {}).get("subscriptionType")
-        text = (account or "Claude subscription") if mode == "subscription" else "API key (pay as you go)"
+        token_type = (self.info.get("account") or {}).get("subscriptionType")
+        plan = usage.plan_name(usage.read_profile(), token_type)      # the profile follows an upgrade at once
+        text = (plan or "Claude subscription") if mode == "subscription" else "API key (pay as you go)"
         label = f"<b>{html.escape(text)}</b>"
         limits = self.usage.limits_text() if mode == "subscription" else ""
         if limits:
@@ -377,6 +381,8 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             self.create_debug_report()
         elif url.scheme() == "update":
             self.update_addon()
+        elif url.scheme() == "sub":
+            self.new_sub_chat(rest)
         elif url.scheme() == "stop":
             self.stop()
         elif url.scheme() == "snapshots":
@@ -461,8 +467,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             self.input.clear()
             pics = "".join(f"<img src='{QtCore.QUrl.fromLocalFile(a['path']).toString()}' width='120'> "
                            for a in self.attachments)
-            self._append(f"<p style='margin-top:10px'><b>You:</b> {html.escape(text)}</p>" + (f"<p>{pics}</p>"
-                                                                                           if pics else ""))
+            self._append(look.user_bubble(text, f"<br>{pics}" if pics else "", self._theme()))
         self.attachments = []
         self._render_attachments()
         self.last_text = text
@@ -746,9 +751,10 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
                 self._note(problem, error=True)
         elif kind in ("text_delta", "text"):
             if not self.text_open:
-                self._append("<p><b>Claude:</b> </p>")
+                self._append(look.claude_header(self._theme()))
                 cur = self.view.textCursor()
                 cur.movePosition(QtGui.QTextCursor.End)
+                cur.insertBlock(QtGui.QTextBlockFormat(), QtGui.QTextCharFormat())   # the answer below its header
                 self.md_start, self.md_buf, self.text_open = cur.position(), "", True
             self.md_buf += ev.get("text", "")
             self._insert_text(ev.get("text", ""))
@@ -760,27 +766,31 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         elif kind == "tool_use":
             name = short_tool_name(ev.get("name", "?"))
             self.turn_steps += 1
-            self.tool_rows[ev.get("id") or name] = (name, time.time())
+            line_end = None
             self.status.setText(f"◐ Running {name}…")
             self.status.repaint()          # visible before FreeCAD's GUI thread may block on the call
-            if name != "TodoWrite":
-                self._append(f"<div style='color:#666'>▸ <code>{html.escape(name)}</code> "
-                             f"{html.escape(_tool_summary(ev.get('input') or {}))}</div>")
+            if name not in ("TodoWrite", "ToolSearch"):      # ToolSearch only loads tool definitions
+                self._append(look.tool_line(name, _tool_summary(ev.get("input") or {}), self._theme()))
+                line_end = self.view.textCursor()
+                line_end.movePosition(QtGui.QTextCursor.End)      # the result's ✓ goes on this line
+                line_end.setKeepPositionOnInsert(True)            # also when more is appended meanwhile
+            self.tool_rows[ev.get("id") or name] = (name, time.time(), line_end)
         elif kind == "todos":
             self._render_todos(ev.get("items") or [])
         elif kind == "tool_result":
-            name, t0 = self.tool_rows.pop(ev.get("id"), ("tool", time.time()))
-            if name == "TodoWrite":
+            name, t0, line_end = self.tool_rows.pop(ev.get("id"), ("tool", time.time(), None))
+            if name in ("TodoWrite", "ToolSearch"):
                 return
             dt = time.time() - t0
             self.max_result_chars = max(self.max_result_chars, int(ev.get("size", 0)))
             if not ev.get("is_error") and ev.get("content"):
                 self.turn_results.append(ev["content"])
-            if ev.get("is_error"):
-                self._append(f"<div style='color:#b00'>✗ <code>{html.escape(name)}</code> {dt:.1f} s: "
-                             f"{html.escape(ev.get('summary', ''))}</div>")
+            done = look.tool_done(not ev.get("is_error"), dt, str(ev.get("summary", ""))[:200], self._theme())
+            if line_end is not None:
+                line_end.clearSelection()        # its anchor moved with what was appended since: no selection
+                line_end.insertHtml(done)
             else:
-                self._append(f"<div style='color:#2a7'>✓ <code>{html.escape(name)}</code> {dt:.1f} s</div>")
+                self._append(f"<div>{look.tool_icon(name)} <code>{html.escape(name)}</code>{done}</div>")
         elif kind == "permission_request":
             self._permission_card(ev)
         elif kind == "api_retry":
@@ -825,6 +835,9 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             parts.append(self.usage.turn_text())
         if self.mode() == "api_key" and ev.get("cost_usd"):
             parts.append(f"${ev['cost_usd']:.2f}")
+        if not interrupted:
+            icons = ["⏱", "🔧", "🪙", "💵"]
+            self._append(look.footer([f"{icons[i]} {p}" for i, p in enumerate(parts)], self._theme()))
         self.status.setText("Stopped" if interrupted else " · ".join(parts))
         self.status.setToolTip("Tokens Claude wrote in this turn (thinking included, as reported by Claude Code) "
                                "and how much of the model's context window the conversation fills.")
@@ -1006,14 +1019,15 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
                 names = ", ".join(s[key][:4]) + (" …" if len(s[key]) > 4 else "")
                 parts.append(f"{len(s[key])} {label} ({html.escape(names)})")
         self.last_result = "; ".join(parts)
-        if parts:
-            self._append(f"<div style='color:#666'>Changes: {'; '.join(parts)}</div>")
+        table = look.changes_table(s, self._theme())
+        if table:
+            self._append(table)
         if "DesignNotes" in s["created"] + s["changed"]:
             self._append("<div>📝 <a href='notes:'>Why it looks like this</a> (design notes, saved with the "
                          "document)</div>")
         for e in s["errors"][:5]:
-            self._append(f"<div style='color:#b00'>⚠ {html.escape(e.get('label') or e.get('name', '?'))} is in an "
-                         f"error state ({html.escape(', '.join(e.get('state', [])))})</div>")
+            self._append(look.note(f"{e.get('label') or e.get('name', '?')} is in an error state "
+                                   f"({', '.join(e.get('state', []))})", "error", self._theme()))
         return bool(s["created"] or s["changed"] or s["deleted"])
 
     def _on_failed(self, message: str) -> None:
@@ -1056,6 +1070,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         if hasattr(cur, "insertMarkdown") and self.md_buf.strip():
             cur.removeSelectedText()
             cur.insertMarkdown(self.md_buf)
+            self._style_tables(self.md_start)
             # leave the list/quote/code block, so what follows starts as a normal paragraph
             cur.movePosition(QtGui.QTextCursor.End)
             cur.insertBlock(QtGui.QTextBlockFormat(), QtGui.QTextCharFormat())
@@ -1069,8 +1084,42 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         self._scroll()
 
     def _note(self, text: str, error: bool = False) -> None:
-        color = "#b00" if error else "#666"
-        self._append(f"<div style='color:{color}'><i>{html.escape(text)}</i></div>")
+        self._append(look.note(text, "error" if error else "info", self._theme()))
+
+    def _theme(self) -> dict[str, str]:
+        return look.theme(dark=self.view.palette().base().color().lightness() < 128)
+
+    def _style_tables(self, start: int) -> None:
+        """Markdown tables from Claude get lines, a tinted header row and zebra rows."""
+        t = self._theme()
+        doc = self.view.document()
+        seen: set[int] = set()
+        block = doc.findBlock(start)
+        while block.isValid():
+            cur = QtGui.QTextCursor(block)
+            table = cur.currentTable()
+            if table is not None and id(table) not in seen:
+                seen.add(id(table))
+                fmt = table.format()
+                fmt.setBorder(1)
+                fmt.setBorderStyle(QtGui.QTextFrameFormat.BorderStyle_Solid)
+                fmt.setBorderBrush(QtGui.QBrush(QtGui.QColor(t["table_line"])))
+                fmt.setCellSpacing(0)
+                fmt.setCellPadding(4)
+                if hasattr(fmt, "setBorderCollapse"):
+                    fmt.setBorderCollapse(True)
+                table.setFormat(fmt)
+                for r in range(table.rows()):
+                    for c in range(table.columns()):
+                        cell = table.cellAt(r, c)
+                        cf = cell.format()
+                        if r == 0:
+                            cf.setBackground(QtGui.QColor(t["table_head"]))
+                            cf.setFontWeight(QtGui.QFont.Bold)
+                        elif r % 2 == 0:
+                            cf.setBackground(QtGui.QColor(t["zebra"]))
+                        cell.setFormat(cf)
+            block = block.next()
 
     def _scroll(self) -> None:
         bar = self.view.verticalScrollBar()

@@ -161,7 +161,7 @@ def status_gui(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     for name, d in App.listDocuments().items():
         gd = Gui.getDocument(name)
         docs.append({"name": name, "label": d.Label, "file": d.FileName or None, "objects": len(d.Objects),
-                     "modified": bool(getattr(gd, "Modified", False))})
+                     "modified": bool(getattr(gd, "Modified", False)), "project_folder": project_folder(d)})
     sel = []
     for s in Gui.Selection.getSelectionEx("", 0):
         sel.append({"doc": s.DocumentName, "object": s.ObjectName, "label": s.Object.Label,
@@ -176,6 +176,7 @@ def status_gui(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         "active_document": App.ActiveDocument.Name if App.ActiveDocument else None,
         "selection": sel[:50],
         "task_dialog_open": bool(Gui.Control.activeDialog()),
+        "projects_folder": projects_root(),
         "undo_limit": App.ParamGet("User parameter:BaseApp/Preferences/Document").GetInt("MaxUndoSize", 20),
     }
 
@@ -335,9 +336,12 @@ def document(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     if action == "save_as":
         if not path:
             raise OpError(protocol.INVALID_ARGS, "save_as needs a path")
-        target = os.path.abspath(os.path.expanduser(path))
+        from . import projects
+
+        target = projects.place(path, "save", project_folder(doc))     # a bare name: its project folder
         if not target.lower().endswith(".fcstd"):
             target += ".FCStd"
+        os.makedirs(os.path.dirname(target), exist_ok=True)
         doc.saveAs(target)
         return {"document": doc.Name, "file": doc.FileName}
     if action == "close":
@@ -384,9 +388,25 @@ def _default_export_objects(doc: Any) -> list[Any]:
     return [o for o in objs if _parent(o) is None or _parent(o).Name not in names]
 
 
+def projects_root() -> str:
+    """Where every model gets its own folder (the preference, else ~/Documents/FreeCAD Projects)."""
+    from . import projects
+
+    return App.ParamGet("User parameter:BaseApp/Preferences/Mod/ClaudeBridge").GetString(projects.PARAM, "") \
+        or projects.default_root()
+
+
+def project_folder(doc: Any) -> str:
+    from . import projects
+
+    return projects.project_folder(doc.FileName or "", doc.Label, projects_root())
+
+
 def export(args: dict[str, Any], ex: Any) -> dict[str, Any]:
+    from . import projects
+
     doc = _doc(args.get("doc"))
-    path = os.path.abspath(os.path.expanduser(str(args.get("path") or "")))
+    path = projects.place(str(args.get("path") or ""), "export", project_folder(doc)) if args.get("path") else ""
     if not args.get("path"):
         raise OpError(protocol.INVALID_ARGS, "export needs a path")
     fmt = (args.get("format") or EXPORT_FORMATS.get(os.path.splitext(path)[1].lower(), "")).lower()
@@ -435,4 +455,5 @@ OPS = {
     "import": action_ops.import_file,
     "view": action_ops.view,
     "snapshot": action_ops.snapshot,
+    "sub_chat": action_ops.sub_chat,
 }

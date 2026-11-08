@@ -10,8 +10,9 @@ import FreeCAD as App
 import FreeCADGui as Gui
 from PySide import QtCore, QtGui, QtWidgets
 
-from . import conversations, debuglog
+from . import conversations, debuglog, look
 from .common import (
+    _buttons,
     _doc_key,
     _history_path,
     _load_history,
@@ -20,7 +21,7 @@ from .common import (
     _when,
     doc_key,
 )
-from .widgets import SUBTITLE_ROLE, _ConversationDelegate
+from .widgets import DEPTH_ROLE, SUBTITLE_ROLE, _ConversationDelegate
 
 
 class SidebarMixin:
@@ -73,7 +74,16 @@ class SidebarMixin:
 
     def _doc_folder(self) -> str:
         doc = App.ActiveDocument
-        return os.path.dirname(doc.FileName) if doc is not None and doc.FileName else os.path.expanduser("~")
+        from ..bridge import ops
+
+        if doc is not None and doc.FileName:
+            return os.path.dirname(doc.FileName)
+        root = ops.projects_root()                       # new work starts in the projects folder, not in ~
+        try:
+            os.makedirs(root, exist_ok=True)
+            return root
+        except OSError:
+            return os.path.expanduser("~")
 
     def refresh_conversations(self) -> None:
         """Conversations grouped by project (FreeCAD document), the current one first. Within a project
@@ -100,7 +110,8 @@ class SidebarMixin:
             lst.addItem(it)
 
         def entry(text: str, sub: str, data: tuple, tip: str, current: bool, nested: bool = False) -> None:
-            it = QtWidgets.QListWidgetItem(("      ↳ " if nested else "") + text)
+            it = QtWidgets.QListWidgetItem(("🧩 " if nested else "") + text)
+            it.setData(DEPTH_ROLE, 1 if nested else 0)
             flags = QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
             if data[0] == "conv" and not nested:
                 flags |= QtCore.Qt.ItemIsDragEnabled             # reorder within its project
@@ -128,7 +139,9 @@ class SidebarMixin:
                           f"Sub chat for the part {part.get('label')} ({part.get('name')})\nIt changes only this "
                           "part; the main chat above holds the full model.\nRight-click for more", current, True)
                     continue
-                entry(("📌 " if c.get("pinned") else "") + c["title"], _when(stamp), ("conv", key, c["id"]),
+                subs = sum(1 for s in group["items"] if s.get("parent") == c["id"])
+                when = _when(stamp) + (f" · 🧩 {subs} sub chat{'s' if subs != 1 else ''}" if subs else "")
+                entry(("📌 " if c.get("pinned") else "") + c["title"], when, ("conv", key, c["id"]),
                       f"{c['title']}\nProject: {group['label']}\nSession {c['id']}\n"
                       "Drag to reorder; right-click for more (also: a sub chat for one part)", current)
                 if pending_sub and pending_sub["parent"] == c["id"]:
@@ -159,14 +172,15 @@ class SidebarMixin:
                                                    os.path.getmtime(_history_path(self._hist_key())) + 1)
         if item and newer:
             parts = []
+            t = self._theme()
             for role, text in conversations.transcript(path):
                 body = html.escape(text).replace("\n", "<br>")
                 if role == "user":
-                    parts.append(f"<p style='margin-top:10px'><b>You:</b> {body}</p>")
+                    parts.append(look.user_bubble(text, "", t))
                 elif role == "assistant":
-                    parts.append(f"<p>{body}</p>")
+                    parts.append(look.claude_header(t) + f"<p>{body}</p>")
                 else:
-                    parts.append(f"<div style='color:#888'>⚙ {body}</div>")
+                    parts.append(f"<div><font color='{t['muted']}'>⚙ {body}</font></div>")
             self.view.setHtml("".join(parts))
             self._note("Redrawn from the session file (it continued outside this panel).")
         else:
@@ -407,6 +421,13 @@ class SidebarMixin:
             self._note(f"Which part? Select it in the model or name it, e.g. /sub Roof. Parts: {names}.")
             return
         self._start_sub(part)
+
+    def offer_sub_chats(self, parts: list[dict[str, str]]) -> None:
+        """Claude offers sub chats (the user asked for them): one button per part, opened by a click."""
+        self._close_text()
+        self._append("<p>🧩 <b>Sub chats</b> — each starts with this chat's history and changes only its part:</p>"
+                     + _buttons([(f"🧩 {p['label']}", f"sub:{p['name']}", "option") for p in parts],
+                                tip={f"sub:{p['name']}": f"Open a sub chat for {p['label']}" for p in parts}))
 
     def _start_sub(self, part: dict[str, str]) -> None:
         active = self.store.active(self.current_key)

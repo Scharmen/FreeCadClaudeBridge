@@ -9,9 +9,10 @@ from freecad_bridge import mcp_server
 EXPECTED = {"status", "get_tree", "get_object", "get_changes", "get_console", "api_help", "run_python",
             "run_command", "selection", "document", "export", "import", "view", "run_headless", "image_to_3d",
             "record_feedback", "sculpt", "compare_to_picture", "design_notes", "check_design", "check_print",
-            "check_fit", "flex_test", "inspect_views", "check_surface", "check_all", "make_part", "design_library"}
+            "check_fit", "flex_test", "inspect_views", "check_surface", "check_all", "make_part", "design_library",
+            "sub_chat"}
 READ_ONLY = {"check_design", "check_print", "check_fit", "flex_test", "inspect_views", "check_surface", "check_all",
-             "status", "get_tree", "get_object", "get_changes", "get_console", "api_help"}
+             "status", "get_tree", "get_object", "get_changes", "get_console", "api_help", "sub_chat"}
 GONE = {"instances", "select_instance", "inspect_shape", "inspect_sketch", "snapshot", "task_dialog", "list_commands",
         "get_preferences"}
 

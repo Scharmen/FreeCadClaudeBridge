@@ -40,6 +40,8 @@ class _ActiveDocWatcher:
         self.panel.store.set_label(doc_key(doc), doc.Label)
 
 
+DEPTH_ROLE = QtCore.Qt.UserRole + 2        # 1 for a sub chat (drawn indented under its main chat)
+SUB_ACCENT = "#d9822b"
 SUBTITLE_ROLE = QtCore.Qt.UserRole + 1
 
 
@@ -52,9 +54,16 @@ class _ConversationDelegate(QtWidgets.QStyledItemDelegate):
             return
         painter.save()
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
-        r = option.rect.adjusted(2, 1, -4, -1)
         pal = option.palette
         fg = pal.text().color()
+        r = option.rect.adjusted(2, 1, -4, -1)
+        if index.data(DEPTH_ROLE):                             # a sub chat: indented on a tree line
+            line = QtGui.QColor(SUB_ACCENT)
+            painter.setPen(QtGui.QPen(line, 2))
+            x = option.rect.x() + 12
+            painter.drawLine(x, option.rect.top(), x, option.rect.center().y())
+            painter.drawLine(x, option.rect.center().y(), x + 8, option.rect.center().y())
+            r = option.rect.adjusted(24, 1, -4, -1)
         if option.state & QtWidgets.QStyle.State_Selected:
             painter.setPen(QtCore.Qt.NoPen)
             painter.setBrush(pal.highlight())

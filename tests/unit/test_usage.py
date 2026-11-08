@@ -150,3 +150,24 @@ def test_a_sub_chat_starts_as_a_fork_of_its_main_chat():
     assert args[args.index("--resume") + 1] == "main-1" and "--fork-session" in args
     assert "--fork-session" not in stream.session_args("main-1"), "a normal resume continues the same session"
     assert "--fork-session" not in stream.session_args(None, fork=True), "nothing to fork"
+
+
+def test_the_plan_comes_from_the_profile_claude_code_refreshes():
+    max5 = {"organizationType": "claude_max", "organizationRateLimitTier": "default_claude_max_5x"}
+    assert usage.plan_name(max5, token_type="pro") == "Claude Max 5x", "the login token lags behind an upgrade"
+    assert usage.plan_name({"organizationType": "claude_max",
+                            "organizationRateLimitTier": "default_claude_max_20x"}) == "Claude Max 20x"
+    assert usage.plan_name({"organizationType": "claude_pro"}) == "Claude Pro"
+    assert usage.plan_name({"organizationType": "claude_team"}) == "Claude Team"
+    assert usage.plan_name({}, token_type="Claude Pro") == "Claude Pro", "no profile: what Claude Code said"
+    assert usage.plan_name({}, token_type="max") == "Claude Max"
+    assert usage.plan_name({}) is None
+
+
+def test_the_profile_is_read_from_claude_codes_config(tmp_path, monkeypatch):
+    (tmp_path / ".claude.json").write_text(json.dumps({"oauthAccount": {"organizationType": "claude_max",
+                                                                        "organizationRateLimitTier": "x_5x"}}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    assert usage.read_profile()["organizationType"] == "claude_max"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "missing"))
+    assert usage.read_profile() == {}

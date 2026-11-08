@@ -64,8 +64,9 @@ def collect(doc: Any) -> list[dict[str, Any]]:
 
 
 def default_folder(doc: Any) -> str:
-    base = os.path.dirname(doc.FileName) if doc.FileName else os.path.join(os.path.expanduser("~"), "Documents")
-    return os.path.join(base, f"{doc.Label}_3D-Print")
+    from ..bridge import ops
+
+    return os.path.join(ops.project_folder(doc), "print")
 
 
 class PrintDialog(QtWidgets.QDialog):
