@@ -19,8 +19,6 @@ Each built from a few sentences in the chat panel (renders of the real files):
 | ![A 20 × 20 cm Duplo-compatible play board with a house, trees and a river](docs/images/gallery-playboard.png) | ![A sculpted Labrador on a base](docs/images/gallery-labrador.png) |
 | **Play board:** 20 × 20 cm Duplo-compatible tiles | **Labrador:** a sculpted figure, one watertight print |
 
-> **Status: 1.21.1, not yet tagged.** Tested by hand on macOS; Linux and Windows are tested in CI against FreeCAD 1.1.4. Nothing from the print export has been printed and assembled yet, so the fit of pins and axles is untested. What changed: [CHANGELOG.md](CHANGELOG.md).
-
 ## Install
 
 You need **[FreeCAD](https://www.freecad.org/downloads.php) 1.0+** and **[Claude Desktop](https://claude.ai/download)**, signed in (on Linux, [Claude Code](https://claude.com/claude-code) is enough).
