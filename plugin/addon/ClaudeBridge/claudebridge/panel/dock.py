@@ -1001,7 +1001,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         cur.movePosition(QtGui.QTextCursor.End)
         cur.insertBlock()
         if hasattr(cur, "insertMarkdown"):
-            cur.insertMarkdown(notes.Text)
+            cur.insertMarkdown(look.markdown_for_qt(notes.Text))
         else:
             cur.insertText(notes.Text)
         cur.movePosition(QtGui.QTextCursor.End)
@@ -1069,7 +1069,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         cur.movePosition(QtGui.QTextCursor.End, QtGui.QTextCursor.KeepAnchor)
         if hasattr(cur, "insertMarkdown") and self.md_buf.strip():
             cur.removeSelectedText()
-            cur.insertMarkdown(self.md_buf)
+            cur.insertMarkdown(look.markdown_for_qt(self.md_buf))
             self._style_tables(self.md_start)
             # leave the list/quote/code block, so what follows starts as a normal paragraph
             cur.movePosition(QtGui.QTextCursor.End)

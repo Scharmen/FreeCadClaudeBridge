@@ -28,3 +28,12 @@ def test_dark_and_light_themes_differ_and_notes_have_symbols():
     assert look.theme(dark=True)["bubble"] != look.theme(dark=False)["bubble"]
     assert look.note("Saved", "info", look.theme()).count("ℹ️") == 1
     assert "⚠️" in look.note("Broken", "error", look.theme())
+
+
+def test_line_breaks_inside_table_cells_do_not_break_the_table():
+    md = ("| Group | Contents |\n|---|---|\n| 📐 Ground floor | **Kitchen:** fridge<br>**Living room:** sofa<br/>x |\n"
+          "| 🧩 Roofs | three |\n\nFirst line<br>second line")
+    out = look.markdown_for_qt(md)
+    assert "<br" not in out
+    assert "| 📐 Ground floor | **Kitchen:** fridge · **Living room:** sofa · x |" in out
+    assert "First line  \nsecond line" in out, "outside a table it becomes a Markdown line break"

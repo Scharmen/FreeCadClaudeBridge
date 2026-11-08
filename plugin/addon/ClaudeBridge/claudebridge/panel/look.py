@@ -82,3 +82,19 @@ def note(text: str, kind: str, t: dict[str, str]) -> str:
         return (f"<table width='100%' cellspacing='0' cellpadding='6'><tr><td bgcolor='{t['error_bg']}'>"
                 f"<font color='{t['error']}'>⚠️ {body}</font></td></tr></table>")
     return f"<div><font color='{t['muted']}'>ℹ️ <i>{body}</i></font></div>"
+
+
+def markdown_for_qt(md: str) -> str:
+    """Qt's Markdown reader loses a table, and all text after it, when a cell holds HTML such as <br> (which
+    Claude uses for line breaks in cells). Cells cannot hold several lines in Qt anyway: join them with " · ";
+    outside tables a <br> becomes a Markdown line break."""
+    import re
+
+    br = re.compile(r"\s*<br\s*/?>\s*", re.I)
+    lines = []
+    for line in md.split("\n"):
+        if line.lstrip().startswith("|"):
+            lines.append(br.sub(" · ", line))
+        else:
+            lines.append(br.sub("  \n", line))
+    return "\n".join(lines)
