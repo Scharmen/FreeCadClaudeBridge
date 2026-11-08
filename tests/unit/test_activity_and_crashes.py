@@ -221,3 +221,32 @@ def test_long_jobs_and_frozen_gui_are_not_stalls():
                now=1)
     b.alive(now=200)                       # the window was frozen by FreeCAD work until now
     assert b.stall(now=210, limit=90) is None
+
+
+# ---------- whether Claude Code is in a turn
+
+def test_messages_merged_into_one_turn_leave_the_panel_free():
+    t = stream.TurnTracker()
+    assert not t.busy
+    t.sent()
+    assert t.busy, "sent and not answered yet"
+    t.on_event("init")
+    for _ in range(3):                       # sent while Claude works: Claude Code folds them into this turn
+        t.sent()
+    t.on_event("result")                     # one result answers all four
+    assert not t.busy, "the turn is over even though four messages got one result"
+
+
+def test_a_queued_message_that_gets_its_own_turn_keeps_the_panel_busy():
+    t = stream.TurnTracker()
+    t.sent()
+    t.on_event("init")
+    t.sent()
+    t.on_event("result")
+    t.on_event("init")                       # Claude Code starts the queued message as its own turn
+    assert t.busy
+    t.on_event("result")
+    assert not t.busy
+    t.sent()
+    t.reset()                                # the process ended
+    assert not t.busy

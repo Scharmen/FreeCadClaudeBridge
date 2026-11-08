@@ -441,12 +441,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
             title = words[0] if words else ("Picture" if images else text.splitlines()[0] if text else "Conversation")
             self.pending = {"title": title.strip()[:60], "cwd": session.cwd}
         if not queued:
-            self.turn_results, self.max_result_chars, self.turn_steps = [], 0, 0
-            self.turn_started = time.time()
-            self.usage.start_turn()
-            self.stopping = False
-            self.stall_noted = False
-            self.activity.start(time.time())
+            self._begin_turn()
         else:
             self._note("Queued: Claude reads it after the current step.")
         active = self.store.active(self.current_key)
@@ -532,6 +527,14 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
             self.stopping = True
             self.status.setText("Stopping…")
             self.session.interrupt()
+
+    def _begin_turn(self) -> None:
+        self.turn_results, self.max_result_chars, self.turn_steps = [], 0, 0
+        self.turn_started = time.time()
+        self.usage.start_turn()
+        self.stopping = False
+        self.stall_noted = False
+        self.activity.start(time.time())
 
     def _busy(self, busy: bool) -> None:
         self.stop_btn.setEnabled(busy)
@@ -630,6 +633,9 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         kind = ev.get("kind")
         if kind not in ("text_delta", "thinking_delta"):
             debuglog.log("event", **{k: v for k, v in ev.items() if k != "content"})
+        if kind == "init" and self.activity.phase == "idle":   # a queued message got a turn of its own
+            self._begin_turn()
+            self._busy(True)
         was = self.activity.phase
         progressed = self.activity.on_event(ev, time.time())
         self.usage.on_event(ev)
@@ -839,7 +845,8 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
             "Chat panel": "\n".join([
                 f"document key: {self.current_key}",
                 f"conversation: {(self.store.active(self.current_key) or {}).get('id')}",
-                f"session running: {bool(s and s.running())}, pending messages: {s.pending if s else 0}",
+                f"session running: {bool(s and s.running())}, in a turn: {s.turn.open if s else False}, "
+                f"waiting for a turn: {s.turn.waiting if s else False}",
                 f"activity: {self.activity.phase} — {self.activity.describe(time.time())}",
                 f"open approvals: {len(self.perms)}, auto: {self.auto_btn.isChecked()}",
                 f"model: {self.model_box.currentData()}, effort: {self.effort_box.currentData()}, "

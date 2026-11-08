@@ -39,6 +39,33 @@ FREECAD_TOOL_PREFIX = "mcp__plugin_freecad_freecad__"
 MAX_CONTENT = 60000
 
 
+class TurnTracker:
+    """Whether Claude Code is in a turn. Messages sent while it works may be folded into the running turn
+    and answered with one result, so counting sends against results drifts and leaves the panel busy for
+    good. The stream says it instead: init opens a turn, result closes it."""
+
+    def __init__(self) -> None:
+        self.waiting = False      # a message was sent and its turn has not started yet
+        self.open = False
+
+    @property
+    def busy(self) -> bool:
+        return self.waiting or self.open
+
+    def sent(self) -> None:
+        if not self.open:
+            self.waiting = True
+
+    def on_event(self, kind: str) -> None:
+        if kind == "init":
+            self.open, self.waiting = True, False
+        elif kind == "result":
+            self.open = self.waiting = False
+
+    def reset(self) -> None:
+        self.open = self.waiting = False
+
+
 class StreamParser:
     def __init__(self) -> None:
         self._buf = b""

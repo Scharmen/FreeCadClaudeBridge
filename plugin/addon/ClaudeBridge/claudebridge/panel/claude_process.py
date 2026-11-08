@@ -19,7 +19,7 @@ from ..bridge import paths
 from ..bridge.childenv import clean_child_env
 from . import secrets
 from .prompts import FULL_CHAT_PROMPT, SYSTEM_PROMPT
-from .stream import StreamParser, build_args
+from .stream import StreamParser, TurnTracker, build_args
 
 
 def child_env() -> dict[str, str]:
@@ -182,7 +182,7 @@ class ClaudeSession(QtCore.QObject):
         self.parser = StreamParser()
         self.proc: QtCore.QProcess | None = None
         self.info: dict[str, Any] = {}
-        self.pending = 0            # user messages sent but not answered with a result yet
+        self.turn = TurnTracker()   # whether Claude Code is in a turn (or about to start one)
         self._init_id: str | None = None
 
     def start(self) -> bool:
@@ -232,7 +232,7 @@ class ClaudeSession(QtCore.QObject):
 
     @property
     def busy(self) -> bool:
-        return self.pending > 0
+        return self.turn.busy
 
     def _send(self, obj: dict[str, Any]) -> None:
         if self.proc is not None:
@@ -241,7 +241,7 @@ class ClaudeSession(QtCore.QObject):
     def send_user(self, text: str, images: list[tuple[str, bytes]] | None = None) -> None:
         from .stream import user_message
 
-        self.pending += 1
+        self.turn.sent()
         self._send(user_message(text, images))
 
     def answer_permission(self, request_id: str, decision: str, tool_input: dict[str, Any],
@@ -272,8 +272,7 @@ class ClaudeSession(QtCore.QObject):
                 self.info = ev.get("response") or {}
                 self.ready.emit(self.info)
                 continue
-            if ev["kind"] == "result":
-                self.pending = max(0, self.pending - 1)
+            self.turn.on_event(ev["kind"])
             if ev["kind"] == "init" and ev.get("session_id"):
                 self.session_id = ev["session_id"]
             self.event.emit(ev)
@@ -289,7 +288,7 @@ class ClaudeSession(QtCore.QObject):
     def _on_finished(self, code: int, _status: Any = None) -> None:
         for ev in self.parser.flush():
             self.event.emit(ev)
-        self.pending = 0
+        self.turn.reset()
         self.exited.emit(int(code))
 
     def _on_error(self, err: Any) -> None:

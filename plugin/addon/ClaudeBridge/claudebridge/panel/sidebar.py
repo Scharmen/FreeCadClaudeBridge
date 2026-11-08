@@ -268,6 +268,7 @@ class SidebarMixin:
 
     def new_conversation(self) -> None:
         if self._working():
+            self._note("Claude is still working on this conversation. Press Stop first, then start a new one.")
             return
         _save_history(self._hist_key(), self.view.toHtml())
         self._close_session()
