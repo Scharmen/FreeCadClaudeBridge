@@ -108,3 +108,27 @@ def test_a_picture_line_asks_for_a_check_against_the_pictures():
     line = usage.picture_line(["/tmp/a.png", "/tmp/b b.jpg"])
     assert "/tmp/a.png" in line and "/tmp/b b.jpg" in line and "compare_to_picture" in line
     assert usage.picture_line([]) == ""
+
+
+
+def test_effort_entries_say_what_they_do_and_auto_names_the_level_it_used():
+    from claudebridge.panel import tips
+
+    label, tip = tips.effort_auto_item("medium")
+    assert label == "Effort: auto (medium)" and "medium" in tip and "each request" in tip
+    label, tip = tips.effort_auto_item(None)
+    assert label == "Effort: auto" and "each request" in tip
+    for level in ("low", "medium", "high", "xhigh", "max"):
+        assert tips.EFFORT_TIPS[level]
+
+
+def test_every_chat_button_and_permission_mode_has_a_tooltip():
+    from claudebridge.panel import tips
+
+    buttons = [("Allow once", "perm:allow:r1"), ("Deny", "perm:deny:r1"), ("A roof", "perm:ans:r3:0:1"),
+               ("Always", "perm:always:r1"), ("Stop", "stop:"), ("Create debug report", "report:"),
+               ("Open copies", "snapshots:")]
+    assert all(tips.button_tip(label, href) for label, href in buttons)
+    assert tips.button_tip("Skip", "perm:deny:r2").startswith("Skip this question"), "Skip is no Deny"
+    for mode in stream.PERMISSION_MODES:
+        assert tips.MODE_TIPS[mode]

@@ -58,8 +58,10 @@ class ApprovalsMixin:
                      "<b>❓ Claude asks</b>"]
             for qi, q in enumerate(qs):
                 parts.append(f"<br><b>{html.escape(q['header'] or '')}</b> {html.escape(q['question'])}")
+                descs = q.get("descriptions") or []
                 parts.append(_buttons([(opt, f"perm:ans:{rid}:{qi}:{oi}", "option")
-                                       for oi, opt in enumerate(q["options"])]))
+                                       for oi, opt in enumerate(q["options"])],
+                                      tip={f"perm:ans:{rid}:{qi}:{oi}": d for oi, d in enumerate(descs) if d}))
             parts.append(_buttons([("Skip", f"perm:deny:{rid}", "deny")]) + "</td></tr></table>")
             self._append("".join(parts))
             self._update_approval_bar()
@@ -118,6 +120,8 @@ class ApprovalsMixin:
             text = f"❓ {q['question']}"
             for oi, opt in enumerate(q["options"]):
                 btn = QtWidgets.QPushButton(opt)
+                descs = q.get("descriptions") or []
+                btn.setToolTip(descs[oi] if oi < len(descs) and descs[oi] else "Answer with this option")
                 btn.setStyleSheet(f"QPushButton {{ background-color: {BUTTON_COLORS['option']}; color: white; "
                                   "border-radius: 4px; padding: 3px 8px; font-weight: bold; }")
                 btn.clicked.connect(lambda _=False, r=ev["request_id"], a=qi, b=oi: self._answer_question(r, a, b))
@@ -133,6 +137,10 @@ class ApprovalsMixin:
         self.approve_btns["always"].setVisible(not is_q)
         self.approve_btns["always"].setToolTip(ev.get("always_label", ""))
         self.approve_btns["deny"].setText("Skip" if is_q else "Deny")
+        self.approve_btns["allow"].setToolTip("Accept the plan; Claude starts building" if ev["tool"] == "ExitPlanMode"
+                                              else "Allow this action once")
+        self.approve_btns["deny"].setToolTip("Skip this question; Claude goes on without your answer" if is_q
+                                             else "Refuse this action; Claude is told and tries something else")
         self.approve_bar.setVisible(True)
 
     def _bar_answer(self, decision: str) -> None:

@@ -154,3 +154,4 @@ def picture_line(paths: list[str]) -> str:
     return (f"[Pictures attached, saved at: {files}. Model every detail you see in them. When the model is "
             "built, call compare_to_picture with each picture from the matching view, list every difference "
             "(missing parts, proportions, details, colors), fix them and check again before you answer.]")
+

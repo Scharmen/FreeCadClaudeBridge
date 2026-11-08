@@ -204,6 +204,28 @@ class _ChatView(_DropMixin, QtWidgets.QTextBrowser):
         self.setAcceptDrops(True)
         self._press: QtCore.QPoint | None = None
 
+    def _tooltip_at(self, pos: QtCore.QPoint) -> str:
+        """The hover text of a button in the chat (its title attribute)."""
+        hit = self.cursorForPosition(pos).position()
+        for p in (hit + 1, hit):
+            cur = QtGui.QTextCursor(self.document())
+            cur.setPosition(max(0, min(p, self.document().characterCount() - 1)))
+            tip = cur.charFormat().toolTip()
+            if tip:
+                return tip
+        return ""
+
+    def viewportEvent(self, e: Any) -> bool:  # noqa: N802 (Qt API)
+        if e.type() == QtCore.QEvent.ToolTip:
+            tip = self._tooltip_at(e.pos())
+            if tip:
+                QtWidgets.QToolTip.showText(e.globalPos(), tip, self.viewport())
+            else:
+                QtWidgets.QToolTip.hideText()
+                e.ignore()
+            return True
+        return super().viewportEvent(e)
+
     def _image_at(self, pos: QtCore.QPoint) -> str | None:
         hit = self.cursorForPosition(pos).position()
         for p in (hit, hit + 1):

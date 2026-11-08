@@ -13,7 +13,7 @@ import FreeCADGui as Gui
 from PySide import QtCore, QtGui, QtWidgets
 
 from ..bridge import paths
-from . import activity, conversations, debuglog, secrets, usage
+from . import activity, conversations, debuglog, secrets, tips, usage
 from .approvals import ApprovalsMixin
 from .attachments import AttachmentsMixin
 from .claude_process import ClaudeSession
@@ -104,6 +104,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         head.addWidget(self.mode_label, 1)
         self.menu_btn = QtWidgets.QToolButton()
         self.menu_btn.setText("⚙")
+        self.menu_btn.setToolTip("Menu: subscription or API key, conversations, settings, debug report")
         self.menu_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.menu_btn.setMenu(self._build_menu())
         self.camera_btn = QtWidgets.QToolButton()
@@ -129,6 +130,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         self.pmode_box.setToolTip("Permission mode: when Claude asks before acting (like Shift+Tab in Claude Code)")
         for m in PERMISSION_MODES:
             self.pmode_box.addItem(MODE_LABELS.get(m, m), m)
+            self.pmode_box.setItemData(self.pmode_box.count() - 1, tips.MODE_TIPS.get(m, ""), QtCore.Qt.ToolTipRole)
         for box in (self.model_box, self.effort_box, self.pmode_box):
             box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
             ctl.addWidget(box, 1)
@@ -194,15 +196,23 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         self.print_btn.clicked.connect(self._print_export)
         row.addWidget(self.print_btn)
         self.stop_btn = QtWidgets.QPushButton("Stop")
+        self.stop_btn.setToolTip("Stop Claude now; a FreeCAD operation already running finishes on its own")
         self.stop_btn.clicked.connect(self.stop)
         self.stop_btn.setEnabled(False)
         row.addWidget(self.stop_btn)
         self.send_btn = QtWidgets.QPushButton("Send")
+        self.send_btn.setToolTip("Send your message (Enter). While Claude works it is queued and read after the "
+                                 "current step.")
         self.send_btn.clicked.connect(self.send)
         row.addWidget(self.send_btn)
         lay.addLayout(row)
 
         self.setWidget(body)
+        for name, tip in (("qt_dockwidget_floatbutton", "Undock the chat panel into a window, or dock it back"),
+                          ("qt_dockwidget_closebutton", "Close the chat panel (View → Panels → Claude brings it back)")):
+            btn = self.findChild(QtWidgets.QAbstractButton, name)
+            if btn is not None:
+                btn.setToolTip(tip)
         self._apply_info(self.info)
         self.model_box.currentIndexChanged.connect(self._on_model_changed)
         self.effort_box.currentIndexChanged.connect(self._on_effort_changed)
@@ -574,10 +584,41 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         model = next((m for m in self.info.get("models") or [] if m.get("value") == self.model_box.currentData()), {})
         levels = model.get("supportedEffortLevels") or ["low", "medium", "high", "xhigh", "max"]
         self.effort_box.clear()
-        self.effort_box.addItem("Effort: auto", "")
+        known = self._auto_effort()
+        last = known.get(model.get("resolvedModel") or "") or known.get(self.model_box.currentData() or "default")
+        auto_label, auto_tip = tips.effort_auto_item(last)
+        self.effort_box.addItem(auto_label, "")
+        self.effort_box.setItemData(0, auto_tip, QtCore.Qt.ToolTipRole)
         for lv in levels:
             self.effort_box.addItem(f"Effort: {lv}", lv)
+            self.effort_box.setItemData(self.effort_box.count() - 1, tips.EFFORT_TIPS.get(lv, ""),
+                                        QtCore.Qt.ToolTipRole)
         self._select_quiet(self.effort_box, current)
+
+    @staticmethod
+    def _auto_effort() -> dict[str, str]:
+        """The effort Claude Code last chose on "auto", per model (from the session files)."""
+        try:
+            data = json.loads(_params().GetString("AutoEffort", "") or "{}")
+        except ValueError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _learn_auto_effort(self) -> None:
+        """After a turn on "auto": read the effort Claude Code used and show it in the effort list."""
+        item = self.store.active(self.current_key)
+        path = conversations.session_path(item["cwd"], item["id"]) if item else None
+        found = conversations.last_effort(path) if path else None
+        if not found or self.effort_box.currentData():
+            return
+        known = self._auto_effort()
+        chosen = self.model_box.currentData() or "default"          # the alias the list shows, e.g. "opus"
+        if known.get(found[0]) != found[1] or known.get(chosen) != found[1]:
+            known[found[0]] = known[chosen] = found[1]
+            _params().SetString("AutoEffort", json.dumps(known))
+            self.effort_box.blockSignals(True)
+            self._fill_effort()
+            self.effort_box.blockSignals(False)
 
     @staticmethod
     def _select_quiet(box: QtWidgets.QComboBox, value: str) -> None:
@@ -749,6 +790,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
                                "and how much of the model's context window the conversation fills.")
         self.stopping = False
         _save_history(self._hist_key(), self.view.toHtml())
+        self._learn_auto_effort()
         if self.restart_after_turn:
             self.restart_after_turn = False
             self._close_session()

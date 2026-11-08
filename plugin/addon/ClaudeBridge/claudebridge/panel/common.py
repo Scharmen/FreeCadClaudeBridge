@@ -14,6 +14,7 @@ import FreeCADGui as Gui
 
 from ..bridge import paths
 from . import usage
+from .tips import button_tip
 
 PARAMS = "User parameter:BaseApp/Preferences/Mod/ClaudeBridge"
 
@@ -135,7 +136,8 @@ def _buttons(items: list[tuple[str, str, str]], tip: dict[str, str] | None = Non
     """Small clickable buttons inside the chat: (label, href, color key)."""
     cells = []
     for label, href, kind in items:
-        title = f" title='{html.escape(tip[href])}'" if tip and href in tip else ""
+        text = (tip or {}).get(href) or button_tip(label, href)
+        title = f" title='{html.escape(text, quote=True)}'" if text else ""
         cells.append(f"<td bgcolor='{BUTTON_COLORS.get(kind, kind)}'><a href='{href}'{title} "
                      f"style='color:#ffffff; text-decoration:none'><b>&nbsp;{html.escape(label)}&nbsp;</b></a></td>")
     return "<table cellspacing='4' cellpadding='3'><tr>" + "".join(cells) + "</tr></table>"

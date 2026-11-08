@@ -396,14 +396,17 @@ QUESTION_TOOL = "AskUserQuestion"
 
 
 def questions(tool: str, tool_input: dict[str, Any]) -> list[dict[str, Any]]:
-    """The questions of an AskUserQuestion request as {question, header, multi, options: [labels]}."""
+    """The questions of an AskUserQuestion request as {question, header, multi, options: [labels],
+    descriptions: [one per option]}."""
     if tool != QUESTION_TOOL:
         return []
     out = []
     for q in tool_input.get("questions") or []:
         if isinstance(q, dict) and q.get("question"):
             out.append({"question": q["question"], "header": q.get("header", ""), "multi": bool(q.get("multiSelect")),
-                        "options": [o.get("label", "") for o in q.get("options") or [] if isinstance(o, dict)]})
+                        "options": [o.get("label", "") for o in q.get("options") or [] if isinstance(o, dict)],
+                        "descriptions": [o.get("description", "") for o in q.get("options") or []
+                                         if isinstance(o, dict)]})
     return out
 
 

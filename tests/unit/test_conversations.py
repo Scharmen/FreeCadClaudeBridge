@@ -147,3 +147,14 @@ def test_sidebar_groups_by_project(tmp_path):
     assert [g["key"] for g in groups] == ["/p/House.FCStd", "unsaved:Viking"], "current project first"
     assert groups[0]["label"] == "House" and groups[1]["items"][0]["id"] == "v1"
     assert store.label("/x/Other.FCStd") == "Other", "file name when no label was saved"
+
+
+def test_the_effort_claude_code_chose_is_read_from_the_session_file(tmp_path):
+    path = tmp_path / "s.jsonl"
+    recs = [{"type": "api-request", "params": {"model": "claude-opus-5-5", "output_config": {"effort": "high"}}},
+            {"type": "assistant", "message": {"content": "x"}},
+            {"type": "api-request", "params": {"model": "claude-opus-5-5", "output_config": {"effort": "medium"}}},
+            {"type": "api-request", "params": {"model": "claude-haiku-5-5"}}]          # a side request
+    path.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    assert conv.last_effort(str(path)) == ("claude-opus-5-5", "medium"), "the last request that names an effort"
+    assert conv.last_effort(str(tmp_path / "missing.jsonl")) is None

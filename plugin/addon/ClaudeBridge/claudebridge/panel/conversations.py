@@ -68,6 +68,19 @@ def _records(path: str):
         return
 
 
+def last_effort(path: str) -> tuple[str, str] | None:
+    """(model, effort) of the last API request in a session file that names an effort: what "auto" chose."""
+    found = None
+    for rec in _records(path):
+        if rec.get("type") != "api-request":
+            continue
+        params = rec.get("params") or {}
+        effort = (params.get("output_config") or {}).get("effort")
+        if effort and params.get("model"):
+            found = (str(params["model"]), str(effort))
+    return found
+
+
 def _is_prompt(rec: dict[str, Any]) -> bool:
     """A real user message (not a tool result or a sidechain)."""
     if rec.get("type") != "user" or rec.get("isSidechain"):
