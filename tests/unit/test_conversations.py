@@ -222,3 +222,36 @@ def test_a_sub_chat_whose_main_chat_is_gone_stands_alone(tmp_path):
     store.add("k", "sub-2", "", "/h", parent="main-1", part={"name": "Base", "label": "Base"})
     store.remove("k", "main-1")
     assert [(c["id"], depth) for c, depth in store.nested("k")] == [("sub-2", 0)]
+
+
+def test_prepared_sub_chats_stay_listed_until_they_start(tmp_path):
+    store = conv.Store(tmp_path)
+    key = "/m/Board.FCStd"
+    store.add(key, "main-1", "Play board", "/home")
+    roof, park = {"name": "Roof", "label": "Roof"}, {"name": "Tile_F", "label": "Waterpark tile"}
+    store.add_pending_sub(key, "main-1", roof)                  # Claude offered them, nothing opened yet
+    store.add_pending_sub(key, "main-1", park)
+    store.add_pending_sub(key, "main-1", park)                  # offered twice: listed once
+    assert [p["part"]["name"] for p in store.pending_subs(key)] == ["Roof", "Tile_F"]
+    assert store.active(key)["id"] == "main-1", "an offer opens nothing"
+    store.open_pending_sub(key, "Tile_F")
+    assert store.active(key) is None and store.pending_sub(key)["part"]["name"] == "Tile_F"
+    store.set_active(key, "main-1")                             # back to the main chat before typing
+    assert store.pending_sub(key) is None
+    assert [p["part"]["name"] for p in store.pending_subs(key)] == ["Roof", "Tile_F"], "still listed"
+    store.open_pending_sub(key, "Tile_F")
+    store.add(key, "sub-2", "", "/home", **store.take_pending_sub(key))   # the first message starts it
+    assert store.find(key, "sub-2")["part"]["name"] == "Tile_F"
+    assert [p["part"]["name"] for p in store.pending_subs(key)] == ["Roof"]
+    store.discard_pending_sub(key, "Roof")
+    assert store.pending_subs(key) == []
+    again = conv.Store(tmp_path)
+    assert again.pending_subs(key) == [] and again.find(key, "sub-2")
+
+
+def test_prepared_sub_chats_of_a_deleted_main_chat_go_with_it(tmp_path):
+    store = conv.Store(tmp_path)
+    store.add("k", "main-1", "Main", "/h")
+    store.add_pending_sub("k", "main-1", {"name": "Roof", "label": "Roof"})
+    store.remove("k", "main-1")
+    assert store.pending_subs("k") == []

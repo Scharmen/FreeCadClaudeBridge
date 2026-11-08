@@ -263,21 +263,65 @@ class Store:
         doc["active"] = sid
         self._save()
 
-    def start_sub(self, key: str, parent: str, part: dict[str, str]) -> None:
-        """Prepare a sub chat for one part: it forks the main chat when its first message is sent."""
+    # Sub chats that are prepared but not started: a sub chat forks its main chat with its first message,
+    # so until then it lives here, listed under its main chat (offered by Claude or opened by the user).
+
+    def pending_subs(self, key: str) -> list[dict[str, Any]]:
+        doc = self.data.get(key) or {}
+        mains = {c["id"] for c in doc.get("items", [])}
+        return [p for p in doc.get("pending_subs", []) if p.get("parent") in mains]
+
+    def add_pending_sub(self, key: str, parent: str, part: dict[str, str]) -> None:
+        """List a sub chat for `part` under its main chat (offered; nothing opens)."""
         doc = self._doc(key)
-        doc["pending_sub"] = {"parent": parent, "part": dict(part)}
+        subs = doc.setdefault("pending_subs", [])
+        if not any(p["parent"] == parent and p["part"].get("name") == part.get("name") for p in subs):
+            subs.append({"parent": parent, "part": dict(part)})
+            self._save()
+
+    def open_pending_sub(self, key: str, name: str, parent: str | None = None) -> bool:
+        """Show a prepared sub chat (the main chat's own conversation is kept)."""
+        doc = self._doc(key)
+        match = next((p for p in self.pending_subs(key) if p["part"].get("name") == name
+                      and (parent is None or p["parent"] == parent)), None)
+        if match is None:
+            return False
+        doc["pending_open"] = {"parent": match["parent"], "name": name}
         doc["active"] = None
         self._save()
+        return True
+
+    def start_sub(self, key: str, parent: str, part: dict[str, str]) -> None:
+        """Prepare a sub chat for one part and show it: it forks the main chat with its first message."""
+        self.add_pending_sub(key, parent, part)
+        self.open_pending_sub(key, part.get("name", ""), parent)
 
     def pending_sub(self, key: str) -> dict[str, Any] | None:
-        return (self.data.get(key) or {}).get("pending_sub")
+        """The prepared sub chat on screen, or None (also when a started conversation is shown)."""
+        doc = self.data.get(key) or {}
+        current = doc.get("pending_open")
+        if doc.get("active") or not current:
+            return None
+        return next((p for p in self.pending_subs(key) if p["parent"] == current["parent"]
+                     and p["part"].get("name") == current["name"]), None)
 
     def take_pending_sub(self, key: str) -> dict[str, Any]:
-        """The prepared sub chat's parent and part (empty when none), and forget it."""
-        pending = (self.data.get(key) or {}).pop("pending_sub", None) or {}
+        """The shown sub chat's parent and part (empty when none), now started: no longer prepared."""
+        current = self.pending_sub(key)
+        doc = self.data.get(key) or {}
+        doc.pop("pending_open", None)
+        if current:
+            doc["pending_subs"] = [p for p in doc.get("pending_subs", []) if p is not current]
         self._save()
-        return pending
+        return {"parent": current["parent"], "part": current["part"]} if current else {}
+
+    def discard_pending_sub(self, key: str, name: str, parent: str | None = None) -> None:
+        doc = self.data.get(key) or {}
+        doc["pending_subs"] = [p for p in doc.get("pending_subs", []) if not (
+            p["part"].get("name") == name and (parent is None or p["parent"] == parent))]
+        if (doc.get("pending_open") or {}).get("name") == name:
+            doc.pop("pending_open", None)
+        self._save()
 
     def nested(self, key: str) -> list[tuple[dict[str, Any], int]]:
         """Main chats in their order, each followed by its sub chats (depth 1). A sub chat whose main chat
@@ -306,7 +350,7 @@ class Store:
         self._save()
 
     def start_new(self, key: str) -> None:
-        (self.data.get(key) or {}).pop("pending_sub", None)
+        (self.data.get(key) or {}).pop("pending_open", None)        # prepared sub chats stay listed
         self.set_active(key, None)
 
     def rename(self, key: str, sid: str, title: str) -> None:

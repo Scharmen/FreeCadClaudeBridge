@@ -140,15 +140,21 @@ class SidebarMixin:
                           f"Sub chat for the part {part.get('label')} ({part.get('name')})\nIt changes only this "
                           "part; the main chat above holds the full model.\nRight-click for more", current, True)
                     continue
-                subs = sum(1 for s in group["items"] if s.get("parent") == c["id"])
+                subs = sum(1 for s in group["items"] if s.get("parent") == c["id"]) + \
+                    sum(1 for p in self.store.pending_subs(key) if p["parent"] == c["id"])
                 when = _when(stamp) + (f" · 🧩 {subs} sub chat{'s' if subs != 1 else ''}" if subs else "")
                 entry(("📌 " if c.get("pinned") else "") + c["title"], when, ("conv", key, c["id"]),
                       f"{c['title']}\nProject: {group['label']}\nSession {c['id']}\n"
                       "Drag to reorder; right-click for more (also: a sub chat for one part)", current)
-                if pending_sub and pending_sub["parent"] == c["id"]:
-                    entry(f"New sub chat: {pending_sub['part'].get('label')}", "not started yet",
-                          ("pending", None), "Type a message to start it; it begins with the main chat's history",
-                          True, True)
+                for p in self.store.pending_subs(key):
+                    if p["parent"] != c["id"]:
+                        continue
+                    shown = bool(pending_sub and pending_sub["parent"] == c["id"]
+                                 and pending_sub["part"].get("name") == p["part"].get("name"))
+                    entry(f"{p['part'].get('label')}", "not started yet · click to open",
+                          ("pendsub", key, p["part"].get("name"), c["id"]),
+                          f"Sub chat for the part {p['part'].get('label')}, not started yet: open it and type a "
+                          "message; it begins with the main chat's history.\nRight-click to remove it", shown, True)
         others = conversations.folder_sessions(self._doc_folder(), exclude=self.store.linked_ids())
         if others:
             header("In this folder")
@@ -197,6 +203,8 @@ class SidebarMixin:
             self._open_conversation(data[1], data[2])
         elif data[0] == "ext":
             self._open_external(data[1])
+        elif data[0] == "pendsub":
+            self._open_pending_sub(data[1], data[2], data[3])
         else:
             self._choose(data[0], data[1])
 
@@ -282,6 +290,13 @@ class SidebarMixin:
         item = self.conv_list.itemAt(pos)
         data = item.data(QtCore.Qt.UserRole) if item else None
         if not data or data[0] == "pending":
+            return
+        if data[0] == "pendsub":
+            menu = QtWidgets.QMenu(self)
+            menu.addAction("Open").triggered.connect(lambda: self._open_pending_sub(data[1], data[2], data[3]))
+            menu.addAction("Remove this sub chat").triggered.connect(
+                lambda: (self.store.discard_pending_sub(data[1], data[2], data[3]), self._render_active()))
+            menu.exec(self.conv_list.viewport().mapToGlobal(pos))
             return
         if data[0] == "conv":
             if data[1] != self.current_key:
@@ -424,17 +439,48 @@ class SidebarMixin:
         self._start_sub(part)
 
     def offer_sub_chats(self, parts: list[dict[str, str]]) -> None:
-        """Claude offers sub chats (the user asked for them): one button per part, opened by a click."""
+        """Claude offers sub chats (the user asked for them): listed under this chat and as buttons; nothing
+        opens until the user clicks one."""
         self._close_text()
-        self._append("<p>🧩 <b>Sub chats</b> — each starts with this chat's history and changes only its part:</p>"
+        active = self.store.active(self.current_key)
+        main = self.store.find(self.current_key, active["parent"]) if active and active.get("parent") else active
+        if main is not None:
+            for p in parts:
+                self.store.add_pending_sub(self.current_key, main["id"], p)
+            self.refresh_conversations()
+        self._append("<p>🧩 <b>Sub chats</b> — listed under this chat on the left; each starts with this chat's "
+                     "history and changes only its part:</p>"
                      + _buttons([(f"🧩 {p['label']}", f"sub:{p['name']}", "option") for p in parts],
                                 tip={f"sub:{p['name']}": f"Open a sub chat for {p['label']}" for p in parts}))
 
-    def _start_sub(self, part: dict[str, str]) -> None:
-        active = self.store.active(self.current_key)
-        pending = self.store.pending_sub(self.current_key) if active is None else None
-        parent = (active or {}).get("parent") or (pending or {}).get("parent")
-        main = self.store.find(self.current_key, parent) if parent else active
+    def _open_pending_sub(self, key: str, name: str, parent: str) -> None:
+        """A prepared sub chat from the list: show it (opening its model first if needed)."""
+        if self._working():
+            self._note("Wait until Claude is done, or press Stop, before switching conversations.")
+            self.refresh_conversations()
+            return
+        if key != self.current_key:
+            self.store.open_pending_sub(key, name, parent)
+            doc = self._doc_for_key(key) or (self._open_model(key) if os.path.isfile(key) else None)
+            if doc is not None:
+                self._bring_up(doc)
+                QtCore.QTimer.singleShot(0, self.switch_document)
+                QtCore.QTimer.singleShot(0, self._focus_conversation)
+            return
+        main = self.store.find(key, parent)
+        p = next((x for x in self.store.pending_subs(key) if x["parent"] == parent and x["part"].get("name") == name),
+                 None)
+        if main is None or p is None:
+            self.refresh_conversations()
+            return
+        self._start_sub(p["part"], main)
+
+    def _start_sub(self, part: dict[str, str], main: dict[str, Any] | None = None) -> None:
+        if main is None:
+            active = self.store.active(self.current_key)
+            pending = self.store.pending_sub(self.current_key) if active is None else None
+            parent = (active or {}).get("parent") or (pending or {}).get("parent")
+            main = self.store.find(self.current_key, parent) if parent else active
         if main is None:
             self._note("A sub chat continues a main chat: start the main chat for this model first.")
             return
