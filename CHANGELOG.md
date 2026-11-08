@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.21.1 – what the first figure and car runs showed (unreleased)
+## 1.21.1 – a smoother chat panel (2026-11-08)
 
 The `waving_person` and `toy_car` benchmark tasks ran for the first time (Sonnet and Haiku). Both models reached for the new families, the pose and `one_piece`; what they got wrong was ours:
 
@@ -24,13 +24,14 @@ The `waving_person` and `toy_car` benchmark tasks ran for the first time (Sonnet
 - Chat panel: sub chats stay in the list before their first message. A sub chat starts (forks its main chat) with its first message; until then it was shown only while open and vanished when you went back to the main chat, and sub chats Claude offered appeared only as buttons. Offered and opened sub chats are now listed under their main chat as "not started yet" (several per model), open with a click, count in the main chat's 🧩 badge, and can be removed with a right-click.
 - Chat panel: links to the files Claude made. After each answer, "📂 New files" lists every file written in that turn (exports, saves, script output; found in the tool calls and their results, kept only if it exists and is new): the name opens it with its app, "📁 Show in Finder" (Explorer on Windows) shows it selected in its folder. Temporary files and the bridge's own copies are left out; nothing that would run when opened is linked.
 - `export` takes the format in any case (`STL` as well as `stl`); Claude used to lose a turn on the upper-case spelling.
+- A relative path in `export` or `save_as` (`exports/x.stl`) now counts from the model's project folder; it used to land wherever FreeCAD's working directory happened to be.
 - README: about a quarter of its former length, with 3D-printable models named as the project's main focus, a gallery of recent models (dollhouse, Tonie storage house, play board, Labrador) next to the RS5, and a new panel screenshot; details moved into a collapsed section and the CHANGELOG.
 - A raised arm keeps its sleeve on the shoulder: a capsule or strand that crosses a joint leaves its points on the body side of the pivot where they are. Before, the sleeve started above the shoulder pivot, so at `arm_r: 150` that end swung down and hung beside the torso as a lobe while the arm went up bare (found in the re-run after these fixes).
 - The person template's hair is locks: 64 short strands on the scalp on top of the shell, so the head no longer reads as a cap.
 - `make_part` `wheel`: on toy wheels (rim 12–15 mm, bore 3 mm) the hub formula left no room for spokes and the rim came out as a solid disc; the hub and the rim's wall now scale with the rim, and a wheel with no room for spokes is refused with the sizes that would work.
 - Benchmark: the judge also gets a left view, so both ends of a car are seen head-on whichever way it points (the toy cars lost their grille and tail lamps to a view that was never taken).
 
-## 1.21.0 – detail that reads (unreleased)
+## 1.21.0 – detail that reads (2026-11-07)
 
 - `make_part` families for vehicles: `wheel` (tyre with rounded shoulders and tread grooves, spoked rim with hub and axle bore, brake disc and caliper), `lamp` (housing with an open front, reflector bowl, lens, LED strip; rect or round) and `pattern` (honeycomb, slats, mesh or round holes as a panel to fuse or as cutters to subtract, for grilles, vents and diffusers).
 - `compare_to_picture(crop=[x0, y0, x1, y1], look_at=[...], zoom)`: a part of the picture enlarged next to a close-up of the matching objects, so a lamp or a grille can be checked at the size it is seen.

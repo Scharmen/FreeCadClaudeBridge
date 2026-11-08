@@ -51,11 +51,14 @@ def model_path(folder: str, label: str) -> str:
 
 
 def place(path: str, kind: str, folder: str) -> str:
-    """Where a file goes: a bare name (no folder) lands in the project folder, exports in exports/; a path
-    with a folder is the user's choice and stays."""
+    """Where a file goes: a bare name (no folder) lands in the project folder, exports in exports/; a
+    relative path counts from the project folder (FreeCAD's working directory is anywhere); an absolute
+    path is the user's choice and stays."""
     path = os.path.expanduser(str(path))
-    if os.path.dirname(path):
+    if os.path.isabs(path):
         return os.path.abspath(path)
+    if os.path.dirname(path):
+        return os.path.join(folder, path)
     if kind == "save":
         return os.path.join(folder, path if path.lower().endswith(".fcstd") else path + ".FCStd")
     return os.path.join(folder, SUBFOLDERS.get(kind, ""), path)

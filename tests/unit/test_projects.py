@@ -35,6 +35,9 @@ def test_a_bare_file_name_lands_in_the_project_folder():
     given = J(os.sep, "tmp", "x.stl")
     assert projects.place(given, "export", folder) == os.path.abspath(given), "a path the user gave stays"
     assert projects.place("~/x.stl", "export", folder) == os.path.abspath(os.path.expanduser("~/x.stl"))
+    assert projects.place(J("exports", "x.stl"), "export", folder) == J(folder, "exports", "x.stl"), \
+        "a relative path counts from the project folder, not from FreeCAD's working directory"
+    assert projects.place(J("renders", "front.png"), "export", folder) == J(folder, "renders", "front.png")
 
 
 def test_the_context_tells_claude_where_files_go():
