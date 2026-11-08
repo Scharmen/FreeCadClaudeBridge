@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import sys
 import time
 from typing import Any
 
@@ -76,6 +77,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         self.current_key = _doc_key()
         self.last_text = ""
         self.turn_results: list[str] = []
+        self.turn_inputs: list[str] = []          # tool inputs of this turn: a script may name the file it writes
         self.max_result_chars = 0
 
         body = QtWidgets.QWidget()
@@ -383,6 +385,9 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             self.update_addon()
         elif url.scheme() == "sub":
             self.new_sub_chat(rest)
+        elif url.scheme() in ("open", "reveal"):
+            path = QtCore.QUrl.fromPercentEncoding(rest.encode("utf-8"))      # spaces arrive as %20
+            _open_path(path, reveal=url.scheme() == "reveal")
         elif url.scheme() == "stop":
             self.stop()
         elif url.scheme() == "snapshots":
@@ -576,6 +581,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
 
     def _begin_turn(self) -> None:
         self.turn_results, self.max_result_chars, self.turn_steps = [], 0, 0
+        self.turn_inputs = []
         self.turn_started = time.time()
         self.usage.start_turn()
         self.stopping = False
@@ -775,6 +781,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
                 line_end.movePosition(QtGui.QTextCursor.End)      # the result's ✓ goes on this line
                 line_end.setKeepPositionOnInsert(True)            # also when more is appended meanwhile
             self.tool_rows[ev.get("id") or name] = (name, time.time(), line_end)
+            self.turn_inputs.append(json.dumps(ev.get("input") or {}))
         elif kind == "todos":
             self._render_todos(ev.get("items") or [])
         elif kind == "tool_result":
@@ -826,6 +833,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             self.store.touch(self.current_key, active["id"])
             self.refresh_conversations()
         changed = self._render_turn_summary()
+        self._render_new_files()
         if changed and not interrupted:
             self._ask_feedback()
         parts = [f"Done in {dt:.0f} s"]
@@ -1030,6 +1038,20 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
                                    f"({', '.join(e.get('state', []))})", "error", self._theme()))
         return bool(s["created"] or s["changed"] or s["deleted"])
 
+    def _render_new_files(self) -> None:
+        """Files Claude wrote in this answer (exports, saves, script output), each with a link to open it and
+        one to show it in its folder. Temporary files and the bridge's own copies are left out."""
+        import tempfile
+
+        from ..bridge import paths as bpaths
+
+        candidates = [p for content in self.turn_results + self.turn_inputs for p in look.files_in(content)]
+        skip = [tempfile.gettempdir(), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders",
+                bpaths.bridge_dir(), os.path.join(os.path.expanduser("~"), ".claude")]
+        fresh = look.fresh_files(candidates, self.turn_started - 1, skip)
+        if fresh:
+            self._append(look.files_table(fresh, self._theme(), _file_browser()))
+
     def _on_failed(self, message: str) -> None:
         self._busy(False)
         self._note(message, error=True)
@@ -1127,6 +1149,23 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
 
     def transcript(self) -> str:
         return self.view.toPlainText()
+
+
+def _file_browser() -> str:
+    return {"darwin": "Finder", "win32": "Explorer"}.get(sys.platform, "folder")
+
+
+def _open_path(path: str, reveal: bool) -> None:
+    """Open a file with its app, or show it selected in its folder (Finder, Explorer, the file manager)."""
+    if not os.path.exists(path):
+        return
+    if reveal and sys.platform == "darwin":
+        QtCore.QProcess.startDetached("/usr/bin/open", ["-R", path])
+    elif reveal and sys.platform == "win32":
+        QtCore.QProcess.startDetached("explorer", ["/select,", os.path.normpath(path)])
+    else:
+        target = os.path.dirname(path) if reveal else path
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(target))
 
 
 _panel: dict[str, Any] = {}

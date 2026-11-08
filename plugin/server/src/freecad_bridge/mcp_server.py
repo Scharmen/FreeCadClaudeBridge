@@ -285,12 +285,14 @@ async def document(action: Literal["new", "open", "save", "save_as", "close", "a
 
 @mcp.tool(annotations=WRITE, structured_output=False)
 async def export(path: str, objects: list[str] | None = None,
-                 format: Literal["step", "iges", "brep", "stl", "obj", "3mf"] | None = None,
+                 format: Literal["step", "iges", "brep", "stl", "obj", "3mf",
+                                 "STEP", "IGES", "BREP", "STL", "OBJ", "3MF"] | None = None,
                  doc: str | None = None, instance: int | None = None) -> str:
     """Export objects (default: all visible solids of the document) to a file. Format from
     `format` or the file extension. Returns path and size."""
     return await _call("export", {"path": os.path.expanduser(path), "objects": objects,
-                                  "format": format, "doc": doc}, timeout_s=300, instance=instance)
+                                  "format": format.lower() if format else None, "doc": doc},
+                       timeout_s=300, instance=instance)
 
 
 @mcp.tool(name="import", annotations=WRITE, structured_output=False)

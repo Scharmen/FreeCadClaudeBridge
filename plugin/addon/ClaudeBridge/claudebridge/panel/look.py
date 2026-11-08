@@ -98,3 +98,89 @@ def markdown_for_qt(md: str) -> str:
         else:
             lines.append(br.sub("  \n", line))
     return "\n".join(lines)
+
+
+FILE_TYPES = ("fcstd", "step", "stp", "iges", "igs", "brep", "stl", "3mf", "obj", "ply", "amf", "dxf", "svg",
+              "pdf", "png", "jpg", "jpeg", "gcode", "bgcode", "zip", "csv", "json", "txt", "md", "html")
+# nothing in this list runs when it is opened (no .py or macros: Windows would execute them)
+_PATH = None
+
+
+def _path_re() -> Any:
+    import re
+
+    global _PATH
+    if _PATH is None:
+        _PATH = re.compile(r"(?:[A-Za-z]:[\\/]|/)[^\n\"'<>|*?]{0,400}?\.(?:" + "|".join(FILE_TYPES) + r")\b", re.I)
+    return _PATH
+
+
+def _strings(value: Any) -> Any:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+
+
+def files_in(text: str) -> list[str]:
+    """Absolute file paths in a tool result (JSON or plain text), also with spaces in them. A match that
+    swallowed words before the real path ("the folder /a contains /a/b.stl") yields each later start too;
+    the caller keeps the ones that exist."""
+    import json
+
+    try:
+        texts = list(_strings(json.loads(text)))
+    except (ValueError, TypeError):
+        texts = [text]
+    out: list[str] = []
+    for t in texts:
+        for m in _path_re().finditer(t):
+            cand = m.group(0)
+            starts = [0] + [i + 1 for i, ch in enumerate(cand) if ch == " " and cand[i + 1:i + 2] in ("/", "\\")
+                            or (ch == " " and len(cand) > i + 3 and cand[i + 2] == ":")]
+            for s in starts:
+                if cand[s:] not in out:
+                    out.append(cand[s:])
+    return out
+
+
+def fresh_files(candidates: list[str], since: float, skip: list[str]) -> list[str]:
+    """The candidates that exist as files, were written at or after `since`, and are not in a skipped folder
+    (temporary files, the bridge's own copies); each once."""
+    import os
+
+    skip_dirs = [os.path.normcase(os.path.abspath(d)) + os.sep for d in skip if d]
+    out: list[str] = []
+    for c in candidates:
+        try:
+            if not os.path.isfile(c) or os.path.getmtime(c) < since:
+                continue
+        except OSError:
+            continue
+        norm = os.path.normcase(os.path.abspath(c))
+        if any(norm.startswith(d) for d in skip_dirs) or any(os.path.samefile(c, o) for o in out):
+            continue
+        out.append(c)
+    return out
+
+
+def files_table(paths: list[str], t: dict[str, str], browser: str) -> str:
+    """New files of this answer: the name opens the file, the second link shows it in its folder."""
+    import os
+
+    if not paths:
+        return ""
+    rows = []
+    for p in paths[:8]:
+        folder = os.path.basename(os.path.dirname(p)) or p
+        rows.append(f"<tr><td>📄 <a href='open:{html.escape(p, quote=True)}'>{html.escape(os.path.basename(p))}</a>"
+                    f"</td><td><a href='reveal:{html.escape(p, quote=True)}'>📁 Show in {browser}</a> "
+                    f"<font color='{t['muted']}'>({html.escape(folder)})</font></td></tr>")
+    more = f"<tr><td colspan='2'><font color='{t['muted']}'>… {len(paths) - 8} more</font></td></tr>" \
+        if len(paths) > 8 else ""
+    return (f"<p style='margin-top:6px'><b>📂 New files</b></p><table cellspacing='0' cellpadding='4' border='1' "
+            f"style='border-color:{t['table_line']}; border-style:solid'>{''.join(rows)}{more}</table>")

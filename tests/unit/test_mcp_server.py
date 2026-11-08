@@ -241,3 +241,17 @@ def test_api_help_takes_query_as_well(monkeypatch):
     assert "mcp tool" in run(mcp_server.api_help(query="make_part"))
     with pytest.raises(mcp_server.ToolError, match="target"):
         run(mcp_server.api_help())
+
+
+def test_export_takes_the_format_in_any_case(monkeypatch):
+    seen = {}
+
+    async def fake_call(op, args, timeout_s=60, instance=None):
+        seen.update(args)
+        return "{}"
+
+    monkeypatch.setattr(mcp_server, "_call", fake_call)
+    run(mcp_server.export(path="/p/x.stl", format="STL"))
+    assert seen["format"] == "stl", "a wasted turn: Claude wrote STL and had to retry"
+    schema = tools()["export"].input_schema["properties"]["format"]
+    assert "STL" in str(schema) or "3MF" in str(schema), "the schema accepts the upper-case spelling too"

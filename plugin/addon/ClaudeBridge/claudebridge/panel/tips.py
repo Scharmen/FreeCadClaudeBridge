@@ -19,6 +19,8 @@ BUTTON_TIPS = {      # by label first, then by link prefix
     "stop:": "Stop Claude now",
     "report:": "Write a debug report (secrets removed) you can attach to a bug report",
     "sub:": "Open a sub chat for this part",
+    "open:": "Open this file with its app",
+    "reveal:": "Show this file in its folder",
     "update:": "Update the Claude Code plugin and the FreeCAD addon to the newest version",
     "snapshots:": "Open the folder with the copies of unsaved documents the bridge keeps",
 }
