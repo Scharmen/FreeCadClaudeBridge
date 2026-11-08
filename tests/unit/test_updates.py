@@ -1,6 +1,7 @@
 """Update check against GitHub and the update steps run from the chat panel."""
 
 import json
+import os
 
 from claudebridge.panel import updates
 
@@ -65,8 +66,9 @@ def test_the_addon_is_installed_from_the_updated_plugin():
     assert updates.plugin_root(folder) == "/repo/plugin", "a folder marketplace is read live"
     assert updates.plugin_root({"id": "freecad@m", "installPath": "/cache/1.22.0"}) == "/cache/1.22.0"
     label, cmd = updates.install_step("/cache/1.22.0", uvx="/u/uvx")
-    assert cmd == ["/u/uvx", "--from", "/cache/1.22.0/server", "freecad-bridge", "install", "--addon-src",
-                   "/cache/1.22.0/addon/ClaudeBridge"]
+    root = "/cache/1.22.0"
+    assert cmd == ["/u/uvx", "--from", os.path.join(root, "server"), "freecad-bridge", "install", "--addon-src",
+                   os.path.join(root, "addon", "ClaudeBridge")]
 
 
 def test_the_check_for_a_github_marketplace_goes_through_claude_code(tmp_path):
