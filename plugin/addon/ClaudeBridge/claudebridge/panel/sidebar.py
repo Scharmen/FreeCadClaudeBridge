@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import os
+import time
 from typing import Any
 
 import FreeCAD as App
@@ -502,17 +503,44 @@ class SidebarMixin:
         self._render_active()
 
     def open_in_desktop(self) -> None:
-        from .claude_process import open_in_desktop
-
         item = self.store.active(self.current_key)
         if not item:
             self._note("Start the conversation first; then it can be opened in the Claude Desktop app.")
             return
+        if self._working():
+            self._note("Wait until Claude is done, or press Stop, before opening this chat in Claude Desktop.")
+            return
         _save_history(self._hist_key(), self.view.toHtml())
+        own = self.session.proc if self.session and self.session.running() else None
         self._close_session()       # one writer per session file: the Desktop app takes over
-        error = open_in_desktop(item["id"], item["cwd"])
-        self._note(error or "Opened in the Claude Desktop app. Changes made there show up here when you "
-                            "come back to this conversation.", error=bool(error))
+        self._note("Opening the chat in the Claude Desktop app…")
+        self._handoff_when_free(item, own, time.time())
+
+    def _handoff_when_free(self, item: dict[str, Any], own: Any, since: float) -> None:
+        """Claude Code refuses a session that still runs, and the panel's own process needs a moment to end
+        after its input closes: hand over once it has (at most 10 s)."""
+        if own is not None and own.state() != QtCore.QProcess.NotRunning and time.time() - since < 10:
+            QtCore.QTimer.singleShot(200, lambda: self._handoff_when_free(item, own, since))
+            return
+        from .claude_process import open_in_desktop
+        from .stream import desktop_link, handoff_busy
+
+        def done(error: str | None) -> None:
+            if error and handoff_busy(error):
+                # already running elsewhere, usually in Claude Desktop itself: bring it up there
+                QtGui.QDesktopServices.openUrl(QtCore.QUrl(desktop_link(item["id"])))
+                self._note("This chat is already open (in Claude Desktop or a terminal); Claude Desktop shows it "
+                           "now. If it runs in a terminal, type /desktop there.")
+            elif error:
+                self._note(f"Claude Desktop did not open the chat: {error}", error=True)
+            else:
+                self._note("Opened in the Claude Desktop app: the chat is listed there now as a local Code "
+                           "session (rename it there if you like). Changes made there show up here when you "
+                           "come back to this conversation.")
+
+        error = open_in_desktop(item["id"], item["cwd"], done, parent=self)
+        if error:
+            self._note(error, error=True)
 
     def switch_document(self) -> None:
         """Show the conversation of the now active document (deferred while Claude is working). A document

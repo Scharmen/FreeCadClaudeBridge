@@ -27,24 +27,46 @@ def child_env() -> dict[str, str]:
     return clean_child_env(dict(os.environ), App.getHomePath(), os.path.join(App.getUserAppDataDir(), "Mod"))
 
 
-def open_in_desktop(session_id: str, cwd: str) -> str | None:
-    """Open a Claude Code session in the Claude Desktop app. Returns an error message or None."""
+def open_in_desktop(session_id: str, cwd: str, done: Any, parent: Any = None) -> str | None:
+    """Hand a Claude Code session to the Claude Desktop app. Returns an error at once, or None and later
+    calls done(error or None) with what Claude Code answered (it runs in a pseudo-terminal, see
+    stream.desktop_command)."""
+    import sys
+
+    from .stream import desktop_command, plain_terminal_text
+
     claude = find_claude()
     if not claude:
         return "Claude Code not found. Run /freecad:setup in Claude Code."
-    proc = QtCore.QProcess()
-    proc.setProgram(claude)
-    proc.setArguments(["--desktop", "--resume", session_id])
+    program, args = desktop_command(claude, session_id, sys.platform)
+    proc = QtCore.QProcess(parent)
+    proc.setProgram(program)
+    proc.setArguments(args)
     proc.setWorkingDirectory(cwd if os.path.isdir(cwd) else os.path.expanduser("~"))
     qenv = QtCore.QProcessEnvironment()
     for k, v in child_env().items():
         qenv.insert(k, v)
     proc.setProcessEnvironment(qenv)
+    proc.setProcessChannelMode(QtCore.QProcess.MergedChannels)
     proc.setStandardInputFile(QtCore.QProcess.nullDevice())
-    ok = proc.startDetached()
-    if isinstance(ok, tuple):
-        ok = ok[0]
-    return None if ok else "Could not start Claude Code to open the Desktop app."
+
+    def finished(code: int, _status: Any = None) -> None:
+        out = plain_terminal_text(bytes(proc.readAll()).decode("utf-8", "replace"))
+        from . import debuglog
+
+        debuglog.log("desktop_handoff", session=session_id, code=int(code), output=out[-500:])
+        done(None if code == 0 else (out.splitlines()[-1] if out else f"Claude Code ended with code {code}"))
+        proc.deleteLater()
+
+    def failed(err: Any) -> None:
+        if err == QtCore.QProcess.FailedToStart:          # "finished" never comes then
+            done(f"Could not start Claude Code: {proc.errorString()}")
+
+    proc.finished.connect(finished)
+    proc.errorOccurred.connect(failed)
+    proc.start()
+    QtCore.QTimer.singleShot(60000, lambda: proc.state() != QtCore.QProcess.NotRunning and proc.kill())
+    return None
 
 
 def claude_candidates() -> list[str]:

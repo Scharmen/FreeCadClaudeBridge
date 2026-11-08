@@ -171,3 +171,23 @@ def test_the_profile_is_read_from_claude_codes_config(tmp_path, monkeypatch):
     assert usage.read_profile()["organizationType"] == "claude_max"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "missing"))
     assert usage.read_profile() == {}
+
+
+def test_the_desktop_handoff_gets_a_terminal_because_claude_code_refuses_without_one():
+    prog, args = stream.desktop_command("/u/claude", "abc-123", "darwin")
+    assert prog == "/usr/bin/script" and args == ["-q", "/dev/null", "/u/claude", "--desktop", "--resume", "abc-123"]
+    prog, args = stream.desktop_command("/u/claude", "abc-123", "linux")
+    assert prog == "script" and args[:2] == ["-q", "-c"] and "--desktop --resume abc-123" in args[2]
+    assert stream.desktop_command("C:/c/claude.exe", "abc-123", "win32") == \
+        ("C:/c/claude.exe", ["--desktop", "--resume", "abc-123"]), "a new console window is a terminal on Windows"
+
+
+def test_the_handoff_answer_is_readable():
+    raw = "\x04\x1b[0m\x1b[31m--desktop only opens the Claude Desktop app; it can't be combined.\x1b[0m\r\n\x1b[?25h"
+    assert stream.plain_terminal_text(raw) == "--desktop only opens the Claude Desktop app; it can't be combined."
+
+
+def test_a_chat_already_open_in_claude_desktop_is_brought_up_by_its_link():
+    assert stream.desktop_link("abc-123") == "claude://claude.ai/epitaxy/local_abc-123"
+    assert stream.handoff_busy("Session abc-123 is open in another terminal. Run /desktop there instead.")
+    assert not stream.handoff_busy("Claude Code ended with code 1")

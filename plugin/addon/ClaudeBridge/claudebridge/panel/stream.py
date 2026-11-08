@@ -422,3 +422,36 @@ def auto_answers(tool: str, tool_input: dict[str, Any]) -> dict[str, Any]:
     if not qs:
         return tool_input
     return answered_input(tool_input, {q["question"]: q["options"][0] for q in qs if q["options"]})
+
+
+def desktop_command(claude: str, session_id: str, system: str) -> tuple[str, list[str]]:
+    """How to hand a session to the Claude Desktop app. `claude --desktop` refuses to run without a terminal
+    ("can't run non-interactively … or redirected output"), and FreeCAD has none: on macOS and Linux it runs
+    under `script`, which gives it a pseudo-terminal; on Windows a new console window is one."""
+    import shlex
+
+    cmd = [claude, "--desktop", "--resume", session_id]
+    if system == "darwin":
+        return "/usr/bin/script", ["-q", "/dev/null", *cmd]
+    if system.startswith("linux"):
+        return "script", ["-q", "-c", shlex.join(cmd), "/dev/null"]
+    return claude, cmd[1:]
+
+
+def plain_terminal_text(raw: str) -> str:
+    """Terminal output without colour codes, cursor codes and control characters."""
+    import re
+
+    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", raw)
+    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text.replace("\r\n", "\n"))
+    return text.replace("^D", "").strip()
+
+
+def desktop_link(session_id: str) -> str:
+    """The Claude Desktop app's own link to a local Code session it knows."""
+    return f"claude://claude.ai/epitaxy/local_{session_id}"
+
+
+def handoff_busy(error: str) -> bool:
+    """`claude --desktop` refused because the session is already running elsewhere (often in Claude Desktop)."""
+    return "open in another terminal" in (error or "")
