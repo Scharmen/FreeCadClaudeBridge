@@ -114,10 +114,13 @@ def test_a_picture_line_asks_for_a_check_against_the_pictures():
 def test_effort_entries_say_what_they_do_and_auto_names_the_level_it_used():
     from claudebridge.panel import tips
 
-    label, tip = tips.effort_auto_item("medium")
-    assert label == "Effort: auto (medium)" and "medium" in tip and "each request" in tip
-    label, tip = tips.effort_auto_item(None)
-    assert label == "Effort: auto" and "each request" in tip
+    label, tip = tips.effort_auto_item("high", "claude-opus-5-5")
+    assert label == "Effort: auto → high" and "last answer" in tip and "default" in tip, "what it used wins"
+    label, tip = tips.effort_auto_item(None, "opus")
+    assert label == "Effort: auto → medium" and "Claude Code's default" in tip
+    assert tips.effort_auto_item(None, "claude-fable-5-1")[0] == "Effort: auto → high"
+    label, tip = tips.effort_auto_item(None, "some-new-model")
+    assert label == "Effort: auto (Claude Code default)" and "after the first answer" in tip
     for level in ("low", "medium", "high", "xhigh", "max"):
         assert tips.EFFORT_TIPS[level]
 

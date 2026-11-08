@@ -118,6 +118,12 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
                                   "or relief")
         self.image_btn.clicked.connect(self.attach_image)
         head.addWidget(self.image_btn)
+        from .. import __version__
+        self.version_label = QtWidgets.QLabel(f"v{__version__}")
+        self.version_label.setStyleSheet("color: gray")
+        self.version_label.setToolTip(f"ClaudeBridge addon version {__version__}. After an update, restart "
+                                      "FreeCAD to load the new version.")
+        head.addWidget(self.version_label)
         head.addWidget(self.menu_btn)
         lay.addLayout(head)
 
@@ -133,7 +139,11 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
             self.pmode_box.setItemData(self.pmode_box.count() - 1, tips.MODE_TIPS.get(m, ""), QtCore.Qt.ToolTipRole)
         for box in (self.model_box, self.effort_box, self.pmode_box):
             box.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
-            ctl.addWidget(box, 1)
+        ctl.addWidget(self.model_box, 1)            # two rows, so "Effort: auto → medium" stays readable
+        ctl.addWidget(self.effort_box, 1)
+        ctl2 = QtWidgets.QHBoxLayout()
+        ctl2.addWidget(self.pmode_box, 1)
+        self.effort_box.currentIndexChanged.connect(self._effort_box_tip)
         self.auto_btn = QtWidgets.QToolButton()
         self.auto_btn.setText("⚡ Auto")
         self.auto_btn.setCheckable(True)
@@ -142,8 +152,9 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
                                  "Claude Code settings still apply.")
         self.auto_btn.setStyleSheet("QToolButton:checked { background-color: #c77700; color: white; "
                                     "border-radius: 4px; font-weight: bold; }")
-        ctl.addWidget(self.auto_btn)
+        ctl2.addWidget(self.auto_btn)
         lay.addLayout(ctl)
+        lay.addLayout(ctl2)
 
         self.view = _ChatView()
         self.view.setOpenLinks(False)
@@ -243,6 +254,9 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
 
     def _build_menu(self) -> QtWidgets.QMenu:
         menu = QtWidgets.QMenu(self)
+        from .. import __version__
+        menu.addAction(f"ClaudeBridge {__version__}").setEnabled(False)
+        menu.addSeparator()
         group = QtGui.QActionGroup(menu) if hasattr(QtGui, "QActionGroup") else QtWidgets.QActionGroup(menu)
         self.act_sub = menu.addAction("Use Claude subscription")
         self.act_key = menu.addAction("Use API key")
@@ -586,8 +600,10 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         levels = model.get("supportedEffortLevels") or ["low", "medium", "high", "xhigh", "max"]
         self.effort_box.clear()
         known = self._auto_effort()
-        last = known.get(model.get("resolvedModel") or "") or known.get(self.model_box.currentData() or "default")
-        auto_label, auto_tip = tips.effort_auto_item(last)
+        chosen = self.model_box.currentData() or "default"
+        resolved = model.get("resolvedModel") or ""
+        last = known.get(resolved) or known.get(chosen)
+        auto_label, auto_tip = tips.effort_auto_item(last, resolved or chosen)
         self.effort_box.addItem(auto_label, "")
         self.effort_box.setItemData(0, auto_tip, QtCore.Qt.ToolTipRole)
         for lv in levels:
@@ -595,6 +611,12 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
             self.effort_box.setItemData(self.effort_box.count() - 1, tips.EFFORT_TIPS.get(lv, ""),
                                         QtCore.Qt.ToolTipRole)
         self._select_quiet(self.effort_box, current)
+        self._effort_box_tip()
+
+    def _effort_box_tip(self, *_: Any) -> None:
+        """The box's hover text says what the shown setting does."""
+        tip = self.effort_box.itemData(self.effort_box.currentIndex(), QtCore.Qt.ToolTipRole) or ""
+        self.effort_box.setToolTip("Effort: how long Claude thinks (like /effort)" + (f"\n\n{tip}" if tip else ""))
 
     @staticmethod
     def _auto_effort() -> dict[str, str]:
