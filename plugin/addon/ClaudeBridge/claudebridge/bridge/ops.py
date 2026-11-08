@@ -25,24 +25,7 @@ MAX_OUTPUT = 20000
 SKIP_PROPS = {"Shape", "Proxy", "ExpressionEngine", "_Body", "Label2"}
 
 
-class ScriptTimeout(Exception):
-    """Raised by the trace hook inside user code when the deadline passes."""
-
-
-def _deadline_tracer(deadline: float, filename: str) -> Any:
-    """Trace only frames of the user's code (cheap) and abort pure-Python loops after the deadline.
-
-    C++/OCCT operations can't be interrupted; they finish and the call then times out.
-    """
-    def local(frame: Any, event: str, arg: Any) -> Any:
-        if event == "line" and time.monotonic() > deadline:
-            raise ScriptTimeout("time limit reached; use run_headless for long computations")
-        return local
-
-    def global_(frame: Any, event: str, arg: Any) -> Any:
-        return local if frame.f_code.co_filename == filename else None
-
-    return global_
+from .pacing import ScriptTimeout  # noqa: E402 (re-exported: callers catch it from here)
 
 
 class ChangeRecorder:
@@ -181,6 +164,17 @@ def status_gui(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     }
 
 
+def _tracer(deadline: float, filename: str) -> Any:
+    """Time limit, and FreeCAD keeps drawing while the script runs (setting chat.redraw_ms, 0 = off)."""
+    from . import pacing, paths, settings
+
+    try:
+        ms = float(settings.load(paths.bridge_dir())["chat.redraw_ms"])
+    except Exception:
+        ms = 100.0
+    return pacing.make_tracer(deadline, filename, pacing.qt_pump() if ms > 0 else None, ms / 1000.0)
+
+
 def run_python(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     code = args.get("code")
     if not isinstance(code, str) or not code.strip():
@@ -211,7 +205,7 @@ def run_python(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     previous_trace = sys.gettrace()
     try:
         with redirect_stdout(out), redirect_stderr(err):
-            sys.settrace(_deadline_tracer(deadline, filename))
+            sys.settrace(_tracer(deadline, filename))
             try:
                 exec(compile(code, filename, "exec"), ns)
             finally:
