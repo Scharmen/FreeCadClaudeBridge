@@ -39,6 +39,11 @@ class PreferencesPage:
         self.transport.setToolTip("auto: Unix socket on macOS/Linux, TCP on 127.0.0.1 on Windows")
         af.addRow(self.autostart)
         af.addRow(self.show_panel)
+        self.check_updates = QtWidgets.QCheckBox("Check once a day for a newer ClaudeBridge")
+        self.check_updates.setToolTip("Claude Code refreshes the freecad-claude marketplace (a folder "
+                                      "marketplace: git fetch); the chat panel then offers to update the "
+                                      "plugin and the addon")
+        af.addRow(self.check_updates)
         af.addRow("Connection:", self.transport)
         af.addRow(QtWidgets.QLabel("<small>Changes here apply after restarting FreeCAD.</small>"))
         layout.addWidget(addon_box)
@@ -104,6 +109,7 @@ class PreferencesPage:
         for key, spin in self.spins.items():
             spin.setValue(values[key])
         self.ask_feedback.setChecked(bool(values["learning.ask_for_feedback"]))
+        self.check_updates.setChecked(p.GetBool("CheckUpdates", True))
         self._update_lessons()
         self._update_preview()
 
@@ -112,6 +118,7 @@ class PreferencesPage:
         p.SetBool("Autostart", self.autostart.isChecked())
         p.SetBool("ShowPanel", self.show_panel.isChecked())
         p.SetString("Transport", self.transport.currentText())
+        p.SetBool("CheckUpdates", self.check_updates.isChecked())
         settings.save(paths.bridge_dir(), {**self.values(),
                                            "learning.ask_for_feedback": int(self.ask_feedback.isChecked())})
 

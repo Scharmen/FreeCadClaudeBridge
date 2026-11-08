@@ -42,10 +42,11 @@ from .stream import (
     short_tool_name,
     turn_summary,
 )
+from .updater import UpdatesMixin
 from .widgets import _ActiveDocWatcher, _ChatView, _Input
 
 
-class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockWidget):
+class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, QtWidgets.QDockWidget):
     def __init__(self, parent: Any = None) -> None:
         super().__init__("Claude", parent)
         self.setObjectName(OBJECT_NAME)
@@ -121,6 +122,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         from .. import __version__
         self.version_label = QtWidgets.QLabel(f"v{__version__}")
         self.version_label.setStyleSheet("color: gray")
+        self.version_label.linkActivated.connect(lambda _url: self.update_addon())
         self.version_label.setToolTip(f"ClaudeBridge addon version {__version__}. After an update, restart "
                                       "FreeCAD to load the new version.")
         head.addWidget(self.version_label)
@@ -246,6 +248,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         self.ticker.start()
         debuglog.prune()
         QtCore.QTimer.singleShot(0, self._report_crashes)
+        self._init_updates()
 
     # ----- settings -----
 
@@ -256,6 +259,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
         menu = QtWidgets.QMenu(self)
         from .. import __version__
         menu.addAction(f"ClaudeBridge {__version__}").setEnabled(False)
+        menu.addAction("Check for updates…").triggered.connect(lambda: self.check_for_updates(manual=True))
         menu.addSeparator()
         group = QtGui.QActionGroup(menu) if hasattr(QtGui, "QActionGroup") else QtWidgets.QActionGroup(menu)
         self.act_sub = menu.addAction("Use Claude subscription")
@@ -371,6 +375,8 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, QtWidgets.QDockW
                 self._answer_permission(rid, decision)
         elif url.scheme() == "report":
             self.create_debug_report()
+        elif url.scheme() == "update":
+            self.update_addon()
         elif url.scheme() == "stop":
             self.stop()
         elif url.scheme() == "snapshots":

@@ -18,6 +18,7 @@ BUTTON_TIPS = {      # by label first, then by link prefix
     "perm:ans": "Answer with this option",
     "stop:": "Stop Claude now",
     "report:": "Write a debug report (secrets removed) you can attach to a bug report",
+    "update:": "Update the Claude Code plugin and the FreeCAD addon to the newest version",
     "snapshots:": "Open the folder with the copies of unsaved documents the bridge keeps",
 }
 
