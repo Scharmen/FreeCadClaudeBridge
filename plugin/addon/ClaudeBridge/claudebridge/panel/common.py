@@ -125,7 +125,8 @@ def context_line() -> str:
             item += ": " + ", ".join(list(s.SubElementNames)[:10])
         parts.append(item)
     sel = "; ".join(parts) if parts else "nothing"
-    return f"[FreeCAD] Active document: {doc.Label} ({doc.Name}). Selection: {sel}."
+    where = f", file {doc.FileName}" if doc.FileName else ", not saved yet"
+    return f"[FreeCAD] Active document: {doc.Label} ({doc.Name}){where}. Selection: {sel}."
 
 
 BUTTON_COLORS = {"allow": "#2e7d32", "always": "#1565c0", "deny": "#a12a2a", "option": "#455a64",

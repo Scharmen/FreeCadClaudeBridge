@@ -158,3 +158,39 @@ def test_the_effort_claude_code_chose_is_read_from_the_session_file(tmp_path):
     path.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
     assert conv.last_effort(str(path)) == ("claude-opus-5-5", "medium"), "the last request that names an effort"
     assert conv.last_effort(str(tmp_path / "missing.jsonl")) is None
+
+
+def test_a_session_knows_its_model_from_the_context_line(tmp_path):
+    model = tmp_path / "House.FCStd"
+    model.write_text("x")
+    old = tmp_path / "Old.FCStd"
+    old.write_text("x")
+    path = tmp_path / "s.jsonl"
+    recs = [{"type": "user", "message": {"content": f"[FreeCAD] Active document: Old (Old), file {old}. "
+                                                    "Selection: nothing.\n\nstart"}},
+            {"type": "user", "message": {"content": f"[FreeCAD] Active document: House (House), file {model}. "
+                                                    "Selection: Box (Box).\n\nmake it red"}}]
+    path.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    assert conv.session_model(str(path)) == str(model), "the last message's model"
+
+
+def test_an_older_session_finds_the_model_it_saved(tmp_path):
+    model = tmp_path / "Dollhouse.FCStd"
+    model.write_text("x")
+    path = tmp_path / "s.jsonl"
+    recs = [{"type": "user", "message": {"content": "[FreeCAD] Active document: Unnamed (Unnamed). "
+                                                    "Selection: nothing.\n\nbuild a dollhouse"}},
+            {"type": "assistant", "message": {"content": [{"type": "tool_use", "input": {
+                "code": f"doc.saveAs(\"{model}\")\nprint(\"{tmp_path}/gone.FCStd\")"}}]}}]
+    path.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    assert conv.session_model(str(path)) == str(model), "a file that exists, not one that is gone"
+    empty = tmp_path / "e.jsonl"
+    empty.write_text(json.dumps(recs[0]) + "\n", encoding="utf-8")
+    assert conv.session_model(str(empty)) is None
+    copies = tmp_path / "bridge" / "snapshots"
+    copies.mkdir(parents=True)
+    (copies / "Dollhouse.FCStd").write_text("x")
+    recs.append({"type": "user", "message": {"content": [{"type": "tool_result", "content":
+                                                          f"snapshot: {copies / 'Dollhouse.FCStd'}"}]}})
+    path.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    assert conv.session_model(str(path), ignore=(str(tmp_path / "bridge"),)) == str(model), "no safety copy"

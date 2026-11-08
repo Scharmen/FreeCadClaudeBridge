@@ -15,6 +15,7 @@ import json
 import os
 import re
 import time
+from collections.abc import Iterator
 from typing import Any
 
 FILE = "conversations.json"
@@ -22,6 +23,8 @@ OLD_FILE = "sessions.json"  # one session per document, before 1.4
 SOURCES = {"sdk-cli": "FreeCAD panel", "cli": "terminal", "claude-desktop": "Claude Desktop",
            "claude-vscode": "VS Code", "sdk-py": "SDK", "sdk-ts": "SDK"}
 CONTEXT_LINE = re.compile(r"^\[FreeCAD\][^\n]*\n*")
+CONTEXT_FILE = re.compile(r"^\[FreeCAD\] Active document: [^\n]*?, file (.+?\.FCStd)\. Selection:", re.I)
+MODEL_PATH = re.compile(r"(?:[A-Za-z]:[\\/]|/)[^\"'\n\r\t*?<>|]{1,400}?\.FCStd\b", re.I)
 SESSION_ID = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 
 
@@ -79,6 +82,42 @@ def last_effort(path: str) -> tuple[str, str] | None:
         if effort and params.get("model"):
             found = (str(params["model"]), str(effort))
     return found
+
+
+def _strings(value: Any) -> Iterator[str]:
+    """Every string inside a record (message text, tool inputs and results)."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+
+
+def session_model(path: str, ignore: tuple[str, ...] = ()) -> str | None:
+    """The FreeCAD file a session works on: the file named in its last [FreeCAD] context line, else (older
+    sessions) the last absolute .FCStd path in it that still exists. Files under `ignore` (the bridge's
+    own safety copies) never count."""
+    named = None
+    mentioned: list[str] = []
+    for rec in _records(path):
+        if rec.get("type") == "user" and _is_prompt(rec):
+            m = CONTEXT_FILE.match(_text((rec.get("message") or {}).get("content")))
+            if m:
+                named = m[1]
+        if rec.get("type") in ("user", "assistant"):
+            for text in _strings(rec.get("message")):
+                if ".fcstd" in text.lower():
+                    mentioned.extend(MODEL_PATH.findall(text))
+    def usable(p: str) -> bool:
+        return os.path.isfile(p) and not any(os.path.abspath(p).startswith(os.path.abspath(i) + os.sep)
+                                             for i in ignore)
+
+    if named and usable(named):
+        return named
+    return next((p for p in reversed(mentioned) if usable(p)), None)
 
 
 def _is_prompt(rec: dict[str, Any]) -> bool:

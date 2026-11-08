@@ -168,6 +168,8 @@ class SidebarMixin:
             return
         if data[0] == "conv":
             self._open_conversation(data[1], data[2])
+        elif data[0] == "ext":
+            self._open_external(data[1])
         else:
             self._choose(data[0], data[1])
 
@@ -183,12 +185,12 @@ class SidebarMixin:
             return
         self.store.set_active(key, sid)
         doc = self._doc_for_key(key)
+        if doc is None and not key.startswith(("unsaved:", "<")) and os.path.isfile(key):
+            doc = self._open_model(key)
         if doc is not None:
-            App.setActiveDocument(doc.Name)
-            Gui.ActiveDocument = Gui.getDocument(doc.Name)
-            QtCore.QTimer.singleShot(0, self.switch_document)
-        elif not key.startswith(("unsaved:", "<")) and os.path.isfile(key):
-            Gui.open(key)
+            if doc_key(doc) != key:                    # the file opened under another spelling of its path
+                self.store.rekey(key, doc_key(doc))
+            self._bring_up(doc)
             QtCore.QTimer.singleShot(0, self.switch_document)
         else:
             _save_history(self._hist_key(), self.view.toHtml())
@@ -197,6 +199,56 @@ class SidebarMixin:
             self._render_active()
             self._note(f"Its document ({self.store.label(key)}) is no longer open; the conversation continues "
                        "here.")
+
+    def _open_external(self, info: dict[str, Any]) -> None:
+        """A session not linked to a document yet (terminal, Desktop app, an older panel): open the model it
+        works on and link it there, so it continues with its own model and its whole history."""
+        if self._working():
+            self._note("Wait until Claude is done, or press Stop, before switching conversations.")
+            self.refresh_conversations()
+            return
+        from ..bridge import paths as bpaths
+
+        path = conversations.session_path(info.get("cwd") or self._doc_folder(), info["id"])
+        model = conversations.session_model(path, ignore=(bpaths.bridge_dir(),)) if path else None
+        doc = self._open_model(model) if model else None
+        if doc is None:
+            self._choose("ext", info)                  # no model found: it continues with the current document
+            return
+        _save_history(self._hist_key(), self.view.toHtml())
+        self._close_session()
+        self.store.add(doc_key(doc), info["id"], info["title"], info.get("cwd") or self._doc_folder())
+        self.store.set_label(doc_key(doc), doc.Label)
+        debuglog.log("link_session", session=info["id"], model=model)
+        self._bring_up(doc)
+        QtCore.QTimer.singleShot(0, self.switch_document)
+
+    def _open_model(self, path: str) -> Any:
+        """The open document of a FreeCAD file, opening it if needed (None if it cannot be opened).
+        Gui.open does nothing when called from code in FreeCAD 1.1, so App.openDocument it is."""
+        want = os.path.normcase(os.path.realpath(path))
+        for d in App.listDocuments().values():
+            if d.FileName and os.path.normcase(os.path.realpath(d.FileName)) == want:
+                return d
+        try:
+            return App.openDocument(path)
+        except Exception as exc:  # noqa: BLE001 (a broken or locked file)
+            self._note(f"Could not open {path}: {exc}", error=True)
+            return None
+
+    def _bring_up(self, doc: Any) -> None:
+        """Make a document the active one, with its 3D view in front."""
+        App.setActiveDocument(doc.Name)
+        try:
+            Gui.setActiveDocument(doc.Name)
+            view = Gui.getDocument(doc.Name).ActiveView
+            area = Gui.getMainWindow().findChild(QtWidgets.QMdiArea)
+            for sub in area.subWindowList() if area is not None else []:
+                if sub.widget() is not None and sub.widget().windowTitle().startswith(doc.Label) and view:
+                    area.setActiveSubWindow(sub)
+                    break
+        except Exception:  # noqa: BLE001 (no GUI document, e.g. while FreeCAD closes)
+            pass
 
     def _conversation_menu(self, pos: QtCore.QPoint) -> None:
         item = self.conv_list.itemAt(pos)
