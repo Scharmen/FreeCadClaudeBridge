@@ -9,6 +9,7 @@ Tested by `tests/gui/test_references.py`. Printers differ, so these are ranges t
 - Hinges
 - Orientation and strength
 - Details that print better
+- Meshes: find holes and repair them
 
 ## Limits
 
@@ -120,6 +121,37 @@ block = Part.makeBox(20, 10, 20, Vector(-10, 5, -10)).cut(tool)
 assert block.isValid() and len(block.Solids) == 1
 assert abs(tool.BoundBox.ZMax - 6 / 2 * 2 ** 0.5) < 1e-6
 doc.addObject("Part::Feature", "Teardrop").Shape = block
+```
+
+## Meshes: find holes and repair them
+
+A slicer needs a closed mesh. `check_print` reports open meshes; to look or repair yourself, use the mesh's own checks instead of walking facets: `isSolid()`, `hasNonManifolds()`, `hasSelfIntersections()`, `countComponents()`. Walking facets: a facet's neighbours are `NeighbourIndices` (plural; there is no `NeighbourIndex`), `-1` marks an open edge. Repair a copy and assign it back, so a failure leaves the original.
+
+```python
+import Mesh
+
+# a mesh with a hole: a box without its last two facets
+box = Mesh.createBox(20, 20, 10)
+part = doc.addObject("Mesh::Feature", "Printable")
+part.Mesh = Mesh.Mesh(box.Facets[:-2])
+
+m = part.Mesh
+open_edges = sum(1 for f in m.Facets for n in f.NeighbourIndices if n < 0)   # NeighbourIndices: -1 = open edge
+report = {"solid": m.isSolid(), "open_edges": open_edges, "non_manifold": m.hasNonManifolds(),
+          "self_intersections": m.hasSelfIntersections(), "pieces": m.countComponents()}
+assert report["open_edges"] == 4 and not report["solid"], report
+
+# repair a copy, then put it back: one undo step, the original stays if anything fails
+fixed = m.copy()
+fixed.harmonizeNormals()
+fixed.removeDuplicatedPoints()
+fixed.removeDuplicatedFacets()
+fixed.fillupHoles(1000)                  # longest hole border to close, in edges
+fixed.removeNonManifolds()
+if fixed.hasSelfIntersections():
+    fixed.fixSelfIntersections()
+part.Mesh = fixed
+assert part.Mesh.isSolid() and not part.Mesh.hasNonManifolds()
 ```
 
 ## Exporting for the printer

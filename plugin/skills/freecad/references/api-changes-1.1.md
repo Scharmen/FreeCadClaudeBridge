@@ -6,6 +6,7 @@ Verified against FreeCAD 1.1.4 while building this plugin. When unsure, call `ap
 - **Origin features:** find planes and axes by role, e.g. `next(f for f in body.Origin.OriginFeatures if f.Role == "XY_Plane")`; the object names (`XY_Plane`, `XY_Plane001`, …) differ per body.
 - **Sketch analysis:** `sk.DoF`, `sk.FullyConstrained`, `sk.ConflictingConstraints`, `sk.RedundantConstraints`, `sk.PartiallyRedundantConstraints`, `sk.MalformedConstraints` exist; `sk.solve()` returns 0 on success. Constraint indices in these lists are 1-based.
 - **PartDesign patterns:** `body.newObject("PartDesign::PolarPattern"|"LinearPattern"|"Mirrored", …)` doesn't move the Body's `Tip` to the pattern; set `body.Tip = pattern` before adding the next feature, or that feature builds on the unpatterned shape.
+- **Mesh facets:** `facet.NeighbourIndices` (plural, `-1` = open edge) and `facet.PointIndices`; there is no `NeighbourIndex`. For holes use `mesh.isSolid()` and repair with `fillupHoles(n)` (see printing.md).
 - **Spreadsheet aliases** can't be unit symbols (`L`, `m`, `h`, …): `setAlias("B1", "L")` raises "Invalid alias".
 - **VarSet:** `App::VarSet` is the recommended home for parameters (`addProperty(type, name, group, doc)`), next to Spreadsheet.
 - **Assembly:** joints are `App::FeaturePython` objects set up with `JointObject.Joint(obj, type_index)` and `obj.Proxy.setJointConnectors(obj, refs)`; references point at parts, not the assembly. Set `assembly.Type = "Assembly"`.
