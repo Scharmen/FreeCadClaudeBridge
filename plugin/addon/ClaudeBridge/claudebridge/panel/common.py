@@ -37,6 +37,7 @@ LOCAL_COMMANDS = [("clear", "Start a new conversation"), ("new", "Start a new co
                   ("model", "Switch the model, e.g. /model opus"), ("effort", "Set the effort, e.g. /effort high"),
                   ("mode", "Permission mode: default, acceptEdits, plan, auto"),
                   ("desktop", "Open this conversation in the Claude Desktop app"),
+                  ("sub", "Open a sub chat for one part, e.g. /sub Roof (no name: the selected part)"),
                   ("usage", "Tokens of the last answer, context and plan limits"), ("help", "List the commands")]
 
 

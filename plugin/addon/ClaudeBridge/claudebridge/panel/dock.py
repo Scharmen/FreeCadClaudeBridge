@@ -416,15 +416,20 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         if self.session and self.session.running():
             return self.session
         item = self.store.active(self.current_key)
+        pending = self.store.pending_sub(self.current_key) if item is None else None
+        main = self.store.find(self.current_key, pending["parent"]) if pending else None
+        fork = bool(main and os.path.isdir(main["cwd"]))
         if item and os.path.isdir(item["cwd"]):
             sid, cwd = item["id"], item["cwd"]                 # resume where the session file lives
+        elif main and fork:
+            sid, cwd = main["id"], main["cwd"]                 # a new sub chat: the main chat's history, forked
         else:
             sid, cwd = None, self._doc_folder()
         model = self.model_box.currentData() or None
         effort = self.effort_box.currentData() or None
         session = ClaudeSession(sid, self.mode(), cwd, model=None if model == "default" else model, effort=effort,
                                 permission_mode=self.pmode_box.currentData() or None,
-                                load_plugin_dir=_params().GetBool("LoadPluginDir", True), parent=self)
+                                load_plugin_dir=_params().GetBool("LoadPluginDir", True), fork=fork, parent=self)
         session.event.connect(self._on_event)
         session.ready.connect(self._on_ready)
         session.exited.connect(self._on_exited)
@@ -482,6 +487,9 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
                      queued=queued)
         # slash commands go to Claude Code as typed; everything else gets the FreeCAD context line
         prompt = text if slash else context_line() + "\n\n" + (text or "Look at the attached picture.")
+        focus = tips.part_focus(self._current_part())
+        if focus and not slash:
+            prompt = focus + "\n" + prompt
         if pictures and not slash:
             prompt += "\n\n" + usage.picture_line(pictures)
         session.send_user(prompt, images)
@@ -506,6 +514,8 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         """Commands the panel handles itself; anything else goes to Claude Code (skills, /compact, …)."""
         if name in ("clear", "new"):
             self.new_conversation()
+        elif name == "sub":
+            self.new_sub_chat(arg)
         elif name == "model":
             self._select(self.model_box, arg) if arg else self.model_box.showPopup()
         elif name == "effort":
@@ -726,7 +736,8 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
                 item = self.store.active(self.current_key)
                 if item is None:
                     self.store.add(self.current_key, sid, self.pending.get("title", ""),
-                                   self.pending.get("cwd", self._doc_folder()))
+                                   self.pending.get("cwd", self._doc_folder()),
+                                   **self.store.take_pending_sub(self.current_key))
                     _save_history(f"session:{sid}", self.view.toHtml())
                 elif item["id"] != sid:
                     self.store.replace(self.current_key, item["id"], sid)

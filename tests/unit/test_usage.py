@@ -135,3 +135,18 @@ def test_every_chat_button_and_permission_mode_has_a_tooltip():
     assert tips.button_tip("Skip", "perm:deny:r2").startswith("Skip this question"), "Skip is no Deny"
     for mode in stream.PERMISSION_MODES:
         assert tips.MODE_TIPS[mode]
+
+
+def test_a_sub_chat_tells_claude_which_part_it_owns():
+    from claudebridge.panel import tips
+
+    line = tips.part_focus({"name": "Roof001", "label": "Roof"})
+    assert "Roof (Roof001)" in line and "only" in line and "main chat" in line
+    assert tips.part_focus(None) == ""
+
+
+def test_a_sub_chat_starts_as_a_fork_of_its_main_chat():
+    args = stream.session_args("main-1", fork=True)
+    assert args[args.index("--resume") + 1] == "main-1" and "--fork-session" in args
+    assert "--fork-session" not in stream.session_args("main-1"), "a normal resume continues the same session"
+    assert "--fork-session" not in stream.session_args(None, fork=True), "nothing to fork"

@@ -333,7 +333,7 @@ PERMISSION_MODES = ["default", "acceptEdits", "plan", "auto", "bypassPermissions
 
 def session_args(session_id: str | None = None, plugin_dir: str | None = None, model: str | None = None,
                  effort: str | None = None, permission_mode: str | None = None, system_prompt: str | None = None,
-                 allowed_tools: list[str] | None = None) -> list[str]:
+                 allowed_tools: list[str] | None = None, fork: bool = False) -> list[str]:
     """Arguments for a persistent `claude` session that reads messages and permission answers on stdin.
 
     All tools are available; anything the user's Claude Code settings don't allow comes back as a
@@ -347,6 +347,8 @@ def session_args(session_id: str | None = None, plugin_dir: str | None = None, m
                         ("--append-system-prompt", system_prompt)):
         if value:
             args += [flag, value]
+    if fork and session_id:              # a sub chat: the main chat's history, under a new session id
+        args.append("--fork-session")
     tools = allowed_tools if allowed_tools is not None else [FREECAD_TOOL_PREFIX + "*"]
     if tools:
         args += ["--allowedTools", ",".join(tools)]

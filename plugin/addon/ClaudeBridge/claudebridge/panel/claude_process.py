@@ -174,11 +174,11 @@ class ClaudeSession(QtCore.QObject):
 
     def __init__(self, session_id: str | None, mode: str, cwd: str, model: str | None = None,
                  effort: str | None = None, permission_mode: str | None = None, load_plugin_dir: bool = True,
-                 parent: Any = None) -> None:
+                 fork: bool = False, parent: Any = None) -> None:
         super().__init__(parent)
         self.session_id, self.mode, self.cwd = session_id, mode, cwd
         self.model, self.effort, self.permission_mode = model, effort, permission_mode
-        self.load_plugin_dir = load_plugin_dir
+        self.load_plugin_dir, self.fork = load_plugin_dir, fork
         self.parser = StreamParser()
         self.proc: QtCore.QProcess | None = None
         self.info: dict[str, Any] = {}
@@ -205,7 +205,7 @@ class ClaudeSession(QtCore.QObject):
         learned = learning.context_text(paths.bridge_dir())
         plugin_dir = paths.load_config().get("plugin_root") if self.load_plugin_dir else None
         args = session_args(self.session_id, plugin_dir, self.model, self.effort, self.permission_mode,
-                            FULL_CHAT_PROMPT + ("\n\n" + learned if learned else ""))
+                            FULL_CHAT_PROMPT + ("\n\n" + learned if learned else ""), fork=self.fork)
         qenv = QtCore.QProcessEnvironment()
         for k, v in env.items():
             qenv.insert(k, v)

@@ -99,10 +99,10 @@ class SidebarMixin:
             it.setForeground(QtGui.QColor("#888"))
             lst.addItem(it)
 
-        def entry(text: str, sub: str, data: tuple, tip: str, current: bool) -> None:
-            it = QtWidgets.QListWidgetItem(text)
+        def entry(text: str, sub: str, data: tuple, tip: str, current: bool, nested: bool = False) -> None:
+            it = QtWidgets.QListWidgetItem(("      ↳ " if nested else "") + text)
             flags = QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
-            if data[0] == "conv":
+            if data[0] == "conv" and not nested:
                 flags |= QtCore.Qt.ItemIsDragEnabled             # reorder within its project
             it.setFlags(flags)
             it.setData(role, data)
@@ -116,13 +116,25 @@ class SidebarMixin:
             key, here = group["key"], group["key"] == self.current_key
             closed = not here and not key.startswith("<") and self._doc_for_key(key) is None
             header(group["label"] + ("  (closed)" if closed else ""))
-            if here and active is None:
+            pending_sub = self.store.pending_sub(key) if here and active is None else None
+            if here and active is None and not pending_sub:
                 entry("New conversation", "not started yet", ("pending", None), "Type a message to start it", True)
-            for c in group["items"]:
+            for c, depth in self.store.nested(key):
                 stamp = c.get("updated") or c.get("created", 0)
+                current = bool(here and active and c["id"] == active["id"])
+                if depth:
+                    part = c.get("part") or {}
+                    entry(c["title"], f"part {part.get('name', '?')} · {_when(stamp)}", ("conv", key, c["id"]),
+                          f"Sub chat for the part {part.get('label')} ({part.get('name')})\nIt changes only this "
+                          "part; the main chat above holds the full model.\nRight-click for more", current, True)
+                    continue
                 entry(("📌 " if c.get("pinned") else "") + c["title"], _when(stamp), ("conv", key, c["id"]),
                       f"{c['title']}\nProject: {group['label']}\nSession {c['id']}\n"
-                      "Drag to reorder; right-click for more", bool(here and active and c["id"] == active["id"]))
+                      "Drag to reorder; right-click for more (also: a sub chat for one part)", current)
+                if pending_sub and pending_sub["parent"] == c["id"]:
+                    entry(f"New sub chat: {pending_sub['part'].get('label')}", "not started yet",
+                          ("pending", None), "Type a message to start it; it begins with the main chat's history",
+                          True, True)
         others = conversations.folder_sessions(self._doc_folder(), exclude=self.store.linked_ids())
         if others:
             header("In this folder")
@@ -192,6 +204,7 @@ class SidebarMixin:
                 self.store.rekey(key, doc_key(doc))
             self._bring_up(doc)
             QtCore.QTimer.singleShot(0, self.switch_document)
+            QtCore.QTimer.singleShot(0, self._focus_conversation)
         else:
             _save_history(self._hist_key(), self.view.toHtml())
             self._close_session()
@@ -266,6 +279,18 @@ class SidebarMixin:
         if not item_data:
             return
         menu = QtWidgets.QMenu(self)
+        sub_menu = menu.addMenu("New sub chat for part")
+        sub_menu.setToolTipsVisible(True)
+        doc = App.ActiveDocument
+        selected = self._selected_part()
+        if selected:
+            sub_menu.addAction(f"Selected: {selected['label']}").triggered.connect(
+                lambda _=False, p=selected: self._start_sub(p))
+            sub_menu.addSeparator()
+        for part in self._part_candidates(doc) if doc is not None else []:
+            sub_menu.addAction(part["label"]).triggered.connect(lambda _=False, p=part: self._start_sub(p))
+        sub_menu.setEnabled(bool(sub_menu.actions()))
+        menu.addSeparator()
         menu.addAction("Rename…").triggered.connect(self.rename_conversation)
         pinned = bool(item_data.get("pinned"))
         menu.addAction("Unpin" if pinned else "Pin to top").triggered.connect(
@@ -317,6 +342,7 @@ class SidebarMixin:
         elif kind == "pending":
             return
         self._render_active()
+        self._focus_conversation()
 
     def new_conversation(self) -> None:
         if self._working():
@@ -328,6 +354,103 @@ class SidebarMixin:
         self.view.clear()
         self._note("New conversation.")
         self.refresh_conversations()
+
+    # ----- sub chats: one part of the model, opened only when asked for
+
+    def _current_part(self) -> dict[str, str] | None:
+        """The part the shown conversation works on (a sub chat, also one not started yet), else None."""
+        item = self.store.active(self.current_key)
+        if item:
+            return item.get("part")
+        pending = self.store.pending_sub(self.current_key)
+        return pending["part"] if pending else None
+
+    @staticmethod
+    def _part_candidates(doc: Any) -> list[dict[str, str]]:
+        """The model's visible top-level pieces a sub chat can work on (containers and solids, no helpers)."""
+        out = []
+        for o in doc.RootObjects:
+            if o.TypeId.startswith(("App::Origin", "Sketcher::", "App::Line", "App::Plane", "App::TextDocument",
+                                    "Spreadsheet::")):
+                continue
+            visible = getattr(getattr(o, "ViewObject", None), "Visibility", True)
+            container = o.TypeId in ("App::Part", "PartDesign::Body", "App::DocumentObjectGroup", "App::Link")
+            shape = getattr(o, "Shape", None)
+            solid = shape is not None and not shape.isNull() and bool(shape.Solids)
+            if visible and (container or solid):
+                out.append({"name": o.Name, "label": o.Label})
+        return out
+
+    @staticmethod
+    def _selected_part() -> dict[str, str] | None:
+        sel = Gui.Selection.getSelection()
+        return {"name": sel[0].Name, "label": sel[0].Label} if sel else None
+
+    def new_sub_chat(self, name: str = "") -> None:
+        """/sub [part]: a sub chat for one part of the model (the selected one without a name)."""
+        doc = App.ActiveDocument
+        if doc is None:
+            self._note("Open the model first.")
+            return
+        if name.strip():
+            want = name.strip().lower()
+            candidates = self._part_candidates(doc)
+            part = next((p for p in candidates if want in (p["label"].lower(), p["name"].lower())), None) or \
+                next((p for p in candidates if want in p["label"].lower()), None)
+            obj = None if part else (doc.getObject(name.strip()) or next(iter(doc.getObjectsByLabel(name.strip())),
+                                                                          None))
+            part = part or ({"name": obj.Name, "label": obj.Label} if obj else None)
+        else:
+            part = self._selected_part()
+        if not part:
+            names = ", ".join(p["label"] for p in self._part_candidates(doc)) or "none found"
+            self._note(f"Which part? Select it in the model or name it, e.g. /sub Roof. Parts: {names}.")
+            return
+        self._start_sub(part)
+
+    def _start_sub(self, part: dict[str, str]) -> None:
+        active = self.store.active(self.current_key)
+        pending = self.store.pending_sub(self.current_key) if active is None else None
+        parent = (active or {}).get("parent") or (pending or {}).get("parent")
+        main = self.store.find(self.current_key, parent) if parent else active
+        if main is None:
+            self._note("A sub chat continues a main chat: start the main chat for this model first.")
+            return
+        if self._working():
+            self._note("Wait until Claude is done, or press Stop, before opening a sub chat.")
+            return
+        _save_history(self._hist_key(), self.view.toHtml())
+        self._close_session()
+        self.store.start_sub(self.current_key, main["id"], part)
+        self.view.clear()
+        self._note(f"Sub chat for {part['label']}. It starts with everything the main chat \"{main['title']}\" "
+                   "knows, and Claude changes only this part. The main chat keeps the full model. Type a message "
+                   "to start it.")
+        self.refresh_conversations()
+        self._focus_conversation()
+
+    def _focus_conversation(self) -> None:
+        """A sub chat shows its part (selected, zoomed to); back in a main chat the whole model shows again."""
+        doc = App.ActiveDocument
+        if doc is None:
+            return
+        part = self._current_part()
+        try:
+            Gui.Selection.clearSelection()
+            if part:
+                obj = doc.getObject(part.get("name", "")) or next(iter(doc.getObjectsByLabel(part.get("label", ""))),
+                                                                   None)
+                if obj is None:
+                    self._note(f"The part {part.get('label')} is no longer in the model.")
+                    return
+                Gui.Selection.addSelection(obj)
+                Gui.SendMsgToActiveView("ViewSelection")
+                self._shown_part = True
+            elif getattr(self, "_shown_part", False):
+                Gui.SendMsgToActiveView("ViewFit")
+                self._shown_part = False
+        except Exception:  # noqa: BLE001 (no 3D view, e.g. while FreeCAD closes)
+            pass
 
     def rename_conversation(self) -> None:
         item = self.store.active(self.current_key)

@@ -55,3 +55,12 @@ def effort_auto_item(last: str | None, model: str = "") -> tuple[str, str]:
         return "Effort: auto (Claude Code default)", meaning + " The level shows here after the first answer."
     source = "it used in the last answer" if last else "Claude Code's default for this model"
     return f"Effort: auto → {level}", f"{meaning}\nNow: {level} ({source}). {EFFORT_TIPS.get(level, '')}"
+
+
+def part_focus(part: dict[str, str] | None) -> str:
+    """What a sub chat tells Claude with every message: the one part it works on."""
+    if not part:
+        return ""
+    return (f"Sub chat for the part {part.get('label')} ({part.get('name')}): change only this part and what it "
+            "contains; the rest of the model belongs to the main chat. Keep the part's position and its fit "
+            "with the neighbouring parts.")

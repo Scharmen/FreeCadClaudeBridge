@@ -194,3 +194,31 @@ def test_an_older_session_finds_the_model_it_saved(tmp_path):
                                                           f"snapshot: {copies / 'Dollhouse.FCStd'}"}]}})
     path.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
     assert conv.session_model(str(path), ignore=(str(tmp_path / "bridge"),)) == str(model), "no safety copy"
+
+
+# ---------- sub chats: one part of a model, started from the main chat
+
+def test_a_sub_chat_belongs_to_a_part_and_follows_its_main_chat(tmp_path):
+    store = conv.Store(tmp_path)
+    key = "/m/Dollhouse.FCStd"
+    store.add(key, "main-1", "Build a dollhouse", "/home")
+    store.add(key, "other-2", "Colours", "/home")
+    store.start_sub(key, "main-1", {"name": "Roof", "label": "Roof"})
+    assert store.active(key) is None, "the sub chat starts when the first message is sent"
+    assert store.pending_sub(key) == {"parent": "main-1", "part": {"name": "Roof", "label": "Roof"}}
+    store.add(key, "sub-3", "", "/home", **store.take_pending_sub(key))
+    assert store.pending_sub(key) is None
+    sub = store.find(key, "sub-3")
+    assert sub["parent"] == "main-1" and sub["part"]["name"] == "Roof" and sub["title"] == "Roof"
+    store.touch(key, "other-2")
+    assert [(c["id"], depth) for c, depth in store.nested(key)] == [("other-2", 0), ("main-1", 0), ("sub-3", 1)]
+    again = conv.Store(tmp_path)
+    assert again.find(key, "sub-3")["part"]["label"] == "Roof", "persisted"
+
+
+def test_a_sub_chat_whose_main_chat_is_gone_stands_alone(tmp_path):
+    store = conv.Store(tmp_path)
+    store.add("k", "main-1", "Main", "/h")
+    store.add("k", "sub-2", "", "/h", parent="main-1", part={"name": "Base", "label": "Base"})
+    store.remove("k", "main-1")
+    assert [(c["id"], depth) for c, depth in store.nested("k")] == [("sub-2", 0)]

@@ -250,12 +250,48 @@ class Store:
     def linked_ids(self) -> set[str]:
         return {c["id"] for d in self.data.values() for c in d.get("items", [])}
 
-    def add(self, key: str, sid: str, title: str, cwd: str) -> None:
+    def add(self, key: str, sid: str, title: str, cwd: str, parent: str | None = None,
+            part: dict[str, str] | None = None) -> None:
+        """A conversation of a document; with `parent` and `part` a sub chat that works on one part."""
         doc = self._doc(key)
         if not self.find(key, sid):
-            doc["items"].append({"id": sid, "title": title or "Conversation", "cwd": cwd, "created": time.time()})
+            item: dict[str, Any] = {"id": sid, "title": (part or {}).get("label") or title or "Conversation",
+                                    "cwd": cwd, "created": time.time()}
+            if parent and part:
+                item.update(parent=parent, part=dict(part))
+            doc["items"].append(item)
         doc["active"] = sid
         self._save()
+
+    def start_sub(self, key: str, parent: str, part: dict[str, str]) -> None:
+        """Prepare a sub chat for one part: it forks the main chat when its first message is sent."""
+        doc = self._doc(key)
+        doc["pending_sub"] = {"parent": parent, "part": dict(part)}
+        doc["active"] = None
+        self._save()
+
+    def pending_sub(self, key: str) -> dict[str, Any] | None:
+        return (self.data.get(key) or {}).get("pending_sub")
+
+    def take_pending_sub(self, key: str) -> dict[str, Any]:
+        """The prepared sub chat's parent and part (empty when none), and forget it."""
+        pending = (self.data.get(key) or {}).pop("pending_sub", None) or {}
+        self._save()
+        return pending
+
+    def nested(self, key: str) -> list[tuple[dict[str, Any], int]]:
+        """Main chats in their order, each followed by its sub chats (depth 1). A sub chat whose main chat
+        is gone stands alone."""
+        items = self.ordered(key)
+        ids = {c["id"] for c in items}
+        out: list[tuple[dict[str, Any], int]] = []
+        for c in items:
+            if c.get("parent") in ids:
+                continue
+            out.append((c, 0))
+            subs = [s for s in items if s.get("parent") == c["id"]]
+            out.extend((s, 1) for s in sorted(subs, key=lambda s: s.get("created", 0)))
+        return out
 
     def replace(self, key: str, old: str, new: str) -> None:
         item = self.find(key, old)
@@ -270,6 +306,7 @@ class Store:
         self._save()
 
     def start_new(self, key: str) -> None:
+        (self.data.get(key) or {}).pop("pending_sub", None)
         self.set_active(key, None)
 
     def rename(self, key: str, sid: str, title: str) -> None:
