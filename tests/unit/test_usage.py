@@ -191,3 +191,12 @@ def test_a_chat_already_open_in_claude_desktop_is_brought_up_by_its_link():
     assert stream.desktop_link("abc-123") == "claude://claude.ai/epitaxy/local_abc-123"
     assert stream.handoff_busy("Session abc-123 is open in another terminal. Run /desktop there instead.")
     assert not stream.handoff_busy("Claude Code ended with code 1")
+
+
+def test_the_turn_knows_which_documents_claude_changed():
+    import json as _json
+
+    results = [_json.dumps({"changes": {"created": [], "changed": ["Roof"], "deleted": []}, "document": "Board"}),
+               _json.dumps({"changes": {"created": [], "changed": [], "deleted": []}, "document": "Other"}),
+               _json.dumps({"result": {"valid": True}, "document": "Read"})]
+    assert stream.turn_summary(results)["documents"] == ["Board"], "only documents with changes"

@@ -509,7 +509,7 @@ class SidebarMixin:
                 obj = doc.getObject(part.get("name", "")) or next(iter(doc.getObjectsByLabel(part.get("label", ""))),
                                                                    None)
                 if obj is None:
-                    self._note(f"The part {part.get('label')} is no longer in the model.")
+                    self._offer_lost_part(doc, part)
                     return
                 Gui.Selection.addSelection(obj)
                 Gui.SendMsgToActiveView("ViewSelection")
@@ -519,6 +519,43 @@ class SidebarMixin:
                 self._shown_part = False
         except Exception:  # noqa: BLE001 (no 3D view, e.g. while FreeCAD closes)
             pass
+
+    def _offer_lost_part(self, doc: Any, part: dict[str, str]) -> None:
+        """The sub chat's part is not in the model (usually unsaved work lost when FreeCAD closed): point to the
+        newest safety copy that still has it."""
+        from ..bridge import action_ops, recovery
+
+        label = part.get("label") or part.get("name")
+        copy = recovery.newest_copy_with(action_ops._snap_dir(doc), part.get("name", ""))
+        if copy is None:
+            self._note(f"The part {label} is not in the model, and no safety copy of it has it either.", error=True)
+            return
+        when = recovery.copy_time(copy)
+        self._note(f"The part {label} is not in the model any more: most likely its work was never saved and "
+                   f"was lost when FreeCAD closed. The safety copy from {when} still has it.", error=True)
+        self._append(_buttons([(f"Open the copy from {when}", f"restorecopy:{copy}", "allow")],
+                              tip={f"restorecopy:{copy}": "Opens it as a separate, unsaved document; your model "
+                                                          "stays as it is"}))
+
+    def _open_safety_copy(self, path: str) -> None:
+        """Open a safety copy as a separate, unsaved document (the copy itself stays untouched)."""
+        import shutil
+        import tempfile
+
+        from ..bridge import paths as bpaths
+        from ..bridge import recovery
+
+        snaps = os.path.join(bpaths.bridge_dir(), "snapshots") + os.sep
+        if not os.path.abspath(path).startswith(snaps) or not os.path.isfile(path):
+            return
+        tmp = os.path.join(tempfile.mkdtemp(prefix="fcb-restore-"), os.path.basename(os.path.dirname(path)) +
+                           "_" + os.path.basename(path))
+        shutil.copy(path, tmp)
+        restored = App.openDocument(tmp)
+        restored.Label = f"{os.path.basename(os.path.dirname(path))} (copy from {recovery.copy_time(path)})"
+        self._bring_up(restored)
+        self._note(f"Opened {restored.Label} as a separate, unsaved document. Check it; to keep it, save it over "
+                   "your model with File → Save As (or ask Claude), then work on in that file.")
 
     def rename_conversation(self) -> None:
         item = self.store.active(self.current_key)

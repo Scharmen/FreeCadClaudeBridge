@@ -255,6 +255,7 @@ def turn_summary(results: list[str]) -> dict[str, Any]:
     changed: list[str] = []
     deleted: list[str] = []
     errors: dict[str, dict[str, Any]] = {}
+    documents: list[str] = []                 # documents a call changed (to save them after the turn)
     for text in results:
         try:
             data = json.loads(text)
@@ -265,6 +266,10 @@ def turn_summary(results: list[str]) -> dict[str, Any]:
         if not isinstance(data, dict):
             continue
         ch = data.get("changes") or {}
+        doc = data.get("document")
+        if isinstance(doc, str) and any(ch.get(k) for k in ("created", "changed", "deleted")) \
+                and doc not in documents:
+            documents.append(doc)
         for src, dst in ((ch.get("created"), created), (ch.get("changed"), changed), (ch.get("deleted"), deleted)):
             for name in src or []:
                 if name not in dst:
@@ -280,7 +285,8 @@ def turn_summary(results: list[str]) -> dict[str, Any]:
                 if name in (ch.get("changed") or []) and name not in {e.get("name") for e in data["errors"]}:
                     errors.pop(name)
     changed = [c for c in changed if c not in created]
-    return {"created": created, "changed": changed, "deleted": deleted, "errors": list(errors.values())}
+    return {"created": created, "changed": changed, "deleted": deleted, "errors": list(errors.values()),
+            "documents": documents}
 
 
 def check_init(init: dict[str, Any], mode: str) -> list[str]:

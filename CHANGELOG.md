@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.21.2 – no lost work (unreleased)
+
+- The chat panel saves the models Claude changed after each answer (setting `chat.autosave`, on by default). Work that lived only in the open FreeCAD was lost when FreeCAD closed, as happened to a whole day on the play board's connector test; a model without a file gets a note to save it. The bridge's safety copies stay as well.
+- A sub chat whose part is missing from the model says why that usually happens and offers the newest safety copy that still has the part (found by reading the copies' `Document.xml`), opened as a separate, unsaved document. It used to say only "no longer in the model".
+
 ## 1.21.1 – a smoother chat panel (2026-11-08)
 
 The `waving_person` and `toy_car` benchmark tasks ran for the first time (Sonnet and Haiku). Both models reached for the new families, the pose and `one_piece`; what they got wrong was ours:

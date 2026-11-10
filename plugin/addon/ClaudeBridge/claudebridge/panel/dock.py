@@ -385,6 +385,8 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             self.update_addon()
         elif url.scheme() == "sub":
             self.new_sub_chat(rest)
+        elif url.scheme() == "restorecopy":
+            self._open_safety_copy(QtCore.QUrl.fromPercentEncoding(rest.encode("utf-8")))
         elif url.scheme() in ("open", "reveal"):
             path = QtCore.QUrl.fromPercentEncoding(rest.encode("utf-8"))      # spaces arrive as %20
             _open_path(path, reveal=url.scheme() == "reveal")
@@ -833,6 +835,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             self.store.touch(self.current_key, active["id"])
             self.refresh_conversations()
         changed = self._render_turn_summary()
+        self._autosave()
         self._render_new_files()
         if changed and not interrupted:
             self._ask_feedback()
@@ -1021,6 +1024,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
 
     def _render_turn_summary(self) -> bool:
         s = turn_summary(self.turn_results)
+        self.last_summary = s
         parts = []
         for key, label in (("created", "created"), ("changed", "changed"), ("deleted", "deleted")):
             if s[key]:
@@ -1037,6 +1041,35 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             self._append(look.note(f"{e.get('label') or e.get('name', '?')} is in an error state "
                                    f"({', '.join(e.get('state', []))})", "error", self._theme()))
         return bool(s["created"] or s["changed"] or s["deleted"])
+
+    def _autosave(self) -> None:
+        """Save the models Claude changed in this answer (setting chat.autosave). Work that only lived in the
+        open FreeCAD was lost when FreeCAD closed; the bridge's safety copies stay as well."""
+        from ..bridge import paths as bpaths
+        from ..bridge import settings as bsettings
+
+        try:
+            on = bool(bsettings.load(bpaths.bridge_dir())["chat.autosave"])
+        except Exception:
+            on = True
+        saved, unsaved = [], []
+        for name in (getattr(self, "last_summary", None) or {}).get("documents") or []:
+            if name not in App.listDocuments():
+                continue
+            doc = App.getDocument(name)
+            if not doc.FileName:
+                unsaved.append(doc.Label)
+            elif on:
+                try:
+                    doc.save()
+                    saved.append(os.path.basename(doc.FileName))
+                except Exception as exc:  # noqa: BLE001 (read-only file, full disk)
+                    self._note(f"Could not save {doc.Label}: {exc}", error=True)
+        if saved:
+            self._append(look.footer([f"💾 Saved {', '.join(saved)}"], self._theme()))
+        if unsaved:
+            self._note(f"{', '.join(unsaved)} has no file yet, so it is lost when FreeCAD closes: ask Claude to "
+                       "save it, or use File → Save As.")
 
     def _render_new_files(self) -> None:
         """Files Claude wrote in this answer (exports, saves, script output), each with a link to open it and

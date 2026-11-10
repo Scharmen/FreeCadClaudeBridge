@@ -32,6 +32,7 @@ SCHEMA: dict[str, tuple[Any, Any, Any, str, str]] = {
     "safety.snapshot_minutes": (5, 0, 120, "min",
                                 "Copy a modified document before Claude changes it, at most this often (0 = off)"),
     "chat.stall_seconds": (120, 30, 3600, "s", "Warn when Claude shows no sign of life for this long"),
+    "chat.autosave": (1, 0, 1, "", "Save the model after each answer of Claude that changed it (1 = yes, 0 = no)"),
     "chat.redraw_ms": (100, 0, 2000, "ms",
                        "While Claude's script runs, let FreeCAD redraw this often (0 = freeze until it is done)"),
 }
