@@ -225,7 +225,11 @@ def run_python(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         if isinstance(e, ScriptTimeout):
             raise OpError(protocol.TIMEOUT, f"{e} (transaction rolled back)", _trunc(tb),
                           {"stdout": _trunc(out.getvalue())}) from None
-        raise OpError(protocol.PY_EXCEPTION, f"{type(e).__name__}: {e} (transaction rolled back)", _trunc(tb),
+        from . import hints
+
+        hint = hints.for_error(e, [o.Name for o in doc.Objects] if _alive(doc) else [])
+        raise OpError(protocol.PY_EXCEPTION, f"{type(e).__name__}: {e} (transaction rolled back)",
+                      _trunc(tb) + (f"\n{hint}" if hint else ""),
                       {"stdout": _trunc(out.getvalue()), "stderr": _trunc(err.getvalue())}) from None
     changed = ex.recorder.stop()
     after = _snapshot()
