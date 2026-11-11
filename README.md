@@ -62,14 +62,14 @@ The setup window checks what is missing, offers to install it, then adds the `fr
 - **3D print…** in the panel (or the File menu) asks for your printer and whether to plug or glue, and writes into the model's `print/` folder.
 - **One print where possible:** the whole model as one coloured 3MF and STL; moving parts (wheels, knobs) apart with axles; split by colour with connector pins only when needed.
 - **A PDF assembly guide** with what to print, the steps and what to paint.
-- **Before export**, Claude checks walls, overhangs, fits and stability with `check_all`, and with `slice_check` it slices the model with your installed slicer (OrcaSlicer, AnycubicSlicerNext, Bambu Studio) for your printer: parts that would start in mid air, free overhangs, bridges, what supports would cost, print time and filament.
+- **Before export**, Claude checks walls, overhangs, fits and stability with `check_all`. With `slice_check` it slices the model itself, with no slicer program installed, and simulates the print layer by layer for your printer: parts that would start in mid air, arms that hang free, bridges, walls thinner than the nozzle, what supports would cost, print time and filament. It also writes G-code for a look in any G-code viewer.
 
 ## Tools
 
 31 tools (`mcp__plugin_freecad_freecad__<tool>` in Claude Code):
 
 - **Build:** `make_part` (gears, springs, threads, hinges, boxes, wheels, stud plates, tile connectors…), `sculpt` (people, animals), `image_to_3d`, `run_python`
-- **Check:** `check_all`, `check_print`, `check_fit`, `check_design`, `check_surface`, `flex_test`, `compare_to_picture`, `slice_check` (slices with your installed slicer and reads the G-code)
+- **Check:** `check_all`, `check_print`, `check_fit`, `check_design`, `check_surface`, `flex_test`, `compare_to_picture`, `slice_check` (built-in slicer: simulates the print and writes G-code)
 - **Work with FreeCAD:** `status`, `get_tree`, `get_object`, `document`, `view`, `selection`, `export`, `print_export`, `import`, `run_headless` and more
 
 The bundled skill holds tested FreeCAD 1.1 patterns and guides for printable, good-looking models; screws, nuts and fits follow ISO sizes (ISO 4017, 4032, 4762, 10642, 273, 286).

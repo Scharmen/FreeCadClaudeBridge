@@ -157,13 +157,18 @@ assert part.Mesh.isSolid() and not part.Mesh.hasNonManifolds()
 
 ## Slicing: what the printer would really do
 
-`check_print` measures the geometry; `slice_check` runs the slicer installed on the user's machine (OrcaSlicer, AnycubicSlicerNext, Bambu Studio) with the printer's own profile and reads the G-code. Call it when the user aims for a print, after `check_all` passes and before `print_export`: `slice_check(printer="Anycubic Kobra S1")`, optionally `objects=[...]` for one part, `layer`, `nozzle`, `material`.
+`check_print` measures the geometry; `slice_check` prints the model in simulation. It is the bridge's own slicer and needs no slicer program: the model is cut into layers, and from the bed up every layer is checked for what it rests on. Call it when the user aims for a print, after `check_all` passes and before `print_export`: `slice_check(printer="Anycubic Kobra S1")`, optionally `objects=[...]` for one part, `layer`, `nozzle`, `material` (PLA, PETG, ABS, ASA, TPU). Read the answer like this:
 
-- `printable_without_supports: false` with "floating regions" or "empty layer": a part starts in mid air. Fix the model: connect it, turn it, or split it at that height.
-- "floating cantilever", a large `overhang_wall_mm` or `bridge_mm`: an arm or roof hangs free. Add a 45° chamfer or gusset under it, shorten the span, turn the part so the flat side lies on the bed, or split it. `with_supports` says what supports would cost (`extra_g`, `extra_minutes`) if the shape has to stay.
-- `minutes` and `filament_g` are the slicer's estimate for the standard profile; tell the user, and thin or hollow a part that takes far longer than they expect.
-- The G-code lies in `print/gcode/` for a look in the slicer's preview. It is sliced as the model stands, without re-orientation: put the model the way it should print first.
-- No slicer installed: the tool says so; `check_print` still works.
+- `problems` with "start in mid air" (`findings` of kind `floating`): a part begins with nothing below it. Fix the model: connect it, turn it, or split it at that height (`z`, `at` say where).
+- "hang free" (kind `cantilever`, `mm` is how far): an arm or roof sticks out over air. Add a 45° chamfer or gusset under it, turn the part so the flat side lies on the bed, or split it. Up to 5 mm it only droops (a warning).
+- kind `bridge`: held on both sides. Up to 10 mm is fine and only counted in `bridges`; longer ones sag: shorten the span, arch it or put a rib below.
+- "slopes steeper than 45°": the underside comes out rough; ease the slope or turn the part.
+- "thinner than the nozzle": that wall or tip is not printed at all. Make it at least two nozzle widths.
+- "does not fit the printer", "small footprint": scale, turn or split; widen the base.
+- `with_supports` appears when supports are needed: `extra_g` and `extra_minutes` are their price, `on_model: true` means they stand on the model and leave marks. Prefer fixing the shape; keep supports for shapes that have to stay.
+- `minutes` and `filament_g` are estimates at moderate speeds; a fast printer is quicker. Tell the user, and thin or hollow a part that takes far longer than they expect.
+- The G-code lies in `print/gcode/` (walls, infill, supports) for a look in a G-code viewer. It is generic and not tuned for the machine; for the real print the user slices the 3MF from `print_export`.
+- The model is simulated as it stands, its lowest point on the bed: put it the way it should print first. After a fix, run `slice_check` again.
 
 ## Exporting for the printer
 

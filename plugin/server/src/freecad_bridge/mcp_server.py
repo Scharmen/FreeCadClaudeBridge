@@ -309,43 +309,45 @@ async def print_export(printer: str = "Anycubic Kobra S1", mode: Literal["whole"
 async def slice_check(printer: str = "Anycubic Kobra S1", objects: list[str] | None = None, nozzle: float = 0.4,
                       layer: float = 0.2, material: str = "PLA", doc: str | None = None,
                       instance: int | None = None) -> str:
-    """Slice with the installed slicer, as the printer would: floating parts, overhangs, bridges, need and
-    cost of supports, time, filament. G-code goes to print/gcode."""
+    """Built-in slicer (no slicer program): simulates the print layer by layer. Floating parts,
+    overhangs, bridges, thin walls, supports, time, filament. G-code: print/gcode."""
     from . import slicing
 
-    slicer, profiles, why = slicing.pick(printer, nozzle, layer, material)
-    if slicer is None:
-        raise ToolError(f"NO_SLICER: {why}. check_print works without a slicer.")
+    try:
+        name, bed = slicing.printer(printer)
+    except ValueError as e:
+        raise ToolError(f"BAD_PRINTER: {e}") from e
     state = await _raw("status_gui", {}, instance=instance)
     docs = state.get("documents") or []
-    name = doc or state.get("active_document")
-    entry = next((d for d in docs if d.get("name") == name), None)
+    wanted = doc or state.get("active_document")
+    entry = next((d for d in docs if d.get("name") == wanted), None)
     if entry is None:
         raise ToolError("NO_DOCUMENT: no document to slice")
     work = tempfile.mkdtemp(prefix="fcb-slice-")
-    model = os.path.join(work, f"{entry['name']}.stl")
-    exported = await _raw("export", {"path": model, "objects": objects, "format": "stl", "doc": entry["name"]},
-                          timeout_s=300, instance=instance)
-    plain = await anyio.to_thread.run_sync(lambda: slicing.slice_file(slicer, profiles, model, os.path.join(work, "a")))
-    needs = plain["log"]["problems"] or any("floating" in w or "cantilever" in w for w in plain["log"]["warnings"])
-    supported = None
-    if needs:
-        supported = await anyio.to_thread.run_sync(
-            lambda: slicing.slice_file(slicer, profiles, model, os.path.join(work, "b"), supports=True))
-    result = slicing.verdict(plain, supported)
-    keep = plain if plain.get("file") else (supported or {})
-    if keep.get("file"):
-        folder = os.path.join(entry.get("project_folder") or work, "print", "gcode")
-        os.makedirs(folder, exist_ok=True)
-        tag = "" if keep is plain else "_with_supports"
-        target = os.path.join(folder, f"{entry['name']}{tag}.gcode")
-        shutil.copyfile(keep["file"], target)
-        result["gcode"] = target
-    shutil.rmtree(work, ignore_errors=True)
-    return _dump({"slicer": slicer["name"], "printer": profiles["machine"].get("name"),
-                  "process": profiles["process"].get("name"), "filament": profiles["filament"].get("name"),
+    try:
+        model = os.path.join(work, f"{entry['name']}.stl")
+        exported = await _raw("export", {"path": model, "objects": objects, "format": "stl", "doc": entry["name"]},
+                              timeout_s=300, instance=instance)
+        folder = os.path.join(entry.get("project_folder") or os.path.dirname(entry.get("path") or "") or work,
+                              "print", "gcode")
+        keep = folder if not folder.startswith(work) else None
+        if keep:
+            os.makedirs(keep, exist_ok=True)
+
+        def run() -> dict[str, Any]:
+            return slicing.slice_model(slicing.read_stl(model), bed, nozzle, layer, material,
+                                       os.path.join(keep, f"{entry['name']}.gcode") if keep else None)
+
+        try:
+            result = await anyio.to_thread.run_sync(run)
+        except ValueError as e:
+            raise ToolError(f"BAD_INPUT: {e}") from e
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return _dump({"printer": name, "nozzle": nozzle, "layer": layer, "material": material.upper(),
                   "objects": exported.get("objects"), **result,
-                  "note": "Sliced as the model stands (no re-orientation), with the slicer's standard profile."})
+                  "note": "Simulated as the model stands (lowest point on the bed) with the bridge's own slicer; "
+                          "minutes and filament are estimates, the G-code is for a viewer, not tuned for the machine."})
 
 
 @mcp.tool(name="import", annotations=WRITE, structured_output=False)
