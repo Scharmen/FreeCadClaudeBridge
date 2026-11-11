@@ -191,6 +191,13 @@ class CallResult:
                 "run `claude plugin update freecad@freecad-claude`."]
 
 
+def _stuck(pid: int) -> str:
+    from . import stuck
+
+    said = stuck.note(str(platforms.bridge_dir()), pid)
+    return f" {said}" if said else ""
+
+
 def call(op: str, args: dict[str, Any] | None = None, timeout_s: float = 60,
          instance: int | None = None) -> CallResult:
     inst, others = choose_instance(instance)
@@ -208,7 +215,8 @@ def call(op: str, args: dict[str, Any] | None = None, timeout_s: float = 60,
         protocol.send_msg(sock, {"id": req_id, "op": op, "args": args or {}, "timeout_s": timeout_s})
         resp = protocol.recv_msg(sock)
     except TimeoutError as e:
-        raise BridgeError(protocol.TIMEOUT, f"no answer from FreeCAD within {timeout_s + 10:.0f} s") from e
+        raise BridgeError(protocol.TIMEOUT, f"no answer from FreeCAD within {timeout_s + 10:.0f} s."
+                          + _stuck(inst.pid)) from e
     except protocol.ProtocolError as e:
         raise BridgeError(e.code, e.message) from e
     finally:
@@ -219,6 +227,7 @@ def call(op: str, args: dict[str, Any] | None = None, timeout_s: float = 60,
         raise BridgeError(protocol.INTERNAL, "FreeCAD closed the connection")
     if not resp.get("ok"):
         err = resp.get("error") or {}
-        raise BridgeError(err.get("code", protocol.INTERNAL), err.get("message", "unknown error"),
-                          err.get("traceback"))
+        code = err.get("code", protocol.INTERNAL)
+        where = _stuck(inst.pid) if code in (protocol.TIMEOUT, protocol.GUI_BUSY) else ""
+        raise BridgeError(code, err.get("message", "unknown error") + where, err.get("traceback"))
     return CallResult(resp.get("result"), inst, hello, others)

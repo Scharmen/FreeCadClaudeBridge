@@ -175,10 +175,48 @@ def _tracer(deadline: float, filename: str) -> Any:
     return pacing.make_tracer(deadline, filename, pacing.qt_pump() if ms > 0 else None, ms / 1000.0)
 
 
+STUCK_EVERY_S = 30.0
+
+
+def _watch_stuck(code: str) -> Any:
+    """Let Python write the GUI thread's stack to a file every 30 s while the code runs: a C++ call that
+    never returns freezes FreeCAD, and the server then reads from the file which line it hangs in."""
+    try:
+        import faulthandler
+
+        from . import hints, paths
+
+        f = open(hints.stuck_path(paths.bridge_dir(), os.getpid()), "w", encoding="utf-8")  # noqa: SIM115
+        f.write(hints.stuck_header(code, time.time()))
+        f.flush()
+        faulthandler.dump_traceback_later(STUCK_EVERY_S, repeat=True, file=f)
+        return f
+    except Exception:  # noqa: BLE001 - a watchdog must never break the call
+        return None
+
+
+def _unwatch_stuck(f: Any) -> None:
+    if f is None:
+        return
+    try:
+        import faulthandler
+
+        faulthandler.cancel_dump_traceback_later()
+        f.close()
+        os.remove(f.name)
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+
 def run_python(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     code = args.get("code")
     if not isinstance(code, str) or not code.strip():
         raise OpError(protocol.INVALID_ARGS, "code is empty")
+    from . import hints
+
+    refused = hints.unstoppable(code)
+    if refused:
+        raise OpError(protocol.INVALID_ARGS, refused)
     doc = _doc(args.get("doc"), required=False)
     ns = ex.namespace
     if not ns:
@@ -203,6 +241,7 @@ def run_python(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     ex.recorder.start()
     deadline = time.monotonic() + max(1.0, float(args.get("_timeout", 60)) - 1.5)
     previous_trace = sys.gettrace()
+    watch = _watch_stuck(code)
     try:
         with redirect_stdout(out), redirect_stderr(err):
             sys.settrace(_tracer(deadline, filename))
@@ -215,7 +254,9 @@ def run_python(args: dict[str, Any], ex: Any) -> dict[str, Any]:
                     d.recompute()
         if _alive(doc):  # the code may have closed its own document
             doc.commitTransaction()
+        _unwatch_stuck(watch)
     except BaseException as e:  # noqa: BLE001 - user code may raise anything, even SystemExit
+        _unwatch_stuck(watch)
         if _alive(doc):
             doc.abortTransaction()
         ex.recorder.stop()
@@ -225,8 +266,6 @@ def run_python(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         if isinstance(e, ScriptTimeout):
             raise OpError(protocol.TIMEOUT, f"{e} (transaction rolled back)", _trunc(tb),
                           {"stdout": _trunc(out.getvalue())}) from None
-        from . import hints
-
         hint = hints.for_error(e, [o.Name for o in doc.Objects] if _alive(doc) else [])
         raise OpError(protocol.PY_EXCEPTION, f"{type(e).__name__}: {e} (transaction rolled back)",
                       _trunc(tb) + (f"\n{hint}" if hint else ""),

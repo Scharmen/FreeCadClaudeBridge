@@ -149,11 +149,11 @@ fixed.removeDuplicatedPoints()
 fixed.removeDuplicatedFacets()
 fixed.fillupHoles(1000)                  # longest hole border to close, in edges
 fixed.removeNonManifolds()
-if fixed.hasSelfIntersections():
-    fixed.fixSelfIntersections()
 part.Mesh = fixed
 assert part.Mesh.isSolid() and not part.Mesh.hasNonManifolds()
 ```
+
+Never call `fixDegenerations`, `fixSelfIntersections`, `fixDeformations` or `fixCaps` with `run_python`: on a real mesh they can run for hours in C++, nothing can interrupt them, and the user's FreeCAD freezes until it is force-quit. `run_python` refuses them. A mesh that still intersects itself after the cheap steps is better rebuilt: mesh the shape again with other deflections, or fix the solid (fuse, `removeSplitter`) and mesh that. If repair is the only way, do it with `run_headless`, which is stopped at its time limit: write the mesh to a file there, repair, save the result and `import` it.
 
 ## Slicing: what the printer would really do
 
