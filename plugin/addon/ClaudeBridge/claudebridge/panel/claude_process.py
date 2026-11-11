@@ -69,6 +69,49 @@ def open_in_desktop(session_id: str, cwd: str, done: Any, parent: Any = None) ->
     return None
 
 
+def probe_info(done: Any, parent: Any = None) -> bool:
+    """Ask Claude Code what it offers (models, commands, account) without starting a conversation: the
+    same initialize request a session sends first, then Claude Code is closed. No message, no tokens.
+    Calls done(info) with the answer, or done(None) if there was none within a minute."""
+    from .stream import StreamParser, control_request
+
+    claude = find_claude()
+    if not claude:
+        return False
+    proc = QtCore.QProcess(parent)
+    proc.setProgram(claude)
+    proc.setArguments(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"])
+    proc.setWorkingDirectory(os.path.expanduser("~"))
+    qenv = QtCore.QProcessEnvironment()
+    for k, v in child_env().items():
+        qenv.insert(k, v)
+    proc.setProcessEnvironment(qenv)
+    parser = StreamParser()
+    init = control_request("initialize")
+    answered = [False]
+
+    def finish(info: Any) -> None:
+        if answered[0]:
+            return
+        answered[0] = True
+        done(info)
+        if proc.state() != QtCore.QProcess.NotRunning:
+            proc.closeWriteChannel()
+            QtCore.QTimer.singleShot(3000, lambda: proc.state() != QtCore.QProcess.NotRunning and proc.kill())
+
+    def read() -> None:
+        for ev in parser.feed(bytes(proc.readAllStandardOutput())):
+            if ev.get("kind") == "control_response" and ev.get("request_id") == init["request_id"]:
+                finish(ev.get("response") or {})
+
+    proc.readyReadStandardOutput.connect(read)
+    proc.finished.connect(lambda *_: (finish(None), proc.deleteLater()))
+    proc.start()
+    proc.write((json.dumps(init) + "\n").encode("utf-8"))
+    QtCore.QTimer.singleShot(60000, lambda: finish(None))
+    return True
+
+
 def claude_candidates() -> list[str]:
     home = os.path.expanduser("~")
     if os.name == "nt":

@@ -200,3 +200,11 @@ def test_the_turn_knows_which_documents_claude_changed():
                _json.dumps({"changes": {"created": [], "changed": [], "deleted": []}, "document": "Other"}),
                _json.dumps({"result": {"valid": True}, "document": "Read"})]
     assert stream.turn_summary(results)["documents"] == ["Board"], "only documents with changes"
+
+
+def test_new_models_are_named_when_claude_code_lists_them():
+    old = [{"value": "opus", "displayName": "Opus 5.5"}, {"value": "fable", "displayName": "Fable 5.1"}]
+    new = old + [{"value": "claude-fable-5-2", "displayName": "Fable 5.2"}]
+    assert usage.new_models(old, new) == ["Fable 5.2"]
+    assert usage.new_models(old, old) == []
+    assert usage.new_models([], new) == [], "a first list has nothing new to announce"

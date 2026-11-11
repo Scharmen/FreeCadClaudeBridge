@@ -4,6 +4,7 @@
 
 - The chat panel saves the models Claude changed after each answer (setting `chat.autosave`, on by default). Work that lived only in the open FreeCAD was lost when FreeCAD closed, as happened to a whole day on the play board's connector test; a model without a file gets a note to save it. The bridge's safety copies stay as well.
 - A sub chat whose part is missing from the model says why that usually happens and offers the newest safety copy that still has the part (found by reading the copies' `Document.xml`), opened as a separate, unsaved document. It used to say only "no longer in the model".
+- New Claude models appear in the model list without a conversation. The list came only from a session's start, so a new model (Fable 5.2) showed up after the first message. The panel now asks Claude Code for its list when FreeCAD starts and every 6 hours (the same `initialize` request, no message, no tokens), keeps your choice and names new models in the chat.
 
 ## 1.21.1 – a smoother chat panel (2026-11-08)
 

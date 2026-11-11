@@ -251,6 +251,10 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         debuglog.prune()
         QtCore.QTimer.singleShot(0, self._report_crashes)
         self._init_updates()
+        QtCore.QTimer.singleShot(4000, self._refresh_models)
+        self.models_timer = QtCore.QTimer(self)          # new models show up without a conversation
+        self.models_timer.timeout.connect(self._refresh_models)
+        self.models_timer.start(6 * 3600 * 1000)
         self.plan_timer = QtCore.QTimer(self)            # a plan change shows within a minute
         self.plan_timer.timeout.connect(self._update_mode_label)
         self.plan_timer.start(60 * 1000)
@@ -597,6 +601,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
     # ----- session info: commands, models, account
 
     def _on_ready(self, info: dict[str, Any]) -> None:
+        fresh = usage.new_models(self.info.get("models") or [], info.get("models") or [])
         self.info = info
         try:
             with open(_info_path(), "w", encoding="utf-8") as f:
@@ -605,6 +610,22 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             pass
         self._apply_info(info)
         self._update_mode_label()
+        if fresh:
+            self._note(f"🆕 New in the model list: {', '.join(fresh)}. Pick it above the chat.")
+
+    def _refresh_models(self) -> None:
+        """At start and every few hours: ask Claude Code for its model list (no conversation, no tokens), so a
+        new model shows up before the first message instead of after it."""
+        if self.session and self.session.running():
+            return                                     # a running session already brought the current list
+        from .claude_process import probe_info
+
+        def done(info: Any) -> None:
+            if info and info.get("models") and not (self.session and self.session.running()):
+                self._on_ready(info)
+            debuglog.log("model_list_refresh", ok=bool(info and info.get("models")))
+
+        probe_info(done, parent=self)
 
     def _apply_info(self, info: dict[str, Any]) -> None:
         cmds = LOCAL_COMMANDS + [(c.get("name", ""), c.get("description", ""))

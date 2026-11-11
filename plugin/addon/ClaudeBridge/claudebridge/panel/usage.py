@@ -190,3 +190,11 @@ def plan_name(profile: dict[str, Any], token_type: str | None = None) -> str | N
     if token_type:
         return PLAN_NAMES.get(token_type.lower(), token_type)
     return None
+
+
+def new_models(old: list[dict[str, Any]], new: list[dict[str, Any]]) -> list[str]:
+    """Display names of models in `new` that `old` did not list (none when there was no list before)."""
+    if not old:
+        return []
+    known = {str(m.get("value")) for m in old}
+    return [str(m.get("displayName") or m.get("value")) for m in new if str(m.get("value")) not in known]
