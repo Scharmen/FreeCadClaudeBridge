@@ -85,9 +85,9 @@ async def _call(op: str, args: dict[str, Any], timeout_s: float = 60, instance: 
 
 @mcp.tool(annotations=READ, structured_output=False)
 async def status(select: str | None = None, instance: int | None = None) -> str:
-    """Overall state: connection, versions, workbench, documents, active document, selection, busy
-    flag, undo limit, the user's learned preferences, and every running FreeCAD when there are
-    several. select = pid or document name chooses the FreeCAD all further calls go to ("auto": the
+    """Overall state: connection, versions, documents with their project folders, selection, busy
+    flag, the user's learned preferences, and every running FreeCAD when there are several. select =
+    pid or document name chooses the FreeCAD all further calls go to ("auto": the
     newest). Works even when FreeCAD is busy."""
     extra: dict[str, Any] = {}
     if select is not None:
@@ -300,9 +300,52 @@ async def print_export(printer: str = "Anycubic Kobra S1", mode: Literal["whole"
                        join: Literal["glue", "pins"] = "glue", folder: str | None = None, lang: str = "en",
                        doc: str | None = None, instance: int | None = None) -> str:
     """Print files from the visible, coloured model: 3MF and STL, moving parts apart, PDF guide; split =
-    plates by colour. Into the model's print/ folder. Never build 3MF by hand."""
+    plates by colour. Into print/. Never build 3MF by hand."""
     return await _call("print_export", {"printer": printer, "mode": mode, "join": join, "folder": folder,
                                         "lang": lang, "doc": doc}, timeout_s=900, instance=instance)
+
+
+@mcp.tool(annotations=WRITE, structured_output=False)
+async def slice_check(printer: str = "Anycubic Kobra S1", objects: list[str] | None = None, nozzle: float = 0.4,
+                      layer: float = 0.2, material: str = "PLA", doc: str | None = None,
+                      instance: int | None = None) -> str:
+    """Slice with the installed slicer, as the printer would: floating parts, overhangs, bridges, need and
+    cost of supports, time, filament. G-code goes to print/gcode."""
+    from . import slicing
+
+    slicer, profiles, why = slicing.pick(printer, nozzle, layer, material)
+    if slicer is None:
+        raise ToolError(f"NO_SLICER: {why}. check_print works without a slicer.")
+    state = await _raw("status_gui", {}, instance=instance)
+    docs = state.get("documents") or []
+    name = doc or state.get("active_document")
+    entry = next((d for d in docs if d.get("name") == name), None)
+    if entry is None:
+        raise ToolError("NO_DOCUMENT: no document to slice")
+    work = tempfile.mkdtemp(prefix="fcb-slice-")
+    model = os.path.join(work, f"{entry['name']}.stl")
+    exported = await _raw("export", {"path": model, "objects": objects, "format": "stl", "doc": entry["name"]},
+                          timeout_s=300, instance=instance)
+    plain = await anyio.to_thread.run_sync(lambda: slicing.slice_file(slicer, profiles, model, os.path.join(work, "a")))
+    needs = plain["log"]["problems"] or any("floating" in w or "cantilever" in w for w in plain["log"]["warnings"])
+    supported = None
+    if needs:
+        supported = await anyio.to_thread.run_sync(
+            lambda: slicing.slice_file(slicer, profiles, model, os.path.join(work, "b"), supports=True))
+    result = slicing.verdict(plain, supported)
+    keep = plain if plain.get("file") else (supported or {})
+    if keep.get("file"):
+        folder = os.path.join(entry.get("project_folder") or work, "print", "gcode")
+        os.makedirs(folder, exist_ok=True)
+        tag = "" if keep is plain else "_with_supports"
+        target = os.path.join(folder, f"{entry['name']}{tag}.gcode")
+        shutil.copyfile(keep["file"], target)
+        result["gcode"] = target
+    shutil.rmtree(work, ignore_errors=True)
+    return _dump({"slicer": slicer["name"], "printer": profiles["machine"].get("name"),
+                  "process": profiles["process"].get("name"), "filament": profiles["filament"].get("name"),
+                  "objects": exported.get("objects"), **result,
+                  "note": "Sliced as the model stands (no re-orientation), with the slicer's standard profile."})
 
 
 @mcp.tool(name="import", annotations=WRITE, structured_output=False)
@@ -325,7 +368,7 @@ async def view(action: Literal["fit", "set_view", "show", "hide", "isolate", "is
                screenshot: bool = False, width: int = 640, height: int = 480,
                instance: int | None = None) -> list[Any]:
     """The 3D view: fit, a view name (front, iso…, fitted), show/hide/isolate objects. look_at =
-    objects to frame (a close-up of the head, one lamp), zoom > 1 closer still. screenshot=true
+    objects to frame (a close-up), zoom > 1 closer still. screenshot=true
     returns a PNG; look once per change, a picture does not change unless the model did."""
     if action in VIEW_NAMES:
         view, action = ("iso" if action == "isometric" else action), "fit"
@@ -343,7 +386,7 @@ async def view(action: Literal["fit", "set_view", "show", "hide", "isolate", "is
           structured_output=False)
 async def run_headless(script: str, timeout_s: float | None = None) -> str:
     """Run a Python script in a separate freecadcmd (no GUI, no open documents): heavy booleans,
-    fillets on big models, batch work; a crash or a long run never touches the user's FreeCAD.
+    fillets on big models, batch work; a crash never touches the user's FreeCAD.
     `WORKDIR` is a scratch folder; set `_result` to return a value; open and save documents by
     path. A job that would exhaust memory is stopped (`killed`). Default timeout 600 s."""
     try:
@@ -835,17 +878,17 @@ async def sculpt(scene: dict[str, Any] | None = None, name: str = "Sculpt", voxe
                  height: float | None = None, parts: list[dict[str, Any]] | None = None,
                  pose: dict[str, float] | None = None, doc: str | None = None,
                  instance: int | None = None) -> list[Any]:
-    """Organic shapes (people, animals, faces, hair, plants, rocks) from primitives that melt into
-    each other like clay; people and animals start from a template: scene (or the keys as
+    """Organic shapes (people, animals, faces, hair, plants, rocks) from primitives blended like
+    clay; people and animals start from a template: scene (or the keys as
     arguments) = {"template":
     "person_standing" | "dog_standing" | "cat_sitting", "height": mm (finished, pose included), "pose":
     {"arm_r": 150} (joints in degrees; _r is the figure's own right), "parts": [{"name", "color",
     "fur", "primitives": [...]}]}, a part with a template part's name changes it. Primitives (mm):
     sphere, ellipsoid, capsule, strand, box, torus, cylinder, each with op add|subtract and its own
-    blend; "detail" adds skin texture, "fur" carves grooves along the flow. Grammar and the rules that
-    make it look real: references/organic.md of the freecad skill. one_piece=true unites
-    every part into one closed mesh for printing (each part keeps its fur and blend; the first part's
-    colour). The meshes arrive as a group of Mesh objects (one undo step). Answers with a front and
+    blend; "detail" adds skin texture, "fur" carves grooves along the flow. Grammar and rules:
+    references/organic.md of the freecad skill. one_piece=true unites
+    every part into one closed mesh for printing (the first part's
+    colour). The result is a group of Mesh objects. Answers with a front and
     side preview: take no other picture."""
     from . import sculpt as sculpt_mod
 

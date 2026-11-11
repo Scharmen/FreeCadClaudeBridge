@@ -408,6 +408,8 @@ def export(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         raise OpError(protocol.INVALID_ARGS, f"unsupported format '{fmt or os.path.splitext(path)[1]}'; "
                       "use step, iges, brep, stl, obj or 3mf (DXF/SVG/PDF come later)")
     objs = [_obj(doc, n) for n in args["objects"]] if args.get("objects") else _default_export_objects(doc)
+    if not args.get("objects") and fmt in ("stl", "obj", "3mf"):      # sculpted figures are meshes, not solids
+        objs += [o for o in doc.Objects if o.TypeId.startswith("Mesh::") and _visible(o)]
     if not objs:
         raise OpError(protocol.NOT_FOUND, "nothing to export (no visible solids)")
     os.makedirs(os.path.dirname(path), exist_ok=True)

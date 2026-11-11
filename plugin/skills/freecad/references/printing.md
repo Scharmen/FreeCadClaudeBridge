@@ -9,6 +9,7 @@ Tested by `tests/gui/test_references.py`. Printers differ, so these are ranges t
 - Hinges
 - Orientation and strength
 - Details that print better
+- Slicing: what the printer would really do
 - Meshes: find holes and repair them
 
 ## Limits
@@ -153,6 +154,16 @@ if fixed.hasSelfIntersections():
 part.Mesh = fixed
 assert part.Mesh.isSolid() and not part.Mesh.hasNonManifolds()
 ```
+
+## Slicing: what the printer would really do
+
+`check_print` measures the geometry; `slice_check` runs the slicer installed on the user's machine (OrcaSlicer, AnycubicSlicerNext, Bambu Studio) with the printer's own profile and reads the G-code. Call it when the user aims for a print, after `check_all` passes and before `print_export`: `slice_check(printer="Anycubic Kobra S1")`, optionally `objects=[...]` for one part, `layer`, `nozzle`, `material`.
+
+- `printable_without_supports: false` with "floating regions" or "empty layer": a part starts in mid air. Fix the model: connect it, turn it, or split it at that height.
+- "floating cantilever", a large `overhang_wall_mm` or `bridge_mm`: an arm or roof hangs free. Add a 45° chamfer or gusset under it, shorten the span, turn the part so the flat side lies on the bed, or split it. `with_supports` says what supports would cost (`extra_g`, `extra_minutes`) if the shape has to stay.
+- `minutes` and `filament_g` are the slicer's estimate for the standard profile; tell the user, and thin or hollow a part that takes far longer than they expect.
+- The G-code lies in `print/gcode/` for a look in the slicer's preview. It is sliced as the model stands, without re-orientation: put the model the way it should print first.
+- No slicer installed: the tool says so; `check_print` still works.
 
 ## Exporting for the printer
 
