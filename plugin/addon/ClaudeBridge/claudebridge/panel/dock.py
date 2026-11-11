@@ -975,7 +975,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         if note:
             debuglog.log("long_thinking", note=note)
             self._note(f"💭 {note}")
-        warning = self.activity.stall(now, limit, freecad_busy=bool(ex and ex.busy))
+        warning = self.activity.stall(now, limit)
         if warning and not self.stall_noted:
             self.stall_noted = True
             debuglog.log("stall", warning=warning, activity=self.activity.phase,

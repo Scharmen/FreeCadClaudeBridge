@@ -10,7 +10,6 @@ from typing import Any
 from .stream import short_tool_name
 from .usage import short
 
-LONG_TOOLS = {"run_headless", "export", "import"}     # may legitimately run for minutes
 RATE_WINDOW = 10.0       # seconds of token samples behind the "+N/s" in the status line
 QUIET_SHOWN = 15.0       # from this many seconds without new tokens the status line says so
 LONG_THINKING_SECONDS = 300.0   # after this much thinking the chat says once that Claude is still at it
@@ -133,7 +132,7 @@ class Activity:
         if self.phase == "compacting":
             return f"Compacting the conversation · {_clock(now - self.since)}"
         if self.phase == "tool":
-            return f"Running {self.tool} ({int(now - self.since)} s) · {total}"
+            return f"Running {self.tool} · {_clock(now - self.since)} · total {total}"
         if self.phase == "writing":
             return f"Writing the answer · {total}"
         if self.phase == "approval":
@@ -160,12 +159,13 @@ class Activity:
                 f"growing (~{short(self.thought_tokens())} tokens{speed}). Big designs can take several minutes. "
                 "Stop ends it; a lower Effort answers sooner.")
 
-    def stall(self, now: float, limit: float, freecad_busy: bool = False) -> str | None:
-        """A warning when nothing happened for `limit` seconds, or None (waiting for the user is fine).
+    def stall(self, now: float, limit: float) -> str | None:
+        """A warning when Claude itself was silent for `limit` seconds, or None. Waiting for the user is fine,
+        and so is a tool however long it runs: checks and geometry take minutes, and the status line counts.
 
         While thinking, updates that repeat the same token count do not count: only a growing count does.
         """
-        if self.phase in ("idle", "approval"):
+        if self.phase in ("idle", "approval", "tool"):     # a running tool shows its clock in the status line
             return None
         if self.phase == "compacting" and now - self.since < 900:      # one long request without events
             return None
@@ -179,12 +179,4 @@ class Activity:
         if now - self.last_event < limit:
             return None
         quiet = _clock(now - self.last_event)
-        if self.phase == "tool" and self.tool in LONG_TOOLS:
-            return f"{self.tool} is still running ({quiet}); long jobs are normal here. Stop ends it."
-        if self.phase == "tool" and freecad_busy:
-            return (f"FreeCAD is still computing {self.tool} ({quiet} without news). Long geometry can take a "
-                    "while; Stop interrupts Claude, the running FreeCAD operation finishes on its own.")
-        if self.phase == "tool":
-            return (f"{self.tool} has given no sign of life for {quiet}. It may be stuck: Stop, or create a "
-                    "debug report.")
         return f"Claude has given no sign of life for {quiet}. It may be stuck: Stop, or create a debug report."

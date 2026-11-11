@@ -49,7 +49,7 @@ def test_activity_describes_the_current_step():
     assert a.describe(now=112) == "Thinking · 0:10 · ~1.5k tokens · +250/s"   # the steps add up
     a.on_event({"kind": "tool_use", "id": "t1", "name": "mcp__plugin_freecad_freecad__run_python",
                 "input": {}}, now=120)
-    assert a.describe(now=135) == "Running run_python (15 s) · 0:35"
+    assert a.describe(now=135) == "Running run_python · 0:15 · total 0:35"
     a.on_event({"kind": "tool_result", "id": "t1"}, now=140)
     a.on_event({"kind": "text_delta", "text": "Done"}, now=141)
     assert a.describe(now=142).startswith("Writing the answer")
@@ -65,18 +65,20 @@ def test_thinking_duration_line():
     assert a.last_thought_seconds == 12
 
 
-def test_stall_detection_tells_freecad_work_from_silence():
+def test_a_running_tool_is_never_called_stuck():
     a = activity.Activity()
     a.start(now=0)
-    a.on_event({"kind": "tool_use", "id": "t", "name": "mcp__plugin_freecad_freecad__run_python", "input": {}},
+    a.on_event({"kind": "tool_use", "id": "t", "name": "mcp__plugin_freecad_freecad__check_all", "input": {}},
                now=5)
-    assert a.stall(now=60, limit=90) is None
-    msg = a.stall(now=200, limit=90, freecad_busy=True)
-    assert msg and "FreeCAD is still computing" in msg
-    msg = a.stall(now=200, limit=90, freecad_busy=False)
-    assert msg and "no sign of life" in msg.lower()
-    a.on_event({"kind": "permission_request"}, now=210)
-    assert a.stall(now=900, limit=90) is None, "waiting for the user is not a stall"
+    assert a.describe(now=130) == "Running check_all · 2:05 · total 2:10"
+    for late in (200, 3600):
+        assert a.stall(now=late, limit=90) is None, "the status line shows it is running"
+    a.on_event({"kind": "tool_result", "id": "t", "content": "ok"}, now=3600)
+    assert a.stall(now=3650, limit=90) is None
+    msg = a.stall(now=3700, limit=90)
+    assert msg and "no sign of life" in msg.lower(), "silence from Claude itself is still reported"
+    a.on_event({"kind": "permission_request"}, now=3710)
+    assert a.stall(now=9000, limit=90) is None, "waiting for the user is not a stall"
 
 
 def think(a, step, now):
@@ -214,7 +216,7 @@ def test_long_jobs_and_frozen_gui_are_not_stalls():
     a.start(now=0)
     a.on_event({"kind": "tool_use", "id": "h", "name": "mcp__plugin_freecad_freecad__run_headless", "input": {}},
                now=1)
-    assert "long jobs are normal" in a.stall(now=500, limit=90)
+    assert a.stall(now=500, limit=90) is None
     b = activity.Activity()
     b.start(now=0)
     b.on_event({"kind": "tool_use", "id": "t", "name": "mcp__plugin_freecad_freecad__run_python", "input": {}},
