@@ -27,10 +27,10 @@ def read(text: str, now: float) -> str:
     source = lines[number].strip() if number < len(lines) else ""
     seconds = int(max(0.0, now - int(started[1])))
     return (f"FreeCAD's main thread has been inside line {number} of the run_python code"
-            + (f" (`{source[:160]}`)" if source else "") + f" for {seconds // 60}:{seconds % 60:02d} min. A C++ call cannot be "
-            "interrupted: if it does not return, FreeCAD stays frozen until the user force-quits it, and what "
-            "was not saved is lost. Tell the user now which call hangs, do not send more work to FreeCAD, and do "
-            "such work with run_headless next time.")
+            + (f" (`{source[:160]}`)" if source else "") + f" for {seconds // 60}:{seconds % 60:02d} min. "
+            "A C++ call cannot be interrupted: if it does not return, FreeCAD stays frozen until the user "
+            "force-quits it, and what was not saved is lost. Tell the user now which call hangs, do not send "
+            "more work to FreeCAD, and do such work with run_headless next time.")
 
 
 def note(folder: str, pid: int, now: float | None = None) -> str:
