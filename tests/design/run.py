@@ -221,10 +221,13 @@ def claude_path() -> str:
     return path
 
 
-def run_claude(prompt: str, model: str, pid: int, work: Path, log: Path, no_checks: bool = False) -> dict[str, Any]:
+def run_claude(prompt: str, model: str, pid: int, work: Path, log: Path, no_checks: bool = False,
+               effort: str | None = None) -> dict[str, Any]:
     allowed = [FREECAD_TOOL_PREFIX + "*", "Read", "Skill", "ToolSearch"]   # its pictures and the skill, as in the panel
     args = [claude_path(), *build_args(prompt, allowed_tools=allowed), "--model", model,
             "--append-system-prompt", SYSTEM_PROMPT]
+    if effort:
+        args += ["--effort", effort]
     if no_checks:     # a "before" measurement: as if the check tools did not exist
         args += ["--disallowedTools", ",".join(FREECAD_TOOL_PREFIX + t for t in CHECK_TOOLS)]
     env = platforms.clean_env()
@@ -290,13 +293,19 @@ def judge(task: dict[str, Any], shots: list[str], work: Path, model: str = "opus
 
 
 def run_task(task: dict[str, Any], model: str, pid: int, out: Path, fc_cmd: list[str],
-             with_judge: bool, no_checks: bool = False) -> dict[str, Any]:
+             with_judge: bool, no_checks: bool = False, effort: str | None = None) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
     name = "Bench_" + task["id"]
     py(f"App.newDocument({name!r})", pid)
+    if task.get("start"):      # an edit task: the finished model is there before Claude begins
+        py(f"import sys\nsys.path.insert(0, {str(HERE.parent)!r})\nfrom design import refs\n"
+           f"refs.solution({task['start']!r}, App.getDocument({name!r}))\n"
+           "import FreeCADGui as Gui\nGui.SendMsgToActiveView('ViewFit')", pid)
     prompt = f"[FreeCAD] Active document: {name} ({name}). Selection: nothing.\n{task['prompt']}"
     result: dict[str, Any] = {"task": task["id"], "model": model, "prompt": task["prompt"]}
-    result["run"] = run_claude(prompt, model, pid, out / "work", out / "stream.jsonl", no_checks)
+    result["run"] = run_claude(prompt, model, pid, out / "work", out / "stream.jsonl", no_checks, effort)
+    if effort:
+        result["effort"] = effort
     try:
         doc, count = py(PICK_DOC, pid)
         path = out / "model.FCStd"
@@ -360,6 +369,8 @@ def worker_args(model: str, args: argparse.Namespace, run_dir: Path) -> list[str
         cmd.append("--no-judge")
     if args.no_checks:
         cmd.append("--no-checks")
+    if getattr(args, "effort", None):
+        cmd += ["--effort", args.effort]
     return cmd
 
 
@@ -422,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--tasks", default=",".join(t["id"] for t in tasks.TASKS))
     ap.add_argument("--no-judge", action="store_true")
     ap.add_argument("--no-checks", action="store_true", help="block the check tools (a before measurement)")
+    ap.add_argument("--effort", help="reasoning effort for the model under test (low, medium, high…)")
     ap.add_argument("--rescore", type=Path)
     ap.add_argument("--rejudge", type=Path, help="new pictures and a new visual judgement of a saved run")
     ap.add_argument("--parallel", action="store_true", help="each model at the same time, in its own FreeCAD")
@@ -461,7 +473,8 @@ def main(argv: list[str] | None = None) -> int:
                     task = tasks.get(tid)
                     t0 = time.time()
                     close_all(pid)
-                    r = run_task(task, model, pid, run_dir / model / tid, fc_cmd, not args.no_judge, args.no_checks)
+                    r = run_task(task, model, pid, run_dir / model / tid, fc_cmd, not args.no_judge, args.no_checks,
+                                 args.effort)
                     if r["run"].get("api_error") == "usage_limit_reached":
                         print(f"{model}: plan usage limit reached at {tid}; stopping. Run the rest later with "
                               f"--tasks.", flush=True)

@@ -465,6 +465,20 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         if slash and self._local_command(*slash):
             self.input.clear()
             return
+        if not slash and echo and self._sub_starts_now():
+            # a new sub chat forks its main chat, whole history included: compact it first, then send this
+            self.input.clear()
+            pics = "".join(f"<img src='{QtCore.QUrl.fromLocalFile(a['path']).toString()}' width='120'> "
+                           for a in self.attachments)
+            self._append(look.user_bubble(text, f"<br>{pics}" if pics else "", self._theme()))
+            self._after_compact = (text, self.attachments)
+            self.attachments = []
+            self._render_attachments()
+            self.compacting = True
+            self._note("🗜 Preparing the sub chat: taking over the main chat's decisions in short form (about a "
+                       "minute), then your message is sent.")
+            self.send(tips.compact_command(self._current_part()), echo=False)
+            return
         fb = getattr(self, "feedback_pending", None)
         if fb and text and not slash:
             self.feedback_pending = None
@@ -860,16 +874,18 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         self._render_new_files()
         if changed and not interrupted:
             self._ask_feedback()
-        parts = [f"Done in {dt:.0f} s"]
+        parts, icons = [f"Done in {dt:.0f} s"], ["⏱"]
         if self.turn_steps:
             parts.append(f"{self.turn_steps} step{'s' if self.turn_steps != 1 else ''}")
+            icons.append("🔧")
         if self.usage.turn_text():
             parts.append(self.usage.turn_text())
+            icons.append("🪙")
         if self.mode() == "api_key" and ev.get("cost_usd"):
             parts.append(f"${ev['cost_usd']:.2f}")
-        if not interrupted:
-            icons = ["⏱", "🔧", "🪙", "💵"]
-            self._append(look.footer([f"{icons[i]} {p}" for i, p in enumerate(parts)], self._theme()))
+            icons.append("💵")
+        if not interrupted and not getattr(self, "compacting", False):
+            self._append(look.footer([f"{i} {p}" for i, p in zip(icons, parts, strict=True)], self._theme()))
         self.status.setText("Stopped" if interrupted else " · ".join(parts))
         self.status.setToolTip("Tokens Claude wrote in this turn (thinking included, as reported by Claude Code) "
                                "and how much of the model's context window the conversation fills.")
@@ -880,6 +896,47 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             self.restart_after_turn = False
             self._close_session()
         QtCore.QTimer.singleShot(0, self.switch_document)  # catch up on a document switch during the turn
+        self._maybe_compact(bool(interrupted))
+
+    def _sub_starts_now(self) -> bool:
+        """True for the first message of a prepared sub chat that will fork its main chat."""
+        if self.session and self.session.running():
+            return False
+        if self.store.active(self.current_key) is not None:
+            return False
+        pending = self.store.pending_sub(self.current_key)
+        main = self.store.find(self.current_key, pending["parent"]) if pending else None
+        return bool(main and os.path.isdir(main["cwd"]))
+
+    def _maybe_compact(self, interrupted: bool) -> None:
+        """Long chats re-read their whole history with every request. Past chat.compact_at_k the panel asks
+        Claude Code to compact it: decisions and dimensions stay, code, pictures and reasoning go."""
+        if getattr(self, "compacting", False):               # this was the compaction's own turn
+            self.compacting = False
+            self.usage.context = 0
+            waiting = getattr(self, "_after_compact", None)
+            self._after_compact = None
+            if waiting and not interrupted:                  # a sub chat's first message, held back until now
+                self.attachments = waiting[1]
+                self.send(waiting[0], echo=False)
+                return
+            self._note("🗜 Chat compacted: decisions, dimensions and open points are kept; the next answers "
+                       "cost much less.")
+            return
+        from ..bridge import paths as bpaths
+        from ..bridge import settings as bsettings
+
+        try:
+            threshold = float(bsettings.load(bpaths.bridge_dir())["chat.compact_at_k"])
+        except Exception:
+            threshold = 200.0
+        if interrupted or not (self.session and self.session.running()) \
+                or not usage.should_compact(self.usage.context, threshold):
+            return
+        self.compacting = True
+        self._note(f"🗜 This chat has grown to {usage.short(self.usage.context)} tokens, which every new answer "
+                   "re-reads. Compacting it now (about a minute)…")
+        self.send(tips.compact_command(self._current_part()), echo=False)
 
     def _on_exited(self, code: int) -> None:
         self._close_text()

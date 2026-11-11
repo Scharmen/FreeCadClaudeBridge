@@ -194,3 +194,20 @@ d.deleteLater()
 _result = ok
 """)
     assert r is True
+
+
+def test_print_export_is_a_bridge_operation_for_claude(tmp_path):
+    folder = str(tmp_path / "print")
+    r = call("print_export", timeout_s=400, doc=DOC, printer="kobra s1", mode="split", folder=folder)
+    assert r["printer"] == "Anycubic Kobra S1" and r["folder"] == folder
+    files = r["files"]
+    assert any(f.endswith(".3mf") for f in files) and any(f.endswith(".pdf") for f in files), files
+    assert all((Path(folder) / f).is_file() for f in files)
+    assert r["prints"] >= 2 and r["moving"], "the wheels turn; the split gives several prints"
+    assert len(json.dumps(r)) < 3000, "a compact answer, not the whole report"
+
+
+def test_print_export_names_the_printers_it_knows():
+    with pytest.raises(client.BridgeError) as e:
+        call("print_export", doc=DOC, printer="Nonexistent 9000")
+    assert "Anycubic Kobra S1" in e.value.message

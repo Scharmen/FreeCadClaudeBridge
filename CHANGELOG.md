@@ -1,10 +1,17 @@
 # Changelog
 
-## 1.21.2 – no lost work (unreleased)
+## 1.22.0 – long chats that stay cheap, no lost work (unreleased)
 
 - The chat panel saves the models Claude changed after each answer (setting `chat.autosave`, on by default). Work that lived only in the open FreeCAD was lost when FreeCAD closed, as happened to a whole day on the play board's connector test; a model without a file gets a note to save it. The bridge's safety copies stay as well.
 - A sub chat whose part is missing from the model says why that usually happens and offers the newest safety copy that still has the part (found by reading the copies' `Document.xml`), opened as a separate, unsaved document. It used to say only "no longer in the model".
 - New Claude models appear in the model list without a conversation. The list came only from a session's start, so a new model (Fable 5.2) showed up after the first message. The panel now asks Claude Code for its list when FreeCAD starts and every 6 hours (the same `initialize` request, no message, no tokens), keeps your choice and names new models in the chat.
+- Long chats cost about half: no chat was ever compacted, so real sessions grew to 370k–608k tokens of context that every request re-read (220M input tokens over the five largest chats). Past `chat.compact_at_k` (200k tokens by default, 0 = never) the panel now asks Claude Code to compact the chat after an answer: wishes, part names, dimensions, fits, decisions and open problems stay; code, pictures and reasoning go. Replayed on the real context histories this saves 51 % of the input tokens at 250k and 68 % at 150k.
+- A new sub chat is compacted before its first message instead of inheriting the whole main chat (the connector sub chat started at 400k tokens; 33M of its 43M input tokens were inherited history).
+- New tool `print_export`: the print kit behind the 3D print button, for Claude. Coloured 3MF and STL of the whole model, moving parts apart, plates by colour (`mode="split"`), PDF guide, printer presets (Anycubic Kobra S1 and others), into the model's `print/` folder; FreeCAD stays responsive while it runs. Claude used to build 3MF files by hand: 15–26 shell calls and 8–23 `run_python` calls per printing project.
+- `make_part` families for toys: `stud_plate` (DUPLO-compatible grid: pitch 16 mm, hollow studs 9.35 × 4.4 mm) and `tile_connector` (a bow-tie key dropped into pockets from above, printable flat without supports; `coupon=true` gives two test plates and three keys with different clearances). The default clearance 0.2 mm has not been print-tested.
+- `design_notes(add)` answers with a confirmation instead of the notes Claude just wrote (2.2k characters per call that stayed in the context).
+- Benchmark: three edit tasks (`edit_bearing_seat`, `edit_flange_size`, `edit_add_holes`, starting from a finished model) and `--effort`, to measure follow-up edits. Not part of the default run.
+- Skill: tools are called by their full name. Claude called `get_tree` or `design_notes` by the short name the skill uses, got "No such tool available" and retried, in nearly every session; the skill now says so up front (edit tasks: 1 tool error instead of 4, 16 % fewer input tokens).
 
 ## 1.21.1 – a smoother chat panel (2026-11-08)
 

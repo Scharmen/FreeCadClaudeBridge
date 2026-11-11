@@ -72,6 +72,17 @@ FAMILIES: dict[str, dict[str, Any]] = {
     "knob": {"doc": "Knob for a D-shaft: grip ridges, indicator mark, rounded top.",
              "params": {"diameter": 25.0, "height": 18.0, "shaft": 6.0, "flat": 1.5, "depth": 12.0, "ridges": 18,
                         "gap": 0.2}},
+    "stud_plate": {"doc": "Plate with a DUPLO-compatible stud grid (pitch 16 mm, hollow studs 9.35 x 4.4 mm); "
+                          "size = studs x pitch. For play boards, toy bases, roofs that take bricks.",
+                   "params": {"studs_x": 4, "studs_y": 4, "thickness": 3.2, "pitch": 16.0, "stud_d": 9.35,
+                              "stud_h": 4.4, "hollow": 6.8}},
+    "tile_connector": {"doc": "Bow-tie key that joins two tiles lying side by side: dropped in from above, printed "
+                              "flat without supports. Returns Key and Pocket (a cutter): put the seam at x = 0 and "
+                              "the tiles' top at z = 0, cut Pocket from both tiles. gap is the clearance per side "
+                              "(0.2 is a starting value, not print-tested: coupon=true gives two small test plates "
+                              "and three keys with gap-0.1, gap, gap+0.1, marked with 1-3 dots).",
+                       "params": {"length": 30.0, "width": 18.0, "waist": 9.0, "height": 4.0, "gap": 0.2,
+                                  "coupon": False}},
     "faired_body": {"doc": "Smooth closed body (car, boat, fairing) from feature lines running front to rear. Each "
                            "line: {points: [[x, y, z], ...], crease: true for a sharp edge}, x rising, all lines from "
                            "the same start x to the same end x. Give one side (y >= 0), mirrored across y=0: order the "
@@ -160,6 +171,20 @@ def _validate(family: str, p: dict[str, Any]) -> None:
             raise ValueError("kind must be panel or holes")
         if p["bar"] >= p["cell"]:
             raise ValueError("bar must be smaller than cell, or nothing is open")
+    if family == "stud_plate":
+        if not (1 <= p["studs_x"] <= 32 and 1 <= p["studs_y"] <= 32):
+            raise ValueError("a stud_plate has 1 to 32 studs each way; join larger boards from tiles")
+        if p["stud_d"] >= p["pitch"] - 2:
+            raise ValueError("the studs would touch: stud_d must be at least 2 mm smaller than the pitch")
+        if p["hollow"] and p["hollow"] > p["stud_d"] - 1.6:
+            raise ValueError("a hollow stud needs a wall of at least 0.8 mm")
+    if family == "tile_connector":
+        if p["waist"] > p["width"] - 4:
+            raise ValueError("the waist must be at least 4 mm narrower than the width, or the key holds nothing")
+        if not 0.05 <= p["gap"] <= 0.6:
+            raise ValueError("gap must be between 0.05 and 0.6 mm")
+        if p["height"] < 2 or p["length"] < 12:
+            raise ValueError("the key is too small to print: height from 2 mm, length from 12 mm")
     if family == "knob" and p["shaft"] + 4 >= p["diameter"]:
         raise ValueError("the knob needs at least 2 mm of wall around the shaft")
 

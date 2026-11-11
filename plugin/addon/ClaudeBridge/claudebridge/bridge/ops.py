@@ -450,4 +450,5 @@ OPS = {
     "view": action_ops.view,
     "snapshot": action_ops.snapshot,
     "sub_chat": action_ops.sub_chat,
+    "print_export": action_ops.print_export,
 }

@@ -299,6 +299,46 @@ def export_now(doc: Any, options: dict[str, Any], folder: str) -> dict[str, Any]
     return finish(job, done.stdout + done.stderr)
 
 
+def printer_preset(name: str) -> tuple[str, dict[str, Any]] | None:
+    """A printer preset by (part of) its name, case-insensitive."""
+    want = "".join(ch for ch in name.lower() if ch.isalnum())
+    for key, preset in plan.PRINTERS.items():
+        if want and want in "".join(ch for ch in key.lower() if ch.isalnum()):
+            return key, preset
+    return None
+
+
+def options_for(doc: Any, printer: tuple[str, dict[str, Any]], split: bool, join: str, lang: str) -> dict[str, Any]:
+    """The dialog's options without the dialog: what is visible, its colours, everything that turns."""
+    items = collect(doc)
+    moving = [{k: m[k] for k in ("objects", "axis", "axle")} for m in plan.detect_moving(items)]
+    name, preset = printer
+    return {"name": doc.Label, "lang": lang, "whole": True, "split": split, "join": join,
+            "colors": {o["name"]: o["color"] for o in items}, "moving": moving,
+            "printer": {"name": name, "bed": list(preset["bed"]), "nozzle": preset["nozzle"],
+                        "slots": preset["slots"], "process": preset["process"]}}
+
+
+def export_responsive(doc: Any, options: dict[str, Any], folder: str, pump: Any) -> dict[str, Any]:
+    """Like export_now, but FreeCAD keeps drawing while the job runs in freecadcmd."""
+    import subprocess
+    import time
+
+    job = prepare(doc, options, folder)
+    with open(os.path.join(job["work"], "out.txt"), "w", encoding="utf-8") as log:
+        proc = subprocess.Popen([*_freecadcmd(), job["script"]], stdout=log, stderr=subprocess.STDOUT,
+                                env=_clean(), stdin=subprocess.DEVNULL, cwd=job["work"])
+        started = time.monotonic()
+        while proc.poll() is None:
+            if time.monotonic() - started > 900:
+                proc.kill()
+                break
+            pump()
+            time.sleep(0.05)
+    with open(os.path.join(job["work"], "out.txt"), encoding="utf-8", errors="replace") as f:
+        return finish(job, f.read())
+
+
 def show() -> None:
     doc = App.ActiveDocument
     parent = Gui.getMainWindow()

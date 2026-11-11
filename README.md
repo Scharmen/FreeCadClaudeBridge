@@ -66,11 +66,11 @@ The setup window checks what is missing, offers to install it, then adds the `fr
 
 ## Tools
 
-29 tools (`mcp__plugin_freecad_freecad__<tool>` in Claude Code):
+30 tools (`mcp__plugin_freecad_freecad__<tool>` in Claude Code):
 
-- **Build:** `make_part` (gears, springs, threads, hinges, boxes, wheels…), `sculpt` (people, animals), `image_to_3d`, `run_python`
+- **Build:** `make_part` (gears, springs, threads, hinges, boxes, wheels, stud plates, tile connectors…), `sculpt` (people, animals), `image_to_3d`, `run_python`
 - **Check:** `check_all`, `check_print`, `check_fit`, `check_design`, `check_surface`, `flex_test`, `compare_to_picture`
-- **Work with FreeCAD:** `status`, `get_tree`, `get_object`, `document`, `view`, `selection`, `export`, `import`, `run_headless` and more
+- **Work with FreeCAD:** `status`, `get_tree`, `get_object`, `document`, `view`, `selection`, `export`, `print_export`, `import`, `run_headless` and more
 
 The bundled skill holds tested FreeCAD 1.1 patterns and guides for printable, good-looking models; screws, nuts and fits follow ISO sizes (ISO 4017, 4032, 4762, 10642, 273, 286).
 

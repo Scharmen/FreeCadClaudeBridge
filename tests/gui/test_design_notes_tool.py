@@ -35,6 +35,7 @@ def test_notes_accumulate_in_a_text_object_and_can_be_listed():
         {"part": "Body", "decision": "barrel chest, 1.1 x as long as tall", "reason": "breed proportions",
          "source": "reference"}])
     assert first["result"]["object"] == "DesignNotes" and first["result"]["entries"] == 1
+    assert "text" not in first["result"] and first["result"]["saved"], "adding confirms, it does not echo the notes"
     tool(action="add", topic="Head", notes=[{"part": "Ears", "decision": "hanging, to the jaw line",
                                             "reason": "seen in your picture", "source": "picture"}])
     listed = tool(action="list")["result"]

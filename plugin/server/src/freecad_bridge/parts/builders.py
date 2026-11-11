@@ -546,6 +546,65 @@ def fit_error(shape: Any, lines: list[dict[str, Any]]) -> float:
     return max(shape.distToShape(Part.Vertex(V(*pt)))[0] for line in lines for pt in line["points"])
 
 
+def stud_plate(p: dict[str, Any]) -> dict[str, Any]:
+    nx, ny, t, pitch, d, h, hollow = (p[k] for k in ("studs_x", "studs_y", "thickness", "pitch", "stud_d", "stud_h",
+                                                     "hollow"))
+    c = min(0.4, h / 4)                                   # chamfer on the stud's rim: bricks find their way on
+    profile = [V(hollow / 2, 0, 0), V(d / 2, 0, 0), V(d / 2, 0, h - c), V(d / 2 - c, 0, h), V(hollow / 2, 0, h),
+               V(hollow / 2, 0, 0)] if hollow else \
+        [V(0, 0, 0), V(d / 2, 0, 0), V(d / 2, 0, h - c), V(d / 2 - c, 0, h), V(0, 0, h), V(0, 0, 0)]
+    stud = Part.Face(Part.makePolygon(profile)).revolve(V(0, 0, 0), V(0, 0, 1), 360)
+    studs = []
+    for i in range(int(nx)):
+        for j in range(int(ny)):
+            s = stud.copy()
+            s.translate(V((i + 0.5) * pitch, (j + 0.5) * pitch, t - 0.01))
+            studs.append(s)
+    plate = Part.makeBox(nx * pitch, ny * pitch, t)
+    return {"StudPlate": plate.fuse(studs).removeSplitter()}
+
+
+def _bow_tie(length: float, width: float, waist: float, shrink: float = 0.0) -> Any:
+    """Face of a bow tie along x, optionally shrunk by `shrink` on every side."""
+    pts = [V(-length / 2, -width / 2, 0), V(0, -waist / 2, 0), V(length / 2, -width / 2, 0),
+           V(length / 2, width / 2, 0), V(0, waist / 2, 0), V(-length / 2, width / 2, 0)]
+    face = Part.Face(Part.makePolygon([*pts, pts[0]]))
+    return face.makeOffset2D(-shrink, 2) if shrink else face
+
+
+def tile_connector(p: dict[str, Any]) -> dict[str, Any]:
+    length, width, waist, h, gap = (p[k] for k in ("length", "width", "waist", "height", "gap"))
+    depth = h + 0.2                                        # the key sits 0.2 mm below the tiles' top
+
+    def key(g: float, dots: int = 0) -> Any:
+        k = _bow_tie(length, width, waist, g).extrude(V(0, 0, h))
+        for n in range(dots):                             # dimples that say which clearance this key has
+            k = k.cut(Part.makeCylinder(0.8, 0.5, V(-length / 2 + 3 + 2.4 * n, 0, h - 0.4)))
+        k.translate(V(0, 0, -depth))
+        return k
+
+    pocket = _bow_tie(length, width, waist).extrude(V(0, 0, depth + 0.01))
+    pocket.translate(V(0, 0, -depth))
+    if not p["coupon"]:
+        return {"Key": key(gap), "Pocket": pocket}
+    step = width + 8
+    plate_t = depth + 1.6
+    out: dict[str, Any] = {}
+    cutters = []
+    for n in range(3):
+        c = pocket.copy()
+        c.translate(V(0, (n - 1) * step, 0))
+        cutters.append(c)
+    half = length / 2 + 6
+    for name, x0 in (("CouponA", -half), ("CouponB", 0.0)):
+        out[name] = Part.makeBox(half, 3 * step, plate_t, V(x0, -1.5 * step, -plate_t)).cut(cutters).removeSplitter()
+    for n, g in enumerate((gap - 0.1, gap, gap + 0.1)):
+        k = key(max(0.0, g), n + 1)
+        k.translate(V(half + 6 + length / 2, (n - 1) * step, depth - plate_t))   # laid beside the plates
+        out[f"Key{n + 1}"] = k
+    return out
+
+
 def build(family: str, p: dict[str, Any], iso: dict[str, Any], strain: dict[str, float]) -> dict[str, Any]:
     if family == "gear":
         return {"Gear": gear(p["module"], p["teeth"], p["width"], p["bore"], p["pressure_deg"], p["helix_deg"],
@@ -561,7 +620,7 @@ def build(family: str, p: dict[str, Any], iso: dict[str, Any], strain: dict[str,
     if family in ("wheel", "lamp", "pattern"):
         return {"wheel": wheel, "lamp": lamp, "pattern": pattern}[family](p)
     return {"gear_pair": gear_pair, "spring": spring, "hinge": hinge, "enclosure": enclosure, "bracket": bracket,
-            "knob": knob}[family](p)
+            "knob": knob, "stud_plate": stud_plate, "tile_connector": tile_connector}[family](p)
 
 
 def export(family: str, p: dict[str, Any], iso: dict[str, Any], strain: dict[str, float], out_dir: str) -> list[dict]:

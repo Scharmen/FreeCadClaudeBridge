@@ -208,3 +208,26 @@ def test_new_models_are_named_when_claude_code_lists_them():
     assert usage.new_models(old, new) == ["Fable 5.2"]
     assert usage.new_models(old, old) == []
     assert usage.new_models([], new) == [], "a first list has nothing new to announce"
+
+
+def test_a_long_chat_is_compacted_above_the_threshold():
+    assert usage.should_compact(context=230_000, threshold_k=200)
+    assert not usage.should_compact(context=150_000, threshold_k=200)
+    assert not usage.should_compact(context=900_000, threshold_k=0), "0 switches it off"
+
+
+def test_the_compact_command_says_what_to_keep_and_names_a_sub_chats_part():
+    from claudebridge.panel import tips
+
+    cmd = tips.compact_command(None)
+    assert cmd.startswith("/compact ") and "dimensions" in cmd and "decisions" in cmd and "\n" not in cmd
+    sub = tips.compact_command({"name": "Roof001", "label": "Roof"})
+    assert "Roof (Roof001)" in sub and "this part" in sub
+
+
+def test_compacting_shows_in_the_status_line_and_is_no_stall():
+    a = activity.Activity()
+    a.start(now=0)
+    a.on_event({"kind": "status", "status": "compacting"}, now=1)
+    assert a.describe(now=61).startswith("Compacting the conversation · 1:00")
+    assert a.stall(now=400, limit=120) is None

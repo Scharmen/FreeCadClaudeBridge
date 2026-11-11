@@ -226,9 +226,9 @@ async def run_python(code: str, doc: str | None = None, transaction: str | None 
                      recompute: bool = True, snapshot: bool = False, timeout_s: float = 60,
                      instance: int | None = None) -> str:
     """Run Python in FreeCAD's GUI thread as one undo transaction (rolled back on an
-    exception). Persistent namespace with App, Gui, FreeCAD, FreeCADGui, Part, Sketcher,
-    doc, Vector, Placement, Rotation. Set `_result` to return a value. Returns _result,
-    stdout, stderr, changes (created/changed/deleted) and errors (objects in error state).
+    exception). Persistent namespace (your helpers stay defined) with App, Gui, FreeCAD,
+    FreeCADGui, Part, Sketcher, doc, Vector, Placement, Rotation. Set `_result` to return a
+    value. Returns _result, stdout, stderr, changes and errors (objects in error state).
     Pure-Python loops stop at timeout_s; heavy geometry belongs in run_headless.
     snapshot=true saves a copy of the document first (for risky changes)."""
     remember_code(code)
@@ -293,6 +293,16 @@ async def export(path: str, objects: list[str] | None = None,
     return await _call("export", {"path": os.path.expanduser(path), "objects": objects,
                                   "format": format.lower() if format else None, "doc": doc},
                        timeout_s=300, instance=instance)
+
+
+@mcp.tool(annotations=WRITE, structured_output=False)
+async def print_export(printer: str = "Anycubic Kobra S1", mode: Literal["whole", "split"] = "whole",
+                       join: Literal["glue", "pins"] = "glue", folder: str | None = None, lang: str = "en",
+                       doc: str | None = None, instance: int | None = None) -> str:
+    """Print files from the visible, coloured model: 3MF and STL, moving parts apart, PDF guide; split =
+    plates by colour. Into the model's print/ folder. Never build 3MF by hand."""
+    return await _call("print_export", {"printer": printer, "mode": mode, "join": join, "folder": folder,
+                                        "lang": lang, "doc": doc}, timeout_s=900, instance=instance)
 
 
 @mcp.tool(name="import", annotations=WRITE, structured_output=False)
@@ -434,7 +444,7 @@ async def image_to_3d(path: str, mode: Literal["show", "outline", "relief", "ref
                       threshold: float | None = None, detail: float = 0.7, max_height_mm: float = 3.0,
                       base_mm: float = 1.0, resolution: int = 200, name: str | None = None,
                       doc: str | None = None, instance: int | None = None) -> list[Any]:
-    """A picture file into 3D, locally. show: return it to look at and model from. outline: its
+    """A picture file into 3D, locally. show: return it to look at. outline: its
     shapes (with holes) as a profile size_mm wide (fit=height), extruded depth_mm or revolved
     around the vertical centre (revolve=true: vases, figures from a side silhouette); dark on light
     or transparent works best. relief: brightness as height (dark = high, invert flips), base_mm
@@ -509,8 +519,8 @@ async def compare_to_picture(path: str, views: list[Literal["current", "iso", "f
     """After modelling from a picture: the user's picture next to the model, one image per view;
     "current" keeps the camera (turn it to the picture's angle first), other views fit the model; the
     camera is put back. For a detail: crop = [x0, y0, x1, y1] (fractions of the picture, top left to
-    bottom right) shows that part of the picture enlarged, look_at = the objects that are that detail
-    frames them (zoom > 1 closer). Compare part by part, fix the differences, compare once more."""
+    bottom right) enlarges that part of the picture, look_at = the objects of that detail frames
+    them (zoom > 1 closer). Compare part by part, fix the differences, compare once more."""
     from PIL import Image as PILImage
 
     box = _crop(crop)
@@ -556,9 +566,11 @@ if _add:
         _t.Text = {header!r}
     _t.Text = _t.Text.rstrip("\\n") + "\\n\\n" + _add
 _text = _t.Text if _t is not None else ""
-_result = {{"text": _text, "entries": sum(1 for _l in _text.splitlines() if _l.startswith("## "))}}
-if _t is not None and _add:
-    _result["object"] = _t.Name
+_entries = sum(1 for _l in _text.splitlines() if _l.startswith("## "))
+if _add:      # you just wrote it: a confirmation is enough, the text would only fill the context again
+    _result = {{"saved": True, "entries": _entries, "chars": len(_text), "object": _t.Name}}
+else:
+    _result = {{"text": _text, "entries": _entries}}
 """
 
 
@@ -585,12 +597,12 @@ def _notes_list(notes: list[Any] | None, text: str | None = None) -> list[dict[s
 async def design_notes(action: Literal["add", "list"] = "add", topic: str = "",
                        notes: list[Any] | None = None, text: str | None = None, doc: str | None = None,
                        instance: int | None = None) -> str:
-    """Why the model looks the way it does, kept in the document ("Design notes" text, saved with
-    the file). Add your key decisions whenever you build or substantially change a model.
+    """Why the model looks the way it does, saved in the document. Add your key decisions whenever
+    you build or substantially change a model.
     notes = [{"part", "decision" (with numbers), "reason", "source": request|picture|reference|
     printability|assumption|feedback}] or plain sentences "… because …"; mark guesses as
-    assumption. topic: this round, e.g. "Labrador, 8 cm, first version". list: all notes so far
-    (read them before changing a model someone designed)."""
+    assumption. topic: this round, e.g. "Labrador, 8 cm, first version". list: all notes (read
+    them before changing a model)."""
     section = ""
     if action == "add":
         try:
@@ -683,15 +695,15 @@ _result = _b.export({family!r}, _j.loads({params!r}), _j.loads({iso!r}), _j.load
 async def make_part(family: str = "list", params: dict[str, Any] | None = None, at: list[float] | None = None,
                     replace: list[str] | None = None, preview: bool = True, doc: str | None = None,
                     instance: int | None = None) -> list[Any]:
-    """Standard parts, right the first time: gear, gear_pair, spring, bolt, nut, bolt_nut, thread (any
-    diameter: bottle necks, caps), hinge, enclosure, snap_box, bracket, knob; for vehicles wheel (tyre,
-    spoked rim, brake), lamp (housing, reflector, lens, strip) and pattern (honeycomb, slats, mesh, holes
-    for grilles and vents); faired_body for a smooth car or boat body from feature lines.
-    family="list" shows every family with its parameters and defaults. Use it instead of building
-    these by hand. Each part is a solid in one undo step, in its
-    mounted position; at=[x, y, z] moves the group. To change sizes call it again with
-    replace=["ObjectName"]; the object's Family and Parameters properties say how it was made. The
-    answer carries a front and side preview: look at it, do not take another picture."""
+    """Standard parts: gear, gear_pair, spring, bolt, nut, bolt_nut, thread (bottle necks, caps),
+    hinge, enclosure, snap_box, bracket, knob; toys: stud_plate (DUPLO studs), tile_connector (joins
+    tiles); vehicles: wheel (tyre, spoked rim, brake), lamp (reflector, lens, strip), pattern
+    (honeycomb, slats, mesh, holes for grilles and vents); faired_body for a smooth car or boat body
+    from feature lines. family="list" lists families with parameters and defaults. Use it instead of
+    building these by hand. Each part is a solid in one undo step, in its mounted position; at=[x, y,
+    z] moves the group. To change sizes call it again with replace=["ObjectName"]; the object's Family
+    and Parameters properties say how it was made. Answers with a front and side preview: take no other
+    picture."""
     from .parts import builders_path, catalog
 
     if family == "list":
@@ -833,8 +845,8 @@ async def sculpt(scene: dict[str, Any] | None = None, name: str = "Sculpt", voxe
     blend; "detail" adds skin texture, "fur" carves grooves along the flow. Grammar and the rules that
     make it look real: references/organic.md of the freecad skill. one_piece=true unites
     every part into one closed mesh for printing (each part keeps its fur and blend; the first part's
-    colour). The meshes arrive as a group of Mesh objects (one undo step). The answer carries a
-    front and side preview: look at it, take no other picture."""
+    colour). The meshes arrive as a group of Mesh objects (one undo step). Answers with a front and
+    side preview: take no other picture."""
     from . import sculpt as sculpt_mod
 
     scene = dict(scene or {})
@@ -940,8 +952,8 @@ async def check_design(spec: dict[str, Any] | None = None, doc: str | None = Non
     spec = {"parts": [{"name", "bbox": [a, b, c], "tol", "volume": [lo, hi], "holes": [{"d": [lo, hi],
     "count": [lo, hi]}], "teeth", "pitch", "radii_min", "surfaces_any"}], "solids": [lo, hi],
     "no_interference", "clearance", "aligned_holes", "center_distance", "height", "total", "params",
-    "expressions_min"}; full grammar in references/checks.md of the freecad skill. Without a spec only
-    validity and tree errors. Prefer check_all, which runs this with the other checks in one go."""
+    "expressions_min"}; grammar: references/checks.md of the freecad skill. Without a spec only
+    validity and tree errors. Prefer check_all (all checks in one go)."""
     from .checks import runner
     from .checks import spec as spec_mod
 
@@ -1128,10 +1140,10 @@ async def check_all(spec: dict[str, Any] | None = None, fits: list[dict[str, Any
                     process: Literal["fdm", "resin", "cnc"] = "fdm", printable: bool = True, views: bool = True,
                     section: dict[str, Any] | None = None, doc: str | None = None,
                     instance: int | None = None) -> list[Any]:
-    """Every check in one call, on one saved copy: check_design with `spec`, check_print of all visible
+    """Every check in one call, on one saved copy: check_design with `spec`, check_print of the visible
     results (printable=false skips it), check_fit for each of fits = [{"a", "b", "kind", "gap_mm"}], the
     view sheet of inspect_views (views=false skips it) and a section {"axis": "x|y|z", "offset": mm}.
-    The answer lists problems first, each with the check that found it, then warnings, then the numbers.
+    The answer lists problems first (with the check that found each), then warnings and numbers.
     Call it once after building and once after the fixes; what did not change needs no new look."""
     from .checks import printing, runner
     from .checks import spec as spec_mod

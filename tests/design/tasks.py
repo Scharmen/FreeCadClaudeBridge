@@ -271,5 +271,41 @@ TASKS: list[dict[str, Any]] = [
 ]
 
 
+# Small changes to a finished model (`start` = a known-good model from refs.py, built before Claude begins).
+# They measure follow-up edits, the most common request in real use; not part of the default run.
+_HOUSING = ("The open document holds a finished flanged housing for a 608 ball bearing: square flange 50 x 50 x 6 mm, "
+            "four M4 mounting holes on a 38 mm square pattern, round boss 32 mm, total height 12 mm, bearing seat "
+            "22 mm wide and 7 mm deep from the top, 12 mm shaft hole, outer edges rounded with 1 mm. ")
+EDIT_TASKS: list[dict[str, Any]] = [
+    {
+        "id": "edit_bearing_seat", "start": "bearing_housing",
+        "prompt": _HOUSING + "Change it for a 6000 bearing: seat 26 mm wide and 8 mm deep from the top. Keep "
+                             "everything else as it is.",
+        "spec": {"parts": [{"name": "housing", "bbox": [50, 50, 12], "tol": 0.5,
+                            "holes": [{"d": [25.8, 26.2], "count": [1, 1]}, {"d": [4.3, 4.8], "count": [4, 4]},
+                                      {"d": [8.2, 18], "count": [1, 2]}]}], "solids": [1, 1]},
+        "look": ["square flange", "four mounting holes", "round boss", "wider bearing seat"],
+    },
+    {
+        "id": "edit_flange_size", "start": "bearing_housing",
+        "prompt": _HOUSING + "Make the flange 60 x 60 mm and move the four mounting holes to a 48 mm square pattern. "
+                             "Keep everything else as it is.",
+        "spec": {"parts": [{"name": "housing", "bbox": [60, 60, 12], "tol": 0.5,
+                            "holes": [{"d": [21.8, 22.2], "count": [1, 1]}, {"d": [4.3, 4.8], "count": [4, 4]},
+                                      {"d": [8.2, 18], "count": [1, 2]}]}], "solids": [1, 1]},
+        "look": ["larger square flange", "four mounting holes near the corners", "round boss", "bearing seat"],
+    },
+    {
+        "id": "edit_add_holes", "start": "bearing_housing",
+        "prompt": _HOUSING + "Add two more M4 mounting holes through the flange, in the middle of two opposite "
+                             "edges, 19 mm from the centre. Keep everything else as it is.",
+        "spec": {"parts": [{"name": "housing", "bbox": [50, 50, 12], "tol": 0.5,
+                            "holes": [{"d": [21.8, 22.2], "count": [1, 1]}, {"d": [4.3, 4.8], "count": [6, 6]},
+                                      {"d": [8.2, 18], "count": [1, 2]}]}], "solids": [1, 1]},
+        "look": ["square flange", "six mounting holes", "round boss", "bearing seat"],
+    },
+]
+
+
 def get(task_id: str) -> dict[str, Any]:
-    return next(t for t in TASKS if t["id"] == task_id)
+    return next(t for t in [*TASKS, *EDIT_TASKS] if t["id"] == task_id)

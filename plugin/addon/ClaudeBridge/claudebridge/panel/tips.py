@@ -68,3 +68,15 @@ def part_focus(part: dict[str, str] | None) -> str:
     return (f"Sub chat for the part {part.get('label')} ({part.get('name')}): change only this part and what it "
             "contains; the rest of the model belongs to the main chat. Keep the part's position and its fit "
             "with the neighbouring parts.")
+
+
+def compact_command(part: dict[str, str] | None) -> str:
+    """The /compact request the panel sends for a long chat. The model itself lives in the FreeCAD document
+    and its design notes, so the summary keeps what was decided and drops how it was computed."""
+    keep = ("Keep: the user's wishes and preferences, every part and object name with its dimensions, positions, "
+            "fits and clearances, colours, decisions with their reasons, file paths, what was checked and with what "
+            "result, and open problems. Drop: code, tool output, pictures and reasoning steps.")
+    if part:
+        keep += (f" This is a sub chat for the part {part.get('label')} ({part.get('name')}): keep what concerns "
+                 "this part and how it fits its neighbours; the rest of the model in a few lines.")
+    return "/compact " + keep

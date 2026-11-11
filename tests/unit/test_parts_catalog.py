@@ -80,3 +80,18 @@ def test_car_detail_families_have_sensible_defaults_and_refuse_nonsense():
                                  ("pattern", {"bar": 5, "cell": 4}, "bar")):
         with pytest.raises(ValueError, match=says):
             catalog.resolve(family, params)
+
+
+def test_toy_families_have_tested_defaults_and_refuse_nonsense():
+    plate = catalog.resolve("stud_plate", {"studs_x": 12, "studs_y": 12})
+    assert plate["pitch"] == 16.0 and plate["stud_d"] == 9.35 and plate["stud_h"] == 4.4
+    with pytest.raises(ValueError, match="1 to 32"):
+        catalog.resolve("stud_plate", {"studs_x": 0})
+    with pytest.raises(ValueError, match="wall"):
+        catalog.resolve("stud_plate", {"hollow": 9.0})
+    key = catalog.resolve("tile_connector", {})
+    assert key["gap"] == 0.2 and key["coupon"] is False
+    with pytest.raises(ValueError, match="waist"):
+        catalog.resolve("tile_connector", {"waist": 17.0})
+    with pytest.raises(ValueError, match="gap"):
+        catalog.resolve("tile_connector", {"gap": 1.0})

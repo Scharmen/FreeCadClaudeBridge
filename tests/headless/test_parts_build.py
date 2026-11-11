@@ -195,3 +195,34 @@ def test_a_pattern_panel_is_mostly_open_and_the_holes_kind_is_its_negative(cmd, 
     neg = run("Part = b.Part\np = parts['Pattern']\n_result = [p.Volume, len(p.Solids) >= 2]", cmd, "pattern",
               cells=cells, kind="holes", width=40.0, height=20.0, thickness=1.2, cell=4.0, bar=0.8)
     assert neg[0] > 0 and neg[1], "the holes kind is a set of cutters"
+
+
+def test_a_stud_plate_has_its_grid_of_hollow_studs(cmd):
+    r = run("s = parts['StudPlate']\n_result = [s.isValid(), len(s.Solids), box(s), round(s.Volume, 1)]",
+            cmd, "stud_plate", studs_x=3, studs_y=2)
+    valid, solids, size, volume = r
+    assert valid and solids == 1 and size == pytest.approx([3.2 + 4.4, 32.0, 48.0], abs=0.02)
+    import math
+    stud = math.pi / 4 * (9.35 ** 2 - 6.8 ** 2) * 4.4
+    assert volume == pytest.approx(48 * 32 * 3.2 + 6 * stud, rel=0.02), "six hollow studs on the plate"
+
+
+def test_a_tile_connector_drops_into_its_pocket_with_the_gap(cmd):
+    r = run("k, p = parts['Key'], parts['Pocket']\n"
+            "_result = [k.isValid(), p.isValid(), round(k.common(p).Volume / k.Volume, 3), round(k.cut(p).Volume, 3),"
+            " round((p.BoundBox.XLength - k.BoundBox.XLength) / 2, 2), round(k.BoundBox.ZMax, 2),"
+            " round(p.BoundBox.ZMax, 2)]",
+            cmd, "tile_connector", gap=0.2)
+    kv, pv, inside, outside, clearance, key_top, pocket_top = r
+    assert kv and pv and inside == 1.0 and outside == 0.0, "the key lies wholly inside the pocket"
+    assert clearance == pytest.approx(0.2, abs=0.03) and key_top == -0.2 and pocket_top >= 0
+
+
+def test_the_connector_coupon_has_two_plates_and_three_marked_keys(cmd):
+    r = run("_result = [sorted(parts), [parts[n].isValid() and len(parts[n].Solids) == 1 for n in sorted(parts)],"
+            " [round(parts[k].Volume, 1) for k in ('Key1', 'Key2', 'Key3')],"
+            " round(parts['CouponA'].common(parts['CouponB']).Volume, 3)]", cmd, "tile_connector", coupon=True)
+    names, ok, volumes, overlap = r
+    assert names == ["CouponA", "CouponB", "Key1", "Key2", "Key3"] and all(ok)
+    assert volumes[0] > volumes[1] > volumes[2], "more clearance, smaller key"
+    assert overlap == 0.0

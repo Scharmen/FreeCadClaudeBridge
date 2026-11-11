@@ -198,3 +198,8 @@ def new_models(old: list[dict[str, Any]], new: list[dict[str, Any]]) -> list[str
         return []
     known = {str(m.get("value")) for m in old}
     return [str(m.get("displayName") or m.get("value")) for m in new if str(m.get("value")) not in known]
+
+
+def should_compact(context: int, threshold_k: float) -> bool:
+    """Compact the conversation once its context passes the threshold (thousands of tokens; 0 = never)."""
+    return threshold_k > 0 and context >= threshold_k * 1000

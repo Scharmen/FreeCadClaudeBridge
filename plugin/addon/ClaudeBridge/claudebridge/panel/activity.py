@@ -101,6 +101,8 @@ class Activity:
             self._set("retrying", now)
             self.retry = ev
             self.retry_at = now + float(ev.get("delay_s") or 0)
+        elif kind == "status" and ev.get("status") == "compacting":
+            self._set("compacting", now)
         elif kind == "result":
             self._set("idle", now)
         if progress:
@@ -128,6 +130,8 @@ class Activity:
                 return text + f" · no new tokens for {_clock(quiet)}"
             rate = self.rate()
             return text + (f" · +{rate:.0f}/s" if rate >= 1 else "")
+        if self.phase == "compacting":
+            return f"Compacting the conversation · {_clock(now - self.since)}"
         if self.phase == "tool":
             return f"Running {self.tool} ({int(now - self.since)} s) · {total}"
         if self.phase == "writing":
@@ -162,6 +166,8 @@ class Activity:
         While thinking, updates that repeat the same token count do not count: only a growing count does.
         """
         if self.phase in ("idle", "approval"):
+            return None
+        if self.phase == "compacting" and now - self.since < 900:      # one long request without events
             return None
         if self.phase == "thinking":
             if now - self.progress_at < limit:

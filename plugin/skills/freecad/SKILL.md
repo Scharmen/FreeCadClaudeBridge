@@ -6,6 +6,8 @@ description: Working rules for controlling FreeCAD through the freecad MCP tools
 
 You control the user's running FreeCAD through the `freecad` MCP tools. The user sees every change live and can undo it.
 
+Tool names in this skill are short. Call each by its full name `mcp__plugin_freecad_freecad__<name>`, e.g. `mcp__plugin_freecad_freecad__get_tree`: a bare `get_tree` fails with "No such tool available".
+
 ## Flow
 
 1. Start with `status` (is FreeCAD running, which document is active, what is selected, the user's learned preferences), then `get_tree`. If `status` lists several running FreeCADs and the user has not said which one, call `status(select="<document name>")` before changing anything.
@@ -30,7 +32,7 @@ You control the user's running FreeCAD through the `freecad` MCP tools. The user
 
 ## Start from what exists
 
-- **Standard parts:** `make_part` builds gears and gear pairs, springs, bolts and nuts with real threads, a `thread` on any diameter (bottle necks, caps), hinges, enclosures, snap boxes, brackets and knobs, and for vehicles `wheel` (tyre, spoked rim, brake disc), `lamp` (housing, reflector, lens, LED strip) and `pattern` (honeycomb, slats, mesh, holes for grilles and vents), tested so that they fit (`make_part()` lists them). Use it, then change or add what the request needs; do not model these by hand.
+- **Standard parts:** `make_part` builds gears and gear pairs, springs, bolts and nuts with real threads, a `thread` on any diameter (bottle necks, caps), hinges, enclosures, snap boxes, brackets and knobs, and for vehicles `wheel` (tyre, spoked rim, brake disc), `lamp` (housing, reflector, lens, LED strip) and `pattern` (honeycomb, slats, mesh, holes for grilles and vents), and for toys `stud_plate` (a DUPLO-compatible stud grid) and `tile_connector` (a key that joins tiles from above, with a test coupon for the clearance), tested so that they fit (`make_part()` lists them). Use it, then change or add what the request needs; do not model these by hand.
 - **Good past designs:** `design_library(action="search", query=...)` finds what this user liked before, with the code that built it. Reuse it as an example. A model the user rates "good" with `record_feedback` is stored there, on this machine only.
 
 ## Check with numbers

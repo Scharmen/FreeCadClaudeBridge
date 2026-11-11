@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import glob
+import json
 import os
 import re
 import shutil
@@ -315,3 +316,38 @@ def sub_chat(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         panel.offer_sub_chats(found)
     return {"offered": [p["label"] for p in found], "missing": missing, "panel": panel is not None,
             "note": "The user opens each sub chat with a click; it starts from this chat's history."}
+
+
+def print_export(args: dict[str, Any], ex: Any) -> dict[str, Any]:
+    """The 3D print export behind the panel's button, for Claude: coloured 3MF and STL of the whole model,
+    moving parts apart, plates per colour when split, and the PDF guide. Works on a saved copy."""
+    from ..printkit import dialog, plan
+    from . import pacing
+    from .ops import project_folder
+
+    doc = _doc(args.get("doc"))
+    printer = dialog.printer_preset(str(args.get("printer") or "Anycubic Kobra S1"))
+    if printer is None:
+        raise OpError(protocol.INVALID_ARGS, f"unknown printer '{args.get('printer')}'; known: "
+                                              + ", ".join(plan.PRINTERS))
+    mode = str(args.get("mode") or "whole")
+    if mode not in ("whole", "split"):
+        raise OpError(protocol.INVALID_ARGS, "mode must be 'whole' (one coloured print) or 'split' (plates by colour)")
+    options = dialog.options_for(doc, printer, mode == "split", "pins" if args.get("join") == "pins" else "glue",
+                                 "de" if args.get("lang") == "de" else "en")
+    if not options["colors"]:
+        raise OpError(protocol.INVALID_ARGS, "nothing visible to print: show the solids or meshes to export")
+    folder = os.path.abspath(os.path.expanduser(str(args.get("folder") or os.path.join(project_folder(doc), "print"))))
+    result = dialog.export_responsive(doc, options, folder, pacing.qt_pump())
+    if not result.get("ok"):
+        raise OpError(protocol.INTERNAL, f"the print export failed: {result.get('why')}")
+    with open(os.path.join(folder, "report.json"), encoding="utf-8") as f:
+        report = json.load(f)
+    files = sorted(os.path.relpath(os.path.join(dp, n), folder) for dp, _d, names in os.walk(folder) for n in names
+                   if n.lower().endswith((".3mf", ".stl", ".pdf")))
+    return {"folder": folder, "printer": printer[0], "mode": mode, "prints": result["pieces"],
+            "files": files[:40], **({"more_files": len(files) - 40} if len(files) > 40 else {}),
+            "whole_fits_bed": bool((report.get("whole") or {}).get("fits")),
+            "moving": [m.get("label") or m.get("objects") for m in report.get("moving") or []][:12],
+            "warnings": [str(w)[:200] for w in report.get("warnings") or []][:10],
+            "guide": os.path.basename(result["guide"])}
