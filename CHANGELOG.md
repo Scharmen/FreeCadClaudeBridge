@@ -16,6 +16,7 @@
 - `design_notes(add)` answers with a confirmation instead of the notes Claude just wrote (2.2k characters per call that stayed in the context).
 - Benchmark: three edit tasks (`edit_bearing_seat`, `edit_flange_size`, `edit_add_holes`, starting from a finished model) and `--effort`, to measure follow-up edits. Not part of the default run.
 - Skill: tools are called by their full name. Claude called `get_tree` or `design_notes` by the short name the skill uses, got "No such tool available" and retried, in nearly every session; the skill now says so up front (edit tasks: 1 tool error instead of 4, 16 % fewer input tokens).
+- User numbers without telemetry: a daily `Traffic` workflow stores GitHub's clone and visitor counts of the repository on branch `stats` (`traffic.json` and a readable `README.md`), because GitHub forgets them after 14 days. Every install and update clones the repository, so the different cloners of the last 14 days are the closest number to active users; CI clones are in it too. The plugin, server and addon send nothing. Needs the repository secret `TRAFFIC_TOKEN` (fine-grained token, Administration: read-only).
 
 ## 1.21.1 – a smoother chat panel (2026-11-08)
 

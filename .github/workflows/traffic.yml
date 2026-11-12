@@ -1,0 +1,49 @@
+name: Traffic
+
+# How many people use the plugin: GitHub's clone and view numbers, kept on branch `stats`
+# (GitHub itself forgets them after 14 days). Needs the repository secret TRAFFIC_TOKEN:
+# a fine-grained token for this repository with "Administration: read-only".
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  traffic:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+    steps:
+      - name: Stop when the token is missing
+        if: env.GH_TOKEN == ''
+        run: |
+          echo "::error::Secret TRAFFIC_TOKEN is not set (fine-grained token, Administration: read-only)."
+          exit 1
+      - uses: actions/checkout@v4
+      - name: Fetch the numbers
+        run: |
+          mkdir -p "$RUNNER_TEMP/in"
+          gh api "repos/$GITHUB_REPOSITORY/traffic/clones" > "$RUNNER_TEMP/in/clones.json"
+          gh api "repos/$GITHUB_REPOSITORY/traffic/views" > "$RUNNER_TEMP/in/views.json"
+          gh api "repos/$GITHUB_REPOSITORY" > "$RUNNER_TEMP/in/repo.json"
+      - name: Merge into the history on branch stats
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cp tools/traffic.py "$RUNNER_TEMP/traffic.py"
+          if git fetch origin stats; then
+            git checkout -B stats FETCH_HEAD
+          else
+            git checkout --orphan stats
+            git rm -rfq .
+          fi
+          python3 "$RUNNER_TEMP/traffic.py" "$RUNNER_TEMP/in/clones.json" "$RUNNER_TEMP/in/views.json" \
+            "$RUNNER_TEMP/in/repo.json" .
+          git add traffic.json README.md
+          git diff --cached --quiet || git commit -qm "Traffic $(date -u +%F)"
+          git push origin stats
+          cat README.md >> "$GITHUB_STEP_SUMMARY"

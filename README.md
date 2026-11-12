@@ -93,7 +93,7 @@ Local only (Unix socket or TCP on 127.0.0.1) with a mutual token handshake; ever
 
 ## Development
 
-`make test` (unit tests), `make itest` (against a running FreeCAD), `make lint`, `make bench` (design benchmark in a separate FreeCAD). Layout and conventions: [CLAUDE.md](CLAUDE.md).
+`make test` (unit tests), `make itest` (against a running FreeCAD), `make lint`, `make bench` (design benchmark in a separate FreeCAD). User numbers: the daily `Traffic` workflow keeps GitHub's clone and visitor counts on branch [`stats`](https://github.com/Scharmen/FreeCadClaudeBridge/tree/stats) (needs the repository secret `TRAFFIC_TOKEN`); the plugin itself sends nothing. Layout and conventions: [CLAUDE.md](CLAUDE.md).
 
 ## License
 
