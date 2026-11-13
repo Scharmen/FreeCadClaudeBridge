@@ -61,7 +61,7 @@ class Scene:
         self.lo = (min(xs), min(ys)) if xs else (0.0, 0.0)
         self.hi = (max(xs), max(ys)) if xs else (1.0, 1.0)
 
-    def image(self, size: tuple[int, int], shown: set[str] | None = None, new: str | None = None) -> QtGui.QImage:
+    def image(self, size: tuple[int, int], shown: set[str] | None = None, new: set[str] | None = None) -> QtGui.QImage:
         w, h = size
         img = QtGui.QImage(w, h, QtGui.QImage.Format_RGB32)
         img.fill(QtGui.QColor(255, 255, 255))
@@ -73,7 +73,7 @@ class Scene:
             if shown is not None and pid not in shown:
                 continue
             c = color
-            if new is not None and pid != new:             # what is already built steps back
+            if new is not None and pid not in new:         # what is already built steps back
                 c = tuple(int(200 + 0.2 * v) for v in color)
             q = QtGui.QColor(*c)
             paint.setPen(q)
@@ -160,7 +160,9 @@ def build(report: dict[str, Any], folder: str, path: str) -> str:
     t = plan.TEXT.get(lang, plan.TEXT["en"])
     doc = Doc(path)
     pieces = report.get("pieces", [])
-    name = {p["id"]: p["objects"][0] for p in pieces}
+    prints = report.get("prints", [])
+    name = {p["id"]: p["objects"][0] for p in prints}
+    bodies = {p["id"]: set(p["pieces"]) for p in prints}
     scene = Scene(folder, pieces) if pieces else None
     moving_of = {pid: m for m in report.get("moving", []) for pid in m.get("pieces", [])}
     try:
@@ -194,38 +196,47 @@ def build(report: dict[str, Any], folder: str, path: str) -> str:
                 doc.text(line, 22, gap=8)
             if not together["fits"]:
                 doc.text(t["too_big_whole"], color="#b02020")
-        if not pieces:
+        if not prints:
             if not together:
                 doc.text(t["no_split"])
         else:
+            kit = report.get("kit") or plan.kit_summary(report)
+            doc.text(t["kit_title"], 28, True)
+            kinds = kit["joints"]
+            plugged = sum(n for k, n in kinds.items() if k not in ("glue", "loose"))
+            doc.text(t["kit_line"].format(prints=kit["prints"], plugged=plugged,
+                                          glue=kinds.get("glue", 0) + kinds.get("loose", 0)))
             for plate in report.get("plates", []):
-                doc.text(f"{plate['color_name']}, {t['plate']} {plate['number']}: {plate['file']}", 20, gap=6)
+                doc.text(f"{t['plate']} {plate['number']} ({plate['color_name']}): {plate['file']}", 20, gap=6)
             for key, title in (("dowels", t["dowels"]), ("axles", t["axles"])):
                 info = report.get(key) or {}
                 if info.get("count"):
                     doc.text(f"{title}: {info['count']} × {info['file']}", 20, gap=6)
             doc.new_page()
             doc.text(t["overview"], 28, True)
-            widths = [0.36, 0.2, 0.2, 0.08, 0.16]
-            doc.row([t["piece"], t["color"], t["file"], t["plate"], t["size"]], widths, bold=True)
-            for p in pieces:
-                size = "×".join(str(s) for s in p["size_mm"])
-                doc.row([p["objects"][0], p["color_name"], os.path.basename(p["stl"]), str(p["plate"] or "-"), size],
-                        widths, p["color"])
+            widths = [0.34, 0.3, 0.08, 0.14, 0.14]
+            doc.row([t["piece"], t["color"], t["plate"], t["size"], t["changes"]], widths, bold=True)
+            for p in prints:
+                size = "×".join(str(round(s)) for s in p["size_mm"])
+                doc.row([name[p["id"]] + (f" (+{len(p['objects']) - 1})" if len(p["objects"]) > 1 else ""),
+                         ", ".join(p["color_names"]), str(p["plate"] or "-"), size, str(p.get("mixed_layers", 0))],
+                        widths, p["colors"][0])
+            doc.text(t["changes_tip"], 18)
             doc.new_page()
             built: set[str] = set()
             axles_done: set[str] = set()
             for n, pid in enumerate(report.get("order", [])):
                 _spin()
-                piece = next(p for p in pieces if p["id"] == pid)
+                this = next(p for p in prints if p["id"] == pid)
                 doc._room(560)
                 doc.text(t["step"].format(n=n + 1), 26, True, 8)
                 if n == 0:
-                    lines = [t["start_with"].format(piece=name[pid], color=piece["color_name"])]
+                    lines = [t["start_with"].format(piece=name[pid], color=", ".join(this["color_names"]))]
                 else:
                     lines = plan.step_lines(t, pid, report.get("joints", []), built, name, moving_of, axles_done)
                 built.add(pid)
-                doc.picture(scene.image((900, 460), set(built), pid), 400)
+                shown = set().union(*(bodies[i] for i in built))
+                doc.picture(scene.image((900, 460), shown, bodies[pid]), 400)
                 for line in lines:
                     doc.text(line, 22, gap=8)
                 doc.y += 18
@@ -233,11 +244,13 @@ def build(report: dict[str, Any], folder: str, path: str) -> str:
         doc.text(t["print_tips"], 28, True)
         doc.text(t["tips_resin"] if report["printer"].get("process") == "resin" else t["tips_fdm"])
         doc.text(t["dry_fit"])
-        need = [p["objects"][0] for p in pieces if p.get("support")]
+        need = [p["objects"][0] for p in prints if p.get("support")]
         if need:
             doc.text(t["support"].format(list=", ".join(need)))
-        if report.get("dowels", {}).get("count"):
+        if any(j["type"] in ("dowel", "peg", "pocket", "seat") for j in report.get("joints", [])):
             doc.text(t["fit_test"])
+        if any(j.get("tight") for j in report.get("joints", [])):
+            doc.text(t["tight"])
         if report.get("painted"):
             doc.text(t["painted"].format(list=", ".join(report["painted"])))
         if report.get("warnings"):

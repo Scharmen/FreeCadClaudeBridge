@@ -111,8 +111,10 @@ class PrintDialog(QtWidgets.QDialog):
         self.whole = QtWidgets.QCheckBox(self.t["whole"])
         self.whole.setChecked(True)
         self.split = QtWidgets.QCheckBox(self.t["split"])
+        self.merge = QtWidgets.QCheckBox(self.t["merge"])
         lay.addWidget(self.whole)
         lay.addWidget(self.split)
+        lay.addWidget(self.merge)
         box = QtWidgets.QGroupBox(self.t["join"])
         inner = QtWidgets.QVBoxLayout(box)
         self.pins = QtWidgets.QRadioButton(self.t["pins"])
@@ -204,6 +206,7 @@ class PrintDialog(QtWidgets.QDialog):
         return {"name": self.doc.Label, "lang": "de" if self.guide_lang.currentIndex() == 0 else "en",
                 "whole": self.whole.isChecked(),
                 "split": self.split.isChecked(), "join": "pins" if self.pins.isChecked() else "glue",
+                "merge_colors": self.merge.isChecked(),
                 "colors": {o["name"]: o["color"] for o in self.items}, "moving": chosen,
                 "printer": {"name": self.printer.currentText(), "bed": [s.value() for s in self.bed],
                             "nozzle": self.nozzle.value(), "slots": self.slots.value(),
@@ -284,6 +287,8 @@ def finish(job: dict[str, str], output: str) -> dict[str, Any]:
         return {"ok": False, "why": "\n".join(lines[-4:])[:600]}
     with open(os.path.join(job["folder"], "report.json"), encoding="utf-8") as f:
         report = json.load(f)
+    if report.get("plan_only"):
+        return {"ok": True, "guide": None, "pieces": plan.print_count(report), "report": report}
     name = "Anleitung.pdf" if report.get("lang") == "de" else "Assembly_guide.pdf"
     pdf = guide.build(report, job["folder"], os.path.join(job["folder"], name))
     return {"ok": True, "guide": pdf, "pieces": plan.print_count(report)}
@@ -308,12 +313,13 @@ def printer_preset(name: str) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
-def options_for(doc: Any, printer: tuple[str, dict[str, Any]], split: bool, join: str, lang: str) -> dict[str, Any]:
+def options_for(doc: Any, printer: tuple[str, dict[str, Any]], split: bool, join: str, lang: str,
+                merge_colors: bool = False) -> dict[str, Any]:
     """The dialog's options without the dialog: what is visible, its colours, everything that turns."""
     items = collect(doc)
     moving = [{k: m[k] for k in ("objects", "axis", "axle")} for m in plan.detect_moving(items)]
     name, preset = printer
-    return {"name": doc.Label, "lang": lang, "whole": True, "split": split, "join": join,
+    return {"name": doc.Label, "lang": lang, "whole": True, "split": split, "join": join, "merge_colors": merge_colors,
             "colors": {o["name"]: o["color"] for o in items}, "moving": moving,
             "printer": {"name": name, "bed": list(preset["bed"]), "nozzle": preset["nozzle"],
                         "slots": preset["slots"], "process": preset["process"]}}

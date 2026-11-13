@@ -56,8 +56,9 @@ def _matrix(turn: tuple[float, float, float]) -> Any:
     place = App.Placement(V(0, 0, 0), App.Rotation(V(1, 0, 0), turn[0]).multiply(App.Rotation(V(0, 1, 0), turn[1])))
     return place.toMatrix()
 
-def _best_pose(mesh: Any) -> tuple[tuple[float, float, float], bool]:
-    """Which face down needs least support, and whether it still needs support."""
+def _best_pose(mesh: Any, pegs: tuple[Any, ...] = ()) -> tuple[tuple[float, float, float], bool]:
+    """Which face down needs least support, and whether it still needs support. Pegs should point up: lying, their
+    underside comes out rough and they fit badly; pointing down, the part would stand on them."""
     best = None
     data = [(f.Normal, f.Area, f.Points) for f in mesh.Facets]
     for turn in ORIENTATIONS:
@@ -70,19 +71,11 @@ def _best_pose(mesh: Any) -> tuple[tuple[float, float, float], bool]:
         over = sum(a for n, a, z0, z1 in rows if n.z < -0.707 and z1 - low >= 0.3)
         total = sum(r[1] for r in rows) or 1.0
         # a usable foot first, then little support; height counts, since tall parts on a small foot fail
-        score = (base < MIN_BASE, over / total + 0.3 * (high - low) / mesh.BoundBox.DiagonalLength - 0.5 * base / total)
+        peg = sum(0.0 if rot.multVec(a).z > 0.9 else 0.6 if rot.multVec(a).z < -0.5 else 0.25 for a in pegs)
+        score = (base < MIN_BASE, over / total + 0.3 * (high - low) / mesh.BoundBox.DiagonalLength - 0.5 * base / total + peg)
         if best is None or score < best[0]:
             best = (score, turn, base < MIN_BASE or over > 0.02 * total)
     return best[1], best[2]
-
-def _pose_mesh(piece: Piece, fine: float = 0.03) -> Any:
-    mesh = _mesh(piece.shape, fine) if piece.shape is not None else piece.mesh.copy()
-    piece.closed = _closed(mesh)
-    piece.turn, piece.support = _best_pose(mesh)
-    mesh.transform(_matrix(piece.turn))
-    box = mesh.BoundBox
-    mesh.translate(-box.XMin, -box.YMin, -box.ZMin)
-    return mesh
 
 def _write_stl(mesh: Any, path: str) -> None:
     mesh.write(path)

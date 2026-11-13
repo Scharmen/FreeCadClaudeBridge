@@ -60,7 +60,7 @@ The setup window checks what is missing, offers to install it, then adds the `fr
 ![The 3D print dialog next to pages of the generated assembly guide](docs/images/print-export.png)
 
 - **3D print…** in the panel (or the File menu) asks for your printer and whether to plug or glue, and writes into the model's `print/` folder.
-- **One print where possible:** the whole model as one coloured 3MF and STL; moving parts (wheels, knobs) apart with axles; split by colour with connector pins only when needed.
+- **One print where possible:** the whole model as one coloured 3MF and STL; moving parts (wheels, knobs) apart with axles. What one print cannot hold becomes a kit: bodies that touch print together in as many colours as your printer has slots, and each remaining part plugs into its host with a keyed peg, a pocket or its own seat. Glue is the last resort, and the guide says where and why.
 - **A PDF assembly guide** with what to print, the steps and what to paint.
 - **Before export**, Claude checks walls, overhangs, fits and stability with `check_all`. With `slice_check` it slices the model itself, with no slicer program installed, and simulates the print layer by layer for your printer: parts that would start in mid air, arms that hang free, bridges, walls thinner than the nozzle, what supports would cost, print time and filament. It also writes G-code for a look in any G-code viewer.
 

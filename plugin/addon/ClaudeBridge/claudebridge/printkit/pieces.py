@@ -82,22 +82,29 @@ def _thickness(p: Piece) -> float:
     area = p._cached("area", lambda: float(p.shape.Area))
     return 2 * p.volume / area if area > 0 else math.inf
 
-def _merge_thin(pieces: list[Piece], min_thick: float) -> tuple[list[Piece], list[str]]:
-    """A piece too thin for a print of its own goes into its biggest neighbour; the guide says to paint it."""
+def _merge_thin(pieces: list[Piece], min_thick: float, alone: set[str],
+                near: dict[str, set[str]]) -> tuple[list[Piece], list[str], dict[str, str]]:
+    """A piece too thin for a print of its own goes into its biggest neighbour; the guide says to paint it.
+
+    Only pieces in `alone` are looked at: a thin piece inside a multi-colour print is printed in its colour.
+    Returns the pieces left, the labels to paint, and which piece took which."""
     painted: list[str] = []
-    for thin in sorted(pieces, key=_thickness):
-        if thin.rotor or _thickness(thin) >= min_thick or thin not in pieces:
+    into: dict[str, str] = {}
+    by_id = {p.id: p for p in pieces}
+    for thin in sorted((p for p in pieces if p.id in alone), key=_thickness):
+        if thin.rotor or _thickness(thin) >= min_thick:
             continue
-        near = [p for p in pieces if p is not thin and not p.rotor and p.shape is not None and _touching(thin, p)]
-        for host in sorted(near, key=lambda p: -p.volume):
+        beside = [by_id[i] for i in near.get(thin.id, ()) if i in by_id and i not in into]
+        for host in sorted((p for p in beside if not p.rotor and p.shape is not None), key=lambda p: -p.volume):
             joined = _fuse(host.shape, thin.shape)
             if joined is not None:
                 host.shape = joined
                 host.items += thin.items
                 painted += thin.labels
+                into[thin.id] = host.id
                 pieces.remove(thin)
                 break
-    return pieces, painted
+    return pieces, painted, into
 
 def _centre(pieces: list[Piece]) -> Any:
     centre = V(0, 0, 0)
@@ -106,24 +113,3 @@ def _centre(pieces: list[Piece]) -> Any:
         centre += p.box.Center * p.volume
         total += p.volume
     return centre * (1 / total)
-
-def _join_again(pieces: list[Piece], bed: list[float]) -> list[Piece]:
-    """A merged thin part can bridge two pieces of one colour that did not touch before."""
-    grown = True
-    while grown:
-        grown = False
-        for a in pieces:
-            for b in pieces:
-                if (a is b or a.color != b.color or a.rotor is not b.rotor or a.shape is None or b.shape is None
-                        or a.volume < b.volume or not _fits_together(a.box, b.box, bed) or not _touching(a, b)):
-                    continue
-                joined = _fuse(a.shape, b.shape)
-                if joined is not None:
-                    a.shape = joined
-                    a.items += b.items
-                    pieces.remove(b)
-                    grown = True
-                    break
-            if grown:
-                break
-    return pieces

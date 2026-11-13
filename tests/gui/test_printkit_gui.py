@@ -207,6 +207,13 @@ def test_print_export_is_a_bridge_operation_for_claude(tmp_path):
     assert len(json.dumps(r)) < 3000, "a compact answer, not the whole report"
 
 
+def test_the_kit_plan_answers_with_numbers_and_writes_nothing():
+    r = call("print_export", timeout_s=400, doc=DOC, printer="kobra s1", mode="plan")
+    assert r["mode"] == "plan" and r["prints"] >= 1 and "folder" not in r and "files" not in r
+    assert isinstance(r["joints"], dict) and isinstance(r["glue"], list) and r["print_list"]
+    assert len(json.dumps(r)) < 3000
+
+
 def test_print_export_names_the_printers_it_knows():
     with pytest.raises(client.BridgeError) as e:
         call("print_export", doc=DOC, printer="Nonexistent 9000")

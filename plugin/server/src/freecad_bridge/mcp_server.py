@@ -296,13 +296,14 @@ async def export(path: str, objects: list[str] | None = None,
 
 
 @mcp.tool(annotations=WRITE, structured_output=False)
-async def print_export(printer: str = "Anycubic Kobra S1", mode: Literal["whole", "split"] = "whole",
-                       join: Literal["glue", "pins"] = "glue", folder: str | None = None, lang: str = "en",
-                       doc: str | None = None, instance: int | None = None) -> str:
-    """Print files from the visible, coloured model: 3MF and STL, moving parts apart, PDF guide; split =
-    plates by colour. Into print/. Never build 3MF by hand."""
+async def print_export(printer: str = "Anycubic Kobra S1", mode: Literal["whole", "split", "plan"] = "whole",
+                       join: Literal["glue", "pins"] = "pins", folder: str | None = None, lang: str = "en",
+                       merge_colours: bool = False, doc: str | None = None, instance: int | None = None) -> str:
+    """Print files of the coloured model into print/: 3MF, PDF guide. split: multi-colour kit
+    with pegs; plan: its numbers only. Never build 3MF by hand."""
     return await _call("print_export", {"printer": printer, "mode": mode, "join": join, "folder": folder,
-                                        "lang": lang, "doc": doc}, timeout_s=900, instance=instance)
+                                        "lang": lang, "merge_colours": merge_colours, "doc": doc}, timeout_s=900,
+                       instance=instance)
 
 
 @mcp.tool(annotations=WRITE, structured_output=False)

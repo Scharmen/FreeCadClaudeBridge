@@ -21,11 +21,21 @@ class ScriptTimeout(Exception):
 
 
 def make_tracer(deadline: float, filename: str, pump: Callable[[], None] | None, interval: float,
-                clock: Callable[[], float] = time.monotonic) -> Any:
+                clock: Callable[[], float] = time.monotonic, own: str | None = None) -> Any:
     """A sys.settrace hook. Lines of Claude's own code (`filename`) check the deadline; every Python frame,
-    also code that Claude's script loads with exec, may pump the GUI at most every `interval` seconds."""
+    also code that Claude's script loads with exec, may pump the GUI at most every `interval` seconds.
+
+    Never from inside the addon's own code (files under `own`): Qt calls it as callbacks, a row painter or a
+    slot, while a document loads inside the script, and events pumped from in there start a second repaint
+    under the first: FreeCAD dies in Qt."""
     due = [clock() + interval]
     calls = [0]
+    inside = [0]                                         # how deep we are in the addon's own callbacks
+
+    def guard(frame: Any, event: str, arg: Any) -> Any:
+        if event == "return":                            # also when an exception leaves the frame
+            inside[0] -= 1
+        return guard
 
     def pump_at(now: float) -> None:
         pump()                                           # type: ignore[misc]  (only called when set)
@@ -38,14 +48,17 @@ def make_tracer(deadline: float, filename: str, pump: Callable[[], None] | None,
             now = clock()                                # one clock read per line: the tracer is hot
             if now > deadline:
                 raise ScriptTimeout("time limit reached; use run_headless for long computations")
-            if pump is not None and now >= due[0]:
+            if pump is not None and now >= due[0] and not inside[0]:
                 pump_at(now)
         return local
 
     def global_(frame: Any, event: str, arg: Any) -> Any:
         if frame.f_code.co_filename == filename:
             return local                                 # its lines pump; a generator resumes here per item
-        if pump is not None:                             # code the script loaded (exec): pump between calls
+        if own and frame.f_code.co_filename.startswith(own):
+            inside[0] += 1
+            return guard
+        if pump is not None and not inside[0]:           # code the script loaded (exec): pump between calls
             calls[0] += 1
             if calls[0] & 255 == 0:                      # every call is too often to read the clock
                 now = clock()

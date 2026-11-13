@@ -52,6 +52,8 @@ class _ConversationDelegate(QtWidgets.QStyledItemDelegate):
         if index.data(QtCore.Qt.UserRole) is None:             # section header
             super().paint(painter, option, index)
             return
+        if not painter.isActive():
+            return      # repainting while FreeCAD loads a document (its progress bar runs the event loop) crashes
         painter.save()
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         pal = option.palette

@@ -172,7 +172,8 @@ def _tracer(deadline: float, filename: str) -> Any:
         ms = float(settings.load(paths.bridge_dir())["chat.redraw_ms"])
     except Exception:
         ms = 100.0
-    return pacing.make_tracer(deadline, filename, pacing.qt_pump() if ms > 0 else None, ms / 1000.0)
+    own = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))          # the claudebridge package
+    return pacing.make_tracer(deadline, filename, pacing.qt_pump() if ms > 0 else None, ms / 1000.0, own=own)
 
 
 STUCK_EVERY_S = 30.0

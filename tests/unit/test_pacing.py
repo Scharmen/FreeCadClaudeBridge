@@ -88,3 +88,25 @@ def test_redrawing_costs_at_most_a_tenth_of_the_time():
         sys.settrace(previous)
     assert spent[0] <= 0.11 * clock.t, (spent[0], clock.t)
     assert spent[0] > 0, "it still redraws"
+
+
+def test_the_gui_is_never_pumped_from_inside_the_addons_own_callbacks(tmp_path):
+    """Qt calls the panel's Python code (a row painter) while a document loads inside Claude's script. Pumping
+    events from in there starts a second repaint under the first and FreeCAD dies in Qt."""
+    own = tmp_path / "claudebridge"
+    own.mkdir()
+    callback = own / "widgets.py"
+    callback.write_text("def helper(T):\n    T.t += 0.02\n\n"
+                        "def paint(T):\n    for _ in range(600):\n        helper(T)\n")
+    clock, pumps = Clock(), []
+    tracer = pacing.make_tracer(deadline=1e9, filename="<claude>", pump=lambda: pumps.append(clock.t),
+                                interval=0.1, clock=clock, own=str(own))
+    scope: dict = {"T": clock}
+    exec(compile(callback.read_text(), str(callback), "exec"), scope)
+    previous = sys.gettrace()
+    sys.settrace(tracer)
+    try:
+        exec(compile("paint(T)\nafter = T.t\nfor i in range(20):\n    T.t += 0.02\n", "<claude>", "exec"), scope)
+    finally:
+        sys.settrace(previous)
+    assert pumps and all(p >= scope["after"] for p in pumps), "none during the callback, again afterwards"

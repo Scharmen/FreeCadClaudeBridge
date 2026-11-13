@@ -94,6 +94,8 @@ class Piece(Geo):
         self.closed = False
         self.turn = (0.0, 0.0, 0.0)
         self.support = False
+        self.unit = ""
+        self.pegs: list[Any] = []       # the directions its pegs point in
 
     @property
     def labels(self) -> list[str]:

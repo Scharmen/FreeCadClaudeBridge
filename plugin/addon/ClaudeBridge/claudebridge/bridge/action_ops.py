@@ -320,7 +320,8 @@ def sub_chat(args: dict[str, Any], ex: Any) -> dict[str, Any]:
 
 def print_export(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     """The 3D print export behind the panel's button, for Claude: coloured 3MF and STL of the whole model,
-    moving parts apart, plates per colour when split, and the PDF guide. Works on a saved copy."""
+    moving parts apart, a kit of multi-colour prints when split, and the PDF guide; mode 'plan' returns the kit
+    as numbers without writing files. Works on a saved copy."""
     from ..printkit import dialog, plan
     from . import pacing
     from .ops import project_folder
@@ -331,12 +332,31 @@ def print_export(args: dict[str, Any], ex: Any) -> dict[str, Any]:
         raise OpError(protocol.INVALID_ARGS, f"unknown printer '{args.get('printer')}'; known: "
                                               + ", ".join(plan.PRINTERS))
     mode = str(args.get("mode") or "whole")
-    if mode not in ("whole", "split"):
-        raise OpError(protocol.INVALID_ARGS, "mode must be 'whole' (one coloured print) or 'split' (plates by colour)")
-    options = dialog.options_for(doc, printer, mode == "split", "pins" if args.get("join") == "pins" else "glue",
-                                 "de" if args.get("lang") == "de" else "en")
+    if mode not in ("whole", "split", "plan"):
+        raise OpError(protocol.INVALID_ARGS, "mode must be 'whole' (one coloured print), 'split' (a kit: what one "
+                                             "print cannot hold becomes parts) or 'plan' (the kit as numbers only)")
+    options = dialog.options_for(doc, printer, mode != "whole", "glue" if args.get("join") == "glue" else "pins",
+                                 "de" if args.get("lang") == "de" else "en", bool(args.get("merge_colours")))
     if not options["colors"]:
         raise OpError(protocol.INVALID_ARGS, "nothing visible to print: show the solids or meshes to export")
+    if mode == "plan":
+        import shutil
+        import tempfile
+
+        options["plan_only"] = True
+        work = tempfile.mkdtemp(prefix="kit-plan-")
+        try:
+            result = dialog.export_responsive(doc, options, work, pacing.qt_pump())
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        if not result.get("ok"):
+            raise OpError(protocol.INTERNAL, f"the kit plan failed: {result.get('why')}")
+        report = result["report"]
+        return {"printer": printer[0], "mode": mode, "slots": printer[1]["slots"], **report["kit"],
+                "moving": len(report.get("moving") or []),
+                "warnings": [str(w)[:200] for w in report.get("warnings") or []][:10],
+                "note": "Nothing was written. Fewer prints: keep colours within the slots or merge shades. No glue: "
+                        "give small parts a flat face on their host with 2 mm of material behind it."}
     folder = os.path.abspath(os.path.expanduser(str(args.get("folder") or os.path.join(project_folder(doc), "print"))))
     result = dialog.export_responsive(doc, options, folder, pacing.qt_pump())
     if not result.get("ok"):
@@ -344,10 +364,13 @@ def print_export(args: dict[str, Any], ex: Any) -> dict[str, Any]:
     with open(os.path.join(folder, "report.json"), encoding="utf-8") as f:
         report = json.load(f)
     files = sorted(os.path.relpath(os.path.join(dp, n), folder) for dp, _d, names in os.walk(folder) for n in names
-                   if n.lower().endswith((".3mf", ".stl", ".pdf")))
+                   if n.lower().endswith((".3mf", ".pdf")))
+    kit = report.get("kit") or {}
     return {"folder": folder, "printer": printer[0], "mode": mode, "prints": result["pieces"],
-            "files": files[:40], **({"more_files": len(files) - 40} if len(files) > 40 else {}),
+            "files": files[:30], **({"more_files": len(files) - 30} if len(files) > 30 else {}),
             "whole_fits_bed": bool((report.get("whole") or {}).get("fits")),
+            **({"joints": kit["joints"], "glue": kit["glue"][:6], "colour_change_layers": kit["colour_change_layers"]}
+               if kit else {}),
             "moving": [m.get("label") or m.get("objects") for m in report.get("moving") or []][:12],
             "warnings": [str(w)[:200] for w in report.get("warnings") or []][:10],
             "guide": os.path.basename(result["guide"])}

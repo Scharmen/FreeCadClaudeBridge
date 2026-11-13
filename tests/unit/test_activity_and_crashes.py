@@ -252,3 +252,14 @@ def test_a_queued_message_that_gets_its_own_turn_keeps_the_panel_busy():
     t.sent()
     t.reset()                                # the process ended
     assert not t.busy
+
+
+def test_the_conversation_list_does_not_draw_with_a_painter_that_is_not_active():
+    """FreeCAD segfaulted when a document was opened from run_python while the list repainted: the load's
+    progress bar runs the event loop, the row painter is not active then, and drawing with it crashes in Qt."""
+    from pathlib import Path
+
+    addon = Path(__file__).resolve().parents[2] / "plugin/addon/ClaudeBridge/claudebridge"
+    source = (addon / "panel/widgets.py").read_text()
+    paint = source[source.index("class _ConversationDelegate"):source.index("def sizeHint")]
+    assert paint.index("painter.isActive()") < paint.index("painter.save()")
