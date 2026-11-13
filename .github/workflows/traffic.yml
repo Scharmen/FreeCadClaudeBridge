@@ -18,19 +18,21 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
     steps:
-      - name: Stop when the token is missing
+      # Without the secret the run stays green and counts nothing; a red run every day helps nobody.
+      - name: Skip when the token is missing
         if: env.GH_TOKEN == ''
-        run: |
-          echo "::error::Secret TRAFFIC_TOKEN is not set (fine-grained token, Administration: read-only)."
-          exit 1
+        run: echo "::warning::Nothing counted - secret TRAFFIC_TOKEN is not set (fine-grained token, Administration read-only)."
       - uses: actions/checkout@v4
+        if: env.GH_TOKEN != ''
       - name: Fetch the numbers
+        if: env.GH_TOKEN != ''
         run: |
           mkdir -p "$RUNNER_TEMP/in"
           gh api "repos/$GITHUB_REPOSITORY/traffic/clones" > "$RUNNER_TEMP/in/clones.json"
           gh api "repos/$GITHUB_REPOSITORY/traffic/views" > "$RUNNER_TEMP/in/views.json"
           gh api "repos/$GITHUB_REPOSITORY" > "$RUNNER_TEMP/in/repo.json"
       - name: Merge into the history on branch stats
+        if: env.GH_TOKEN != ''
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
