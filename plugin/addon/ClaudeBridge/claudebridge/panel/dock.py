@@ -14,7 +14,7 @@ import FreeCADGui as Gui
 from PySide import QtCore, QtGui, QtWidgets
 
 from ..bridge import paths
-from . import activity, conversations, debuglog, look, secrets, tips, usage
+from . import activity, conversations, debuglog, dropping, look, secrets, tips, usage
 from .approvals import ApprovalsMixin
 from .attachments import AttachmentsMixin
 from .claude_process import ClaudeSession
@@ -55,7 +55,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         self.info: dict[str, Any] = _load_info()
         self.perms: dict[str, dict[str, Any]] = {}       # open permission requests by request id
         self.session_always: set[str] = set()            # tools allowed for the rest of this session
-        self.attachments: list[dict[str, Any]] = []      # pictures for the next message
+        self.attachments: list[dict[str, Any]] = []      # files for the next message
         self.thoughts: list[str] = []
         self.think_open = False
         self.md_start = 0
@@ -116,10 +116,10 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         self.camera_btn.clicked.connect(self.insert_view_image)
         head.addWidget(self.camera_btn)
         self.image_btn = QtWidgets.QToolButton()
-        self.image_btn.setText("🖼")
-        self.image_btn.setToolTip("Attach a picture: Claude can look at it, trace it, or turn it into an outline "
-                                  "or relief")
-        self.image_btn.clicked.connect(self.attach_image)
+        self.image_btn.setText("📎")
+        self.image_btn.setToolTip("Attach files: pictures, PDFs and text files are sent with their content, CAD "
+                                  "files can be imported. Dropping or pasting files works too.")
+        self.image_btn.clicked.connect(self.attach_files)
         head.addWidget(self.image_btn)
         from .. import __version__
         self.version_label = QtWidgets.QLabel(f"v{__version__}")
@@ -468,9 +468,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         if not slash and echo and self._sub_starts_now():
             # a new sub chat forks its main chat, whole history included: compact it first, then send this
             self.input.clear()
-            pics = "".join(f"<img src='{QtCore.QUrl.fromLocalFile(a['path']).toString()}' width='120'> "
-                           for a in self.attachments)
-            self._append(look.user_bubble(text, f"<br>{pics}" if pics else "", self._theme()))
+            self._append(look.user_bubble(text, self._attachments_html(), self._theme()))
             self._after_compact = (text, self.attachments)
             self.attachments = []
             self._render_attachments()
@@ -486,13 +484,13 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             text = (f"Feedback on your last result: {fb['rating']}. I say: \"{text}\". First call record_feedback "
                     f"with rating \"{fb['rating']}\", my words, the request and one general lesson worth remembering "
                     "for future models; then fix the model accordingly.")
-        images = [(a["media_type"], a["data"]) for a in self.attachments]
-        pictures = [a["path"] for a in self.attachments if a.get("path")]
+        blocks = dropping.content_blocks(self.attachments)
+        references = dropping.reference_lines(self.attachments)
+        names = [a["name"] for a in self.attachments]
+        pictures = [a["path"] for a in self.attachments if a["kind"] == "image"]
         if echo:
             self.input.clear()
-            pics = "".join(f"<img src='{QtCore.QUrl.fromLocalFile(a['path']).toString()}' width='120'> "
-                           for a in self.attachments)
-            self._append(look.user_bubble(text, f"<br>{pics}" if pics else "", self._theme()))
+            self._append(look.user_bubble(text, self._attachments_html(), self._theme()))
         self.attachments = []
         self._render_attachments()
         self.last_text = text
@@ -504,7 +502,7 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
             return
         if self.store.active(self.current_key) is None:
             words = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("[")]
-            title = words[0] if words else ("Picture" if images else text.splitlines()[0] if text else "Conversation")
+            title = words[0] if words else (names[0] if names else text.splitlines()[0] if text else "Conversation")
             self.pending = {"title": title.strip()[:60], "cwd": session.cwd}
         if not queued:
             self._begin_turn()
@@ -513,16 +511,20 @@ class ChatPanel(SidebarMixin, ApprovalsMixin, AttachmentsMixin, UpdatesMixin, Qt
         active = self.store.active(self.current_key)
         if active:
             self.store.touch(self.current_key, active["id"])
-        debuglog.log("send", doc=self.current_key, session=session.session_id, text=text, images=len(images),
+        debuglog.log("send", doc=self.current_key, session=session.session_id, text=text, files=len(names),
                      queued=queued)
         # slash commands go to Claude Code as typed; everything else gets the FreeCAD context line
-        prompt = text if slash else context_line() + "\n\n" + (text or "Look at the attached picture.")
+        only_pictures = bool(pictures) and len(pictures) == len(names)
+        ask = text or ("Look at the attached picture." if only_pictures else "Look at the attached files.")
+        prompt = text if slash else context_line() + "\n\n" + ask
         focus = tips.part_focus(self._current_part())
         if focus and not slash:
             prompt = focus + "\n" + prompt
         if pictures and not slash:
             prompt += "\n\n" + usage.picture_line(pictures)
-        session.send_user(prompt, images)
+        if references and not slash:
+            prompt += "\n\n" + "\n".join(references)
+        session.send_user(prompt, blocks=blocks)
         self._busy(True)
 
     def _reset_placeholder(self) -> None:

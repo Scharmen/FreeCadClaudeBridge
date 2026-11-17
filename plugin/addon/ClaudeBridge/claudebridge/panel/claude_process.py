@@ -303,11 +303,12 @@ class ClaudeSession(QtCore.QObject):
         if self.proc is not None:
             self.proc.write((json.dumps(obj) + "\n").encode("utf-8"))
 
-    def send_user(self, text: str, images: list[tuple[str, bytes]] | None = None) -> None:
+    def send_user(self, text: str, images: list[tuple[str, bytes]] | None = None,
+                  blocks: list[dict[str, Any]] | None = None) -> None:
         from .stream import user_message
 
         self.turn.sent()
-        self._send(user_message(text, images))
+        self._send(user_message(text, images, blocks))
 
     def answer_permission(self, request_id: str, decision: str, tool_input: dict[str, Any],
                           suggestions: list[dict[str, Any]] | None = None, message: str = "") -> None:

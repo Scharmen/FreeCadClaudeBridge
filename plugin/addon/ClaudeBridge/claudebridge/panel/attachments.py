@@ -33,13 +33,13 @@ class AttachmentsMixin:
         self._append(f"<p><img src='{QtCore.QUrl.fromLocalFile(path).toString()}' width='{width}'></p>")
         _save_history(self._hist_key(), self.view.toHtml())
 
-    def attach_image(self) -> None:
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Attach a picture", os.path.expanduser("~"),
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)")
-        if not path:
-            return
-        self._add_file(path)
+    def attach_files(self) -> None:
+        found, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self, "Attach files", os.path.expanduser("~"),
+            "All files (*);;Pictures (*.png *.jpg *.jpeg *.gif *.webp);;Documents (*.pdf *.txt *.md *.csv);;"
+            "CAD files (*.step *.stp *.iges *.igs *.stl *.obj *.3mf *.FCStd *.dxf *.svg)")
+        for path in found:
+            self._add_file(path)
         self.input.setFocus()
 
     def handle_drop(self, mime: Any, source: Any) -> None:
@@ -62,18 +62,28 @@ class AttachmentsMixin:
                 self._add_file(path)
 
     def _add_file(self, path: str) -> None:
-        kind = dropping.classify(path)
-        if kind == "image":
-            with open(path, "rb") as f:
-                self.attachments.append({"path": path, "media_type": dropping.media_type(path), "data": f.read()})
-            self._render_attachments()
+        """Every file is an attachment of the next message; what is sent of it depends on its kind."""
+        path = os.path.normpath(path)
+        if any(a["path"] == path for a in self.attachments):
             return
-        self.input.insertPlainText(dropping.reference_line(kind, path) + " ")
-        if kind == "cad":
+        att = dropping.attachment(path)
+        self.attachments.append(att)
+        self._render_attachments()
+        if att["kind"] == "cad":
             link = QtCore.QUrl.toPercentEncoding(path).data().decode()
-            self._append(f"<div style='color:#666'>📦 {html.escape(os.path.basename(path))}: "
+            self._append(f"<div style='color:#666'>📦 {html.escape(att['name'])}: "
                          f"<a href='import:{link}'>Import into FreeCAD</a></div>")
         self.input.setFocus()
+
+    def _attachments_html(self) -> str:
+        """The attachments as they show in the user's bubble: pictures small, files by name."""
+        parts = []
+        for a in self.attachments:
+            if a["kind"] == "image":
+                parts.append(f"<img src='{QtCore.QUrl.fromLocalFile(a['path']).toString()}' width='120'>")
+            else:
+                parts.append(f"<span title='{html.escape(a['path'])}'>{html.escape(dropping.chip_text(a))}</span>")
+        return "<br>" + " &nbsp; ".join(parts) if parts else ""
 
     def _render_attachments(self) -> None:
         while self.attach_lay.count() > 1:
@@ -83,12 +93,12 @@ class AttachmentsMixin:
         for i, a in enumerate(self.attachments):
             btn = QtWidgets.QToolButton()
             btn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-            pix = QtGui.QPixmap(a["path"])
+            pix = QtGui.QPixmap(a["path"]) if a["kind"] == "image" else QtGui.QPixmap()
             if not pix.isNull():
                 btn.setIcon(QtGui.QIcon(pix.scaled(32, 32, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)))
                 btn.setIconSize(QtCore.QSize(32, 32))
-            btn.setText(os.path.basename(a["path"])[:18] + " ✕")
-            btn.setToolTip("Sent as a picture with your next message. Click to remove.")
+            btn.setText(dropping.chip_text(a) + " ✕")
+            btn.setToolTip(f"{a['path']}\n{dropping.chip_tip(a)}")
             btn.clicked.connect(lambda _=False, idx=i: (self.attachments.pop(idx), self._render_attachments()))
             self.attach_lay.insertWidget(i, btn)
         self.attach_row.setVisible(bool(self.attachments))

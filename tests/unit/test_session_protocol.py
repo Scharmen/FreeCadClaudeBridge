@@ -59,6 +59,12 @@ def test_user_message_with_images():
     assert stream.user_message("plain")["message"]["content"] == "plain"
 
 
+def test_user_message_with_files():
+    pdf = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "QQ=="}}
+    content = stream.user_message("Read it", blocks=[pdf])["message"]["content"]
+    assert content == [pdf, {"type": "text", "text": "Read it"}]
+
+
 def test_permission_answers():
     allow = stream.permission_response("r1", "allow", {"command": "ls"})
     assert allow["response"]["response"] == {"behavior": "allow", "updatedInput": {"command": "ls"}}

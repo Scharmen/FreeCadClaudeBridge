@@ -361,13 +361,16 @@ def session_args(session_id: str | None = None, plugin_dir: str | None = None, m
     return args
 
 
-def user_message(text: str, images: list[tuple[str, bytes]] | None = None) -> dict[str, Any]:
-    """A user turn; images go as real image content (media type, bytes)."""
-    if not images:
+def user_message(text: str, images: list[tuple[str, bytes]] | None = None,
+                 blocks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """A user turn; images go as real image content (media type, bytes), blocks (pictures, PDFs, file
+    texts already in message form) before the text."""
+    if not images and not blocks:
         return {"type": "user", "message": {"role": "user", "content": text}}
     content: list[dict[str, Any]] = [
         {"type": "image", "source": {"type": "base64", "media_type": mt, "data": base64.b64encode(data).decode()}}
-        for mt, data in images]
+        for mt, data in images or []]
+    content += blocks or []
     content.append({"type": "text", "text": text})
     return {"type": "user", "message": {"role": "user", "content": content}}
 
